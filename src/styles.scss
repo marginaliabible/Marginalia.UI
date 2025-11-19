@@ -1,1 +1,82 @@
-/* You can add global styles to this file, and also import other style files */
+:root {
+	color-scheme: light;
+	--background-color: #f5f6fa;
+	--surface-color: #ffffff;
+	--surface-raised-color: #f9faff;
+	--surface-hover-color: #eef2ff;
+	--text-color: #1f2433;
+	--text-muted: #5c6378;
+	--border-color: #d9deeb;
+	--accent-color: #3a6df0;
+	--accent-on-color: #ffffff;
+	--error-color: #c0392b;
+	--card-shadow: 0 16px 42px -28px rgba(27, 41, 97, 0.55);
+	--card-shadow-strong: 0 24px 46px -24px rgba(27, 41, 97, 0.6);
+	--inner-shadow:
+		inset 0 1px 2px rgba(255, 255, 255, 0.7),
+		inset 0 -1px 2px rgba(27, 41, 97, 0.08);
+}
+
+:root[data-theme='dark'] {
+	color-scheme: dark;
+	--background-color: #111623;
+	--surface-color: #171d2d;
+	--surface-raised-color: #1d2437;
+	--surface-hover-color: #232c44;
+	--text-color: #e8ecf8;
+	--text-muted: #a1a9c3;
+	--border-color: #2a3249;
+	--accent-color: #6d9bff;
+	--accent-on-color: #060a14;
+	--error-color: #ff6b6b;
+	--card-shadow: 0 20px 45px -30px rgba(0, 0, 0, 0.85);
+	--card-shadow-strong: 0 26px 50px -30px rgba(0, 0, 0, 0.8);
+	--inner-shadow:
+		inset 0 1px 2px rgba(255, 255, 255, 0.05),
+		inset 0 -1px 2px rgba(0, 0, 0, 0.35);
+}
+
+html,
+body {
+	min-height: 100%;
+	background: var(--background-color);
+}
+
+body {
+	margin: 0;
+	font-family: 'Inter', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+	background: var(--background-color);
+	color: var(--text-color);
+	transition: background 0.3s ease, color 0.3s ease;
+}
+
+* {
+	box-sizing: border-box;
+}
+
+a {
+	color: var(--accent-color);
+	text-decoration: none;
+}
+
+a:hover {
+	text-decoration: underline;
+}
+
+button,
+input,
+select,
+textarea {
+	font: inherit;
+}
+
+@media (prefers-reduced-motion: reduce) {
+	*,
+	*::before,
+	*::after {
+		animation-duration: 0.01ms !important;
+		animation-iteration-count: 1 !important;
+		transition-duration: 0.01ms !important;
+		scroll-behavior: auto !important;
+	}
+}

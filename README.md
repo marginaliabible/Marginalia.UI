@@ -1,59 +1,48 @@
-# Gitbible
+# GitBible
 
-This project was generated using [Angular CLI](https://github.com/angular/angular-cli) version 20.3.10.
+GitBible is a browser-only Angular application for exploring and searching Scripture. The default King James Version is bundled locally and additional translations are fetched directly from the [scrollmapper/bible_databases](https://github.com/scrollmapper/bible_databases/tree/master/formats/json) repository on demand. Translations are cached in IndexedDB for offline reuse, and your last location, search term, and theme preference are stored in `localStorage`.
 
-## Development server
+## Features
 
-To start a local development server, run:
+- Quick verse jump using natural references such as `Gen 1`, `John 3:16`, or `1Th 4:13`
+- Full-text search with the top 100 matches surfaced instantly
+- Translation selector with remote downloads cached locally for subsequent sessions
+- Mobile-first layout with responsive book/chapter selectors
+- Light and dark themes with a single-toggle switch
 
-```bash
-ng serve
-```
+## Getting Started
 
-Once the server is running, open your browser and navigate to `http://localhost:4200/`. The application will automatically reload whenever you modify any of the source files.
+1. Install dependencies:
 
-## Code scaffolding
+	```bash
+	npm install
+	```
 
-Angular CLI includes powerful code scaffolding tools. To generate a new component, run:
+2. Start the development server:
 
-```bash
-ng generate component component-name
-```
+	```bash
+	npm start
+	```
 
-For a complete list of available schematics (such as `components`, `directives`, or `pipes`), run:
+	The app runs at [http://localhost:4200](http://localhost:4200) and reloads on file changes.
 
-```bash
-ng generate --help
-```
+## Usage Tips
 
-## Building
+- The quick search bar recognizes many standard book abbreviations. If a reference is recognized, a preview card appears before you press **Go**.
+- When the query is not a reference, pressing **Go** performs a full-text search within the active translation.
+- Translation downloads are stored in IndexedDB for 30 days. You can force a fresh copy by clearing browser storage or using devtools to delete the `gitbible-db` database.
+- Theme preference, last translation, and the most recent verse location persist across browser sessions.
 
-To build the project run:
+## Build and Test
 
-```bash
-ng build
-```
+- Production build: `npm run build`
+- Unit tests (Karma): `npm test`
 
-This will compile your project and store the build artifacts in the `dist/` directory. By default, the production build optimizes your application for performance and speed.
+## Adding New Data Sources
 
-## Running unit tests
+- Place additional bundled translations in `public/data/` to ship them with the app.
+- Remote translations must be accessible via raw JSON URLs. Add them to the GitBible dropdown by uploading to GitHub (or any CORS-enabled host) following the same structure as the Scrollmapper data set.
 
-To execute unit tests with the [Karma](https://karma-runner.github.io) test runner, use the following command:
+## License Notes
 
-```bash
-ng test
-```
-
-## Running end-to-end tests
-
-For end-to-end (e2e) testing, run:
-
-```bash
-ng e2e
-```
-
-Angular CLI does not come with an end-to-end testing framework by default. You can choose one that suits your needs.
-
-## Additional Resources
-
-For more information on using the Angular CLI, including detailed command references, visit the [Angular CLI Overview and Command Reference](https://angular.dev/tools/cli) page.
+Each translation retains the license defined by its source. Review the metadata in the Scrollmapper repository before distributing additional texts.
