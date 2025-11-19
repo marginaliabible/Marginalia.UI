@@ -77,7 +77,7 @@ export interface BookAliasMatcher {
   readonly rawAlias: string;
 }
 
-const boundarySuffix = '(?=[\s\d:;-]|$)';
+const boundarySuffix = '(?=[\\s\\d:;-]|$)';
 
 const aliasMatchers: BookAliasMatcher[] = Object.entries(BOOK_ALIAS_CONFIG)
   .flatMap(([book, aliases]) =>
