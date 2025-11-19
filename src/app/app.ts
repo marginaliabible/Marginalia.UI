@@ -315,7 +315,9 @@ export class App implements OnInit {
       return;
     }
 
-    document.documentElement.setAttribute('data-theme', theme);
+    const root = document.documentElement;
+    root.setAttribute('data-theme', theme);
+    root.setAttribute('data-bs-theme', theme);
   }
 
   private detectPreferredTheme(): ThemePreference {
