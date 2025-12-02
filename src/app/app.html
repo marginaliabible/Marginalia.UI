@@ -16,9 +16,11 @@
             [value]="selectedTranslationId()"
             (change)="onTranslationSelect($event)"
           >
-            <option *ngFor="let translation of translations(); trackBy: trackByTranslation" [value]="translation.id">
+          @for (translation of translations(); track translation.id) {
+            <option [value]="translation.id">
               {{ translation.label }}
             </option>
+          }
           </select>
         </div>
         <button
@@ -57,127 +59,152 @@
           </div>
         </fieldset>
       </form>
-      <div
-        class="alert alert-info quick-jump-preview d-flex flex-wrap align-items-baseline gap-2 mt-3 mb-0"
-        *ngIf="quickJumpPreview() as preview"
-      >
-        <span class="text-uppercase fw-semibold small text-primary">Jump to</span>
-        <span class="reference">
-          {{ preview.book }} {{ preview.chapter }}<ng-container *ngIf="preview.verse">:{{ preview.verse }}</ng-container>
-        </span>
-        <span class="preview-text text-body-secondary" *ngIf="preview.text">“{{ preview.text }}”</span>
-      </div>
+      @if (quickJumpPreview(); as preview) {
+        <div
+          class="alert alert-info quick-jump-preview d-flex flex-wrap align-items-baseline gap-2 mt-3 mb-0"
+        >
+          <span class="text-uppercase fw-semibold small text-primary">Jump to</span>
+          <span class="reference">
+            {{ preview.book }} {{ preview.chapter }}
+            @if (preview.verse) {
+              <ng-container>:{{ preview.verse }}</ng-container>
+            }
+          </span>
+          @if (preview.text) {
+            <span class="preview-text text-body-secondary">“{{ preview.text }}”</span>
+          }
+        </div>
+      }
     </div>
   </section>
 
   <div class="row g-4 align-items-start">
-    <div class="col-12 col-lg-3" *ngIf="books().length > 0">
-      <div class="card border-0 shadow-sm h-100">
-        <div class="card-body">
-          <h2 class="h6 text-uppercase text-body-secondary mb-3">Navigate</h2>
-          <div class="mb-3">
-            <label class="form-label small fw-semibold" for="bookSelect">Book</label>
-            <select
-              id="bookSelect"
-              class="form-select"
-              [value]="selectedBook() ?? ''"
-              (change)="onBookSelect($event)"
-            >
-              <option *ngFor="let book of books(); trackBy: trackByBook" [value]="book.name">
-                {{ book.name }}
-              </option>
-            </select>
-          </div>
-          <div>
-            <label class="form-label small fw-semibold" for="chapterSelect">Chapter</label>
-            <select
-              id="chapterSelect"
-              class="form-select"
-              [value]="selectedChapter()"
-              (change)="onChapterSelect($event)"
-            >
-              <option *ngFor="let chapter of chapters(); trackBy: trackByChapter" [value]="chapter.chapter">
-                {{ chapter.chapter }}
-              </option>
-            </select>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <div
-      class="col-12"
-      [ngClass]="searchResults() ? 'col-lg-6' : 'col-lg-9'"
-      *ngIf="currentBible() as bible"
-    >
-      <div class="card border-0 shadow-sm">
-        <div class="card-body">
-          <div class="d-flex flex-wrap align-items-baseline gap-2 mb-3">
-            <h2 class="h4 mb-0">{{ selectedBook() }}</h2>
-            <span class="badge bg-secondary-subtle text-secondary-emphasis" *ngIf="selectedChapter() as chapter">
-              {{ chapter }}
-            </span>
-          </div>
-          <p class="text-body-secondary mb-4">{{ bible.translation }}</p>
-
-          <ng-container *ngIf="currentChapter() as chapter; else chapterEmpty">
-            <ol class="list-group list-group-flush verses">
-              <li
-                *ngFor="let verse of chapter.verses; trackBy: trackByVerse"
-                class="list-group-item verse-item"
-                [id]="verseDomId(selectedBook() ?? '', chapter.chapter, verse.verse)"
-                [class.bg-primary-subtle]="focusVerse() === verse.verse"
-                [class.border-primary]="focusVerse() === verse.verse"
-                [class.text-primary-emphasis]="focusVerse() === verse.verse"
+    @if (books().length > 0) {
+      <div class="col-12 col-lg-3">
+        <div class="card border-0 shadow-sm h-100">
+          <div class="card-body">
+            <h2 class="h6 text-uppercase text-body-secondary mb-3">Navigate</h2>
+            <div class="mb-3">
+              <label class="form-label small fw-semibold" for="bookSelect">Book</label>
+              <select
+                id="bookSelect"
+                class="form-select"
+                [value]="selectedBook() ?? ''"
+                (change)="onBookSelect($event)"
               >
-                <span class="verse-number">{{ verse.verse }}</span>
-                <span class="verse-text">{{ verse.text }}</span>
-              </li>
-            </ol>
-          </ng-container>
-          <ng-template #chapterEmpty>
-            <p class="text-body-secondary mb-0">Select a chapter to begin.</p>
-          </ng-template>
+              @for (book of books(); track book.name) {
+                <option [value]="book.name">
+                  {{ book.name }}
+                </option>
+              }
+              </select>
+            </div>
+            <div>
+              <label class="form-label small fw-semibold" for="chapterSelect">Chapter</label>
+              <select
+                id="chapterSelect"
+                class="form-select"
+                [value]="selectedChapter()"
+                (change)="onChapterSelect($event)"
+              >
+              @for (chapter of chapters(); track chapter.chapter) {
+                <option [value]="chapter.chapter">
+                  {{ chapter.chapter }}
+                </option>
+              }
+              </select>
+            </div>
+          </div>
         </div>
       </div>
-    </div>
+    }
 
-    <div class="col-12 col-lg-3" *ngIf="searchResults() as results">
-      <div class="card border-0 shadow-sm h-100">
-        <div class="card-body d-flex flex-column gap-3">
-          <div>
-            <h3 class="h6 text-uppercase mb-1">Search Results</h3>
-            <p class="text-body-secondary results-summary mb-0">
-              {{ results.total }} match{{ results.total === 1 ? '' : 'es' }}
-              <ng-container *ngIf="results.limited">(showing first {{ results.matches.length }})</ng-container>
-              for “{{ results.query }}”
-            </p>
-          </div>
-          <div class="list-group results-list">
-            <button
-              type="button"
-              class="list-group-item list-group-item-action text-start"
-              *ngFor="let match of results.matches"
-              (click)="goToReference({ book: match.book, chapter: match.chapter, verse: match.verse })"
-            >
-              <span class="match-reference d-block">{{ match.book }} {{ match.chapter }}:{{ match.verse }}</span>
-              <span class="match-text d-block text-body-secondary">{{ match.text }}</span>
-            </button>
+    @if (currentBible(); as bible) {
+      <div
+        class="col-12"
+        [ngClass]="searchResults() ? 'col-lg-6' : 'col-lg-9'"
+      >
+        <div class="card border-0 shadow-sm">
+          <div class="card-body">
+            <div class="d-flex flex-wrap align-items-baseline gap-2 mb-3">
+              <h2 class="h4 mb-0">{{ selectedBook() }}</h2>
+              @if (selectedChapter(); as chapter) {
+                <span class="badge bg-secondary-subtle text-secondary-emphasis">
+                  {{ chapter }}
+                </span>
+              }
+            </div>
+            <p class="text-body-secondary mb-4">{{ bible.translation }}</p>
+
+            @if (currentChapter(); as chapter) {
+              <ol class="list-group list-group-flush verses">
+                @for (verse of chapter.verses; track verse.verse) {
+                <li
+                  class="list-group-item verse-item"
+                  [id]="verseDomId(selectedBook() ?? '', chapter.chapter, verse.verse)"
+                  [class.bg-primary-subtle]="focusVerse() === verse.verse"
+                  [class.border-primary]="focusVerse() === verse.verse"
+                  [class.text-primary-emphasis]="focusVerse() === verse.verse"
+                >
+                  <span class="verse-number">{{ verse.verse }}</span>
+                  <span class="verse-text">{{ verse.text }}</span>
+                </li>
+                }
+              </ol>
+            } @else {
+              <p class="text-body-secondary mb-0">Select a chapter to begin.</p>
+            }
           </div>
         </div>
       </div>
-    </div>
+    }
+
+    @if (searchResults(); as results) {
+      <div class="col-12 col-lg-3">
+        <div class="card border-0 shadow-sm h-100">
+          <div class="card-body d-flex flex-column gap-3">
+            <div>
+              <h3 class="h6 text-uppercase mb-1">Search Results</h3>
+              <p class="text-body-secondary results-summary mb-0">
+                {{ results.total }} match{{ results.total === 1 ? '' : 'es' }}
+                @if (results.limited) {
+                  <ng-container>(showing first {{ results.matches.length }})</ng-container>
+                }
+                for "{{ results.query }}"
+              </p>
+            </div>
+            <div class="list-group results-list">
+              @for (match of results.matches; track match.id) {
+              <button
+                type="button"
+                class="list-group-item list-group-item-action text-start"
+                (click)="goToReference({ book: match.book, chapter: match.chapter, verse: match.verse })"
+              >
+                <span class="match-reference d-block">{{ match.book }} {{ match.chapter }}:{{ match.verse }}</span>
+                <span class="match-text d-block text-body-secondary">{{ match.text }}</span>
+              </button>
+              }
+            </div>
+          </div>
+        </div>
+      </div>
+    }
   </div>
 
-  <section class="mt-4" *ngIf="loading() || error()">
-    <div
-      *ngIf="loading()"
-      class="alert alert-info d-inline-flex align-items-center gap-2 py-2 mb-0"
-      role="status"
-    >
-      <span class="spinner-border spinner-border-sm" aria-hidden="true"></span>
-      <span>Loading…</span>
-    </div>
-    <div *ngIf="error() as err" class="alert alert-danger mt-3 mb-0">{{ err }}</div>
-  </section>
+  @if (loading() || error()) {
+    <section class="mt-4">
+      @if (loading()) {
+        <div
+          class="alert alert-info d-inline-flex align-items-center gap-2 py-2 mb-0"
+          role="status"
+        >
+          <span class="spinner-border spinner-border-sm" aria-hidden="true"></span>
+          <span>Loading.</span>
+        </div>
+      }
+      @if (error(); as err) {
+        <div class="alert alert-danger mt-3 mb-0">{{ err }}</div>
+      }
+    </section>
+  }
 </div>

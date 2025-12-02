@@ -42,7 +42,7 @@ describe('parseQuickJump', () => {
           chapter: 13,
           verses: [
             { verse: 1, text: 'Though I speak with the tongues...' },
-            { verse: 13, text: 'And now abideth faith, hope, charity...' }
+            { verse: 13, text: 'And now abides faith, hope, charity...' }
           ]
         }
       ]

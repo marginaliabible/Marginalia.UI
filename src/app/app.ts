@@ -294,22 +294,6 @@ export class App implements OnInit {
     return `${book.replace(/\s+/g, '_')}-${chapter}-${verse}`;
   }
 
-  trackByChapter(_index: number, chapter: { chapter: number }): number {
-    return chapter.chapter;
-  }
-
-  trackByVerse(_index: number, verse: { verse: number }): number {
-    return verse.verse;
-  }
-
-  trackByTranslation(_index: number, item: { id: string }): string {
-    return item.id;
-  }
-
-  trackByBook(_index: number, book: BibleBook): string {
-    return book.name;
-  }
-
   private applyTheme(theme: ThemePreference): void {
     if (typeof document === 'undefined') {
       return;

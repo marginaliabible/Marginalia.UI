@@ -4,9 +4,9 @@ import type {
   BibleData,
   BibleTranslationMeta,
   GitBibleState,
-  SearchMatch,
   SearchResultSet
 } from '../models/bible';
+import { SearchMatch } from '../models/bible';
 
 interface BibleDB extends DBSchema {
   translations: {
@@ -167,12 +167,12 @@ export class BibleService {
           if (verse.text.toLowerCase().includes(lower)) {
             totalMatches += 1;
             if (matches.length < SEARCH_LIMIT) {
-              matches.push({
-                book: book.name,
-                chapter: chapter.chapter,
-                verse: verse.verse,
-                text: verse.text
-              });
+              matches.push(new SearchMatch(
+                book.name,
+                chapter.chapter,
+                verse.verse,
+                verse.text
+              ));
             }
           }
         }

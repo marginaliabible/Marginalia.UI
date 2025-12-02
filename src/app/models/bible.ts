@@ -44,11 +44,17 @@ export interface GitBibleState {
 
 export type ThemePreference = 'light' | 'dark';
 
-export interface SearchMatch {
-  book: string;
-  chapter: number;
-  verse: number;
-  text: string;
+export class SearchMatch {
+  constructor(
+    public book: string,
+    public chapter: number,
+    public verse: number,
+    public text: string
+  ) {}
+
+  get id(): string {
+    return `${this.book}-${this.chapter}-${this.verse}`;
+  }
 }
 
 export interface SearchResultSet {
