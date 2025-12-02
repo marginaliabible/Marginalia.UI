@@ -159,7 +159,7 @@ describe('parseQuickJump', () => {
     });
 
     it('should return null for unknown book', () => {
-      const result = parseQuickJump('Hezekiah 1:1', mockBooks);
+      const result = parseQuickJump('Hezekiah 9:12', mockBooks);
       expect(result).toBeNull();
     });
 

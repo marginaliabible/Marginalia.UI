@@ -41,6 +41,7 @@ GitBible is a browser-only Angular application for exploring and searching Scrip
 ## Adding New Data Sources
 
 - Place additional bundled translations in `public/data/` to ship them with the app.
+<!-- TODO: Auto-load translations from that folder.  -->
 - Remote translations must be accessible via raw JSON URLs. Add them to the GitBible dropdown by uploading to GitHub (or any CORS-enabled host) following the same structure as the Scrollmapper data set.
 
 ## License Notes

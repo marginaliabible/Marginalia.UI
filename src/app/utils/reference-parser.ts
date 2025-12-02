@@ -56,7 +56,7 @@ export function parseQuickJump(query: string, books: readonly BibleBook[]): Quic
     chapter: chapter.chapter,
     verse: verseNumber,
     rangeEnd
-  } satisfies QuickJumpTarget;
+  };
 }
 
 function findBook(query: string): { book: string; remainder: string } | null {

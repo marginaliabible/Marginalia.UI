@@ -90,7 +90,7 @@ const aliasMatchers: BookAliasMatcher[] = Object.entries(BOOK_ALIAS_CONFIG)
         book,
         rawAlias: alias,
         regex: new RegExp(`^${pattern}${boundarySuffix}`, 'i')
-      } satisfies BookAliasMatcher;
+      };
     })
   )
   .sort((a, b) => b.rawAlias.replace(/\s+/g, '').length - a.rawAlias.replace(/\s+/g, '').length);
