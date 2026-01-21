@@ -15,6 +15,16 @@
       "request": "launch",
       "preLaunchTask": "npm: test",
       "url": "http://localhost:9876/debug.html"
+    },
+    {
+      "name": "Debug generate-settings.js",
+      "type": "node",
+      "request": "launch",
+      "program": "${workspaceFolder}/scripts/generate-settings.js",
+      "console": "integratedTerminal",
+      "skipFiles": [
+        "<node_internals>/**"
+      ]
     }
   ]
 }

@@ -1,12 +1,22 @@
 <div class="container py-4">
   <header class="card border-0 shadow-sm mb-4">
-    <div class="card-body d-flex flex-column flex-lg-row gap-3 align-items-lg-start justify-content-lg-between">
+    <div class="card-body d-flex flex-column flex-lg-row gap-3 align-items-lg-start justify-content-lg-between position-relative">
       <div>
         <h1 class="display-6 fw-semibold mb-1">GitBible</h1>
         <p class="text-body-secondary mb-0">
           Browse Scripture offline, search quickly, and jump to any verse.
         </p>
       </div>
+      <button
+        type="button"
+        class="btn btn-outline-secondary rounded-circle d-inline-flex align-items-center justify-content-center position-absolute top-0 end-0 m-3"
+        aria-label="Open settings"
+        data-bs-toggle="modal"
+        data-bs-target="#settingsModal"
+        (click)="openSettingsModal()"
+      >
+        <i class="bi bi-gear-fill" aria-hidden="true"></i>
+      </button>
       <div class="d-flex flex-wrap align-items-center gap-3 justify-content-end">
         <div class="translation-select d-flex flex-column flex-grow-1 flex-lg-grow-0">
           <label class="form-label fw-semibold small mb-1" for="translationSelect">Translation</label>
@@ -16,24 +26,13 @@
             [value]="selectedTranslationId()"
             (change)="onTranslationSelect($event)"
           >
-          @for (translation of translations(); track translation.id) {
+          @for (translation of filteredTranslations(); track translation.id) {
             <option [value]="translation.id">
               {{ translation.label }}
             </option>
           }
           </select>
         </div>
-        <button
-          type="button"
-          class="btn btn-outline-secondary d-flex align-items-center gap-2"
-          (click)="toggleTheme()"
-          aria-label="Toggle theme"
-        >
-          <span class="fs-5" aria-hidden="true">
-            <i class="bi bi-{{ theme() === 'dark' ? 'moon' : 'sun' }}"></i>
-          </span>
-          <span class="small mb-0">{{ theme() === 'dark' ? 'Dark' : 'Light' }} mode</span>
-        </button>
       </div>
     </div>
   </header>
@@ -207,4 +206,94 @@
       }
     </section>
   }
+
+  <div
+    class="modal fade"
+    id="settingsModal"
+    tabindex="-1"
+    aria-labelledby="settingsModalLabel"
+    aria-hidden="true"
+  >
+    <div class="modal-dialog modal-dialog-centered modal-lg">
+      <div class="modal-content shadow">
+        <div class="modal-header">
+          <h2 class="modal-title h5 mb-0 d-flex align-items-center gap-2" id="settingsModalLabel">
+            <i class="bi bi-gear" aria-hidden="true"></i>
+            Settings
+          </h2>
+          <button
+            type="button"
+            class="btn-close"
+            data-bs-dismiss="modal"
+            aria-label="Close"
+            (click)="closeSettingsModal()"
+          ></button>
+        </div>
+        <div class="modal-body d-flex flex-column gap-4">
+          <section class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-3">
+            <div class="d-flex flex-column">
+              <span class="text-body-secondary small text-uppercase fw-semibold">Appearance</span>
+              <span class="fw-semibold">Theme</span>
+              <span class="text-body-secondary small">Defaults to your browser preference.</span>
+            </div>
+            <div class="form-check form-switch settings-theme-toggle mb-0 d-flex align-items-center gap-2">
+              <input
+                id="themeToggle"
+                class="form-check-input flex-shrink-0"
+                type="checkbox"
+                role="switch"
+                [attr.aria-checked]="theme() === 'dark'"
+                [checked]="theme() === 'dark'"
+                (change)="onThemeToggle($event)"
+                aria-label="Toggle dark mode"
+              />
+              <label class="form-check-label fw-semibold small mb-0" for="themeToggle">
+                {{ theme() === 'dark' ? 'Dark mode' : 'Light mode' }}
+              </label>
+            </div>
+          </section>
+
+          <section>
+            <div class="d-flex align-items-baseline justify-content-between gap-2 mb-2">
+              <div class="d-flex flex-column">
+                <span class="text-body-secondary small text-uppercase fw-semibold">Languages</span>
+                <span class="fw-semibold">Available translations</span>
+                <span class="text-body-secondary small">Choose which languages to show.</span>
+              </div>
+              <span class="badge bg-primary-subtle text-primary-emphasis">
+                {{ selectedLanguages().length }} selected
+              </span>
+            </div>
+            <select
+              id="languageSelect"
+              class="form-select"
+              multiple
+              size="6"
+              (change)="onLanguagesChange($event)"
+              aria-describedby="languageSelectHelp"
+            >
+            @for (language of languageOptions(); track language.code) {
+              <option [value]="language.code" [selected]="selectedLanguages().includes(language.code)">
+                {{ getLanguageDisplayName(language.code) }} ({{ language.count }})
+              </option>
+            }
+            </select>
+            <p id="languageSelectHelp" class="form-text small mb-0">
+              Selected languages filter the translation dropdown. Defaults follow your browser language plus Hebrew and Greek.
+            </p>
+          </section>
+        </div>
+        <div class="modal-footer">
+          <button
+            type="button"
+            class="btn btn-secondary"
+            data-bs-dismiss="modal"
+            (click)="closeSettingsModal()"
+          >
+            Close
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
 </div>

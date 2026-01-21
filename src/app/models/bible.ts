@@ -23,6 +23,7 @@ export interface BibleTranslationMeta {
   label: string;
   source: string;
   isLocal: boolean;
+  language?: string | string[];
   lastFetched?: number;
 }
 
@@ -39,6 +40,7 @@ export interface GitBibleState {
   lastChapter?: number;
   lastVerse?: number;
   lastSearch?: string;
+  languages?: string[];
   theme?: ThemePreference;
 }
 

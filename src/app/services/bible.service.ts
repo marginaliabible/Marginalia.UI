@@ -27,13 +27,34 @@ interface CachedTranslationMeta {
   cachedAt: number;
 }
 
+interface BibleSettingsFile {
+  translations?: TranslationSettingsEntry[];
+}
+
+
+interface TranslationSettingsEntry {
+  id?: string;
+  label?: string;
+  location?: string;
+  language?: string | string[];
+}
+
 const LOCAL_TRANSLATION_ID = 'KJV';
-const LOCAL_TRANSLATION_SOURCE = 'data/KJV.json';
+const BIBLE_DATA_PATH = 'data/bibles';
+const SETTINGS_PATH = `${BIBLE_DATA_PATH}/_settings.json`;
+const LOCAL_TRANSLATION_SOURCE = `${BIBLE_DATA_PATH}/${LOCAL_TRANSLATION_ID}.json`;
 const META_CACHE_KEY = 'gitbible:translation-meta';
 const STATE_CACHE_KEY = 'gitbible:state';
 const REMOTE_TTL_MS = 1000 * 60 * 60 * 24 * 30; // 30 days
 const SEARCH_LIMIT = 100;
 const META_TTL_MS = 1000 * 60 * 60 * 24 * 7; // 7 days
+const DEFAULT_LOCAL_TRANSLATION: BibleTranslationMeta = {
+  id: LOCAL_TRANSLATION_ID,
+  label: 'KJV (King James Version)',
+  source: LOCAL_TRANSLATION_SOURCE,
+  isLocal: true,
+  language: 'en'
+};
 const GITHUB_OWNER = 'scrollmapper';
 const GITHUB_REPO = 'bible_databases';
 const GITHUB_BRANCH = 'master';
@@ -41,12 +62,7 @@ const GITHUB_BRANCH = 'master';
 @Injectable({ providedIn: 'root' })
 export class BibleService {
   private readonly _availableTranslations = signal<BibleTranslationMeta[]>([
-    {
-      id: LOCAL_TRANSLATION_ID,
-      label: 'KJV (King James Version)',
-      source: LOCAL_TRANSLATION_SOURCE,
-      isLocal: true
-    }
+    DEFAULT_LOCAL_TRANSLATION
   ]);
 
   private readonly _currentBible = signal<BibleData | null>(null);
@@ -70,38 +86,117 @@ export class BibleService {
     }
 
     try {
-      const response = await fetch(
-        'https://api.github.com/repos/scrollmapper/bible_databases/contents/formats/json',
-        {
-          headers: {
-            Accept: 'application/vnd.github.v3+json'
-          }
-        }
-      );
-
-      if (!response.ok) {
-        throw new Error(`GitHub responded with ${response.status}`);
-      }
-
-      const payload = (await response.json()) as GithubContentItem[];
-      const remoteTranslations = payload
-        .filter((item) => item.type === 'file' && item.name.toLowerCase().endsWith('.json'))
-        .map((item) => {
-          const id = item.name.replace(/\.json$/i, '');
-          return {
-            id,
-            label: prettifyId(id),
-            source: item.download_url,
-            isLocal: id.toUpperCase() === LOCAL_TRANSLATION_ID ? true : false
-          } satisfies BibleTranslationMeta;
-        })
-        .filter((meta) => meta.id.toUpperCase() !== LOCAL_TRANSLATION_ID);
-
-      this.mergeAndSetTranslations(remoteTranslations);
-      this.writeCachedTranslationMeta(remoteTranslations);
+      const settings = await this.fetchSettings();
+      this.mergeAndSetTranslations(settings);
+      this.writeCachedTranslationMeta(settings);
     } catch (error) {
       console.error('Failed to refresh translations:', error);
     }
+  }
+
+  private async fetchSettings(): Promise<BibleTranslationMeta[]> {
+    const response = await fetch(SETTINGS_PATH, { cache: 'no-store' });
+    if (!response.ok) {
+      throw new Error(`Settings responded with ${response.status}`);
+    }
+
+    const payload = (await response.json()) as BibleSettingsFile | null;
+
+    const entries = this.normalizeSettingsPayload(payload ?? undefined);
+    return this.normalizeTranslationEntries(entries);
+  }
+
+  private normalizeSettingsPayload(
+    payload?: BibleSettingsFile
+  ): TranslationSettingsEntry[] {
+    if (!payload || typeof payload !== 'object') {
+      return [];
+    }
+
+    const translations = this.normalizeSettingsEntries(payload.translations);
+    return translations;
+  }
+
+  private normalizeSettingsEntries(
+    entries?: TranslationSettingsEntry[]
+  ): TranslationSettingsEntry[] {
+    if (!entries) {
+      return [];
+    }
+
+    if (Array.isArray(entries)) {
+      return entries.filter(isTranslationSettingsEntry).map((entry) => ({ ...entry }));
+    }
+
+    if (isPlainObject(entries)) {
+      return Object.entries(entries).map(([id, raw]) => {
+        const entry = isTranslationSettingsEntry(raw) ? raw : {};
+        return {
+          ...entry,
+          id: entry.id ?? id
+        };
+      });
+    }
+
+    return [];
+  }
+
+  private normalizeTranslationEntries(entries: TranslationSettingsEntry[]): BibleTranslationMeta[] {
+    const merged = new Map<string, BibleTranslationMeta>();
+
+    for (const entry of entries) {
+      const id = (entry.id ?? '').trim();
+      if (!id) {
+        continue;
+      }
+
+      const source = this.normalizeSource(entry.location, id);
+      const isLocal = this.isLocalSource(source);
+      const meta: BibleTranslationMeta = {
+        id,
+        label: entry.label?.trim() || prettifyId(id),
+        source,
+        isLocal,
+        language: entry.language
+      };
+
+      const existing = merged.get(id);
+      if (existing) {
+        merged.set(id, this.choosePreferredMeta(existing, meta));
+      } else {
+        merged.set(id, meta);
+      }
+    }
+
+    if (!merged.has(LOCAL_TRANSLATION_ID)) {
+      merged.set(LOCAL_TRANSLATION_ID, DEFAULT_LOCAL_TRANSLATION);
+    }
+
+    return this.sortTranslations(Array.from(merged.values()));
+  }
+
+  private normalizeSource(location: string | undefined, id: string): string {
+    if (location && /^https?:\/\//i.test(location)) {
+      return location;
+    }
+
+    if (location) {
+      const trimmed = location.replace(/^\//, '');
+      if (trimmed.startsWith(BIBLE_DATA_PATH)) {
+        return trimmed;
+      }
+      return `${BIBLE_DATA_PATH}/${trimmed}`;
+    }
+
+    return this.buildLocalSource(id);
+  }
+
+  private isLocalSource(source: string): boolean {
+    return !/^https?:\/\//i.test(source);
+  }
+
+  private buildLocalSource(id: string): string {
+    return `${BIBLE_DATA_PATH}/${id}.json`;
   }
 
   async loadTranslation(id: string): Promise<BibleData> {
@@ -209,6 +304,11 @@ export class BibleService {
       if (!parsed.lastTranslationId) {
         parsed.lastTranslationId = LOCAL_TRANSLATION_ID;
       }
+      if (parsed.languages) {
+        parsed.languages = Array.isArray(parsed.languages)
+          ? parsed.languages.filter((entry): entry is string => typeof entry === 'string')
+          : undefined;
+      }
       return parsed;
     } catch (error) {
       console.warn('Failed to parse persisted state', error);
@@ -216,6 +316,18 @@ export class BibleService {
     }
   }
 
+  /**
+   * Persists the application state by merging the provided update with the current state
+   * and storing it in localStorage.
+   * 
+   * @param update - Partial state object containing the properties to update
+   * @returns The merged state object after persistence attempt
+   * 
+   * @remarks
+   * - Returns a default state with LOCAL_TRANSLATION_ID if running in a server environment (window is undefined)
+   * - Gracefully handles localStorage errors by logging a warning and continuing execution
+   * - The returned state reflects the intended merge regardless of localStorage success/failure
+   */
   persistState(update: Partial<GitBibleState>): GitBibleState {
     if (typeof window === 'undefined') {
       return { lastTranslationId: LOCAL_TRANSLATION_ID };
@@ -233,22 +345,53 @@ export class BibleService {
     return next;
   }
 
-  private mergeAndSetTranslations(remote: BibleTranslationMeta[]): void {
+  private mergeAndSetTranslations(entries: BibleTranslationMeta[]): void {
     const mergedMap = new Map<string, BibleTranslationMeta>();
-    for (const entry of this._availableTranslations()) {
-      mergedMap.set(entry.id, entry);
-    }
 
-    for (const entry of remote) {
-      const existing = mergedMap.get(entry.id);
+    const apply = (candidate: BibleTranslationMeta): void => {
+      const existing = mergedMap.get(candidate.id);
       if (existing) {
-        mergedMap.set(entry.id, { ...existing, ...entry });
+        mergedMap.set(candidate.id, this.choosePreferredMeta(existing, candidate));
       } else {
-        mergedMap.set(entry.id, entry);
+        mergedMap.set(candidate.id, candidate);
       }
+    };
+
+    for (const entry of this._availableTranslations()) {
+      apply(entry);
     }
 
-    this._availableTranslations.set(Array.from(mergedMap.values()).sort((a, b) => a.id.localeCompare(b.id)));
+    for (const entry of entries) {
+      apply(entry);
+    }
+
+    if (!mergedMap.has(LOCAL_TRANSLATION_ID)) {
+      apply(DEFAULT_LOCAL_TRANSLATION);
+    }
+
+    this._availableTranslations.set(this.sortTranslations(Array.from(mergedMap.values())));
+  }
+
+  private choosePreferredMeta(
+    existing: BibleTranslationMeta,
+    incoming: BibleTranslationMeta
+  ): BibleTranslationMeta {
+    const existingIsLocal = existing.isLocal;
+    const incomingIsLocal = incoming.isLocal;
+
+    if (incomingIsLocal && !existingIsLocal) {
+      return { ...existing, ...incoming };
+    }
+
+    if (existingIsLocal && !incomingIsLocal) {
+      return { ...incoming, ...existing, isLocal: true, source: existing.source };
+    }
+
+    return { ...existing, ...incoming, isLocal: existingIsLocal || incomingIsLocal };
+  }
+
+  private sortTranslations(entries: BibleTranslationMeta[]): BibleTranslationMeta[] {
+    return entries.sort((a, b) => a.id.localeCompare(b.id));
   }
 
   private readCachedTranslationMeta(): CachedTranslationMeta | null {
@@ -360,21 +503,27 @@ export class BibleService {
   }
 
   private buildSourceCandidates(meta: BibleTranslationMeta): string[] {
-    if (meta.isLocal) {
-      return [meta.source];
+    const candidates = new Set<string>();
+    candidates.add(this.buildLocalSource(meta.id));
+
+    if (this.isLocalSource(meta.source)) {
+      candidates.add(meta.source);
+      return Array.from(candidates);
     }
 
-    const { owner, repo, branch, path } = this.extractRepoInfo(meta);
-    const cdnPath = `${owner}/${repo}@${branch}/${path}`;
-    const set = new Set<string>([
-      `https://cdn.jsdelivr.net/gh/${cdnPath}`,
-      `https://fastly.jsdelivr.net/gh/${cdnPath}`,
-      `https://cdn.statically.io/gh/${owner}/${repo}/${branch}/${path}`,
-      `https://rawcdn.githack.com/${owner}/${repo}/${branch}/${path}`,
-      meta.source
-    ]);
 
-    return Array.from(set);
+    const repoInfo = this.extractRepoInfo(meta);
+    if (repoInfo) {
+      const { owner, repo, branch, path } = repoInfo;
+      const cdnPath = `${owner}/${repo}@${branch}/${path}`;
+      candidates.add(`https://cdn.jsdelivr.net/gh/${cdnPath}`);
+      candidates.add(`https://fastly.jsdelivr.net/gh/${cdnPath}`);
+      candidates.add(`https://cdn.statically.io/gh/${owner}/${repo}/${branch}/${path}`);
+      candidates.add(`https://rawcdn.githack.com/${owner}/${repo}/${branch}/${path}`);
+    }
+    candidates.add(meta.source);
+
+    return Array.from(candidates);
   }
 
   private extractRepoInfo(meta: BibleTranslationMeta): {
@@ -382,29 +531,22 @@ export class BibleService {
     repo: string;
     branch: string;
     path: string;
-  } {
-    const fallback = {
-      owner: GITHUB_OWNER,
-      repo: GITHUB_REPO,
-      branch: GITHUB_BRANCH,
-      path: `formats/json/${meta.id}.json`
-    };
-
+  } | null {
     if (!meta.source.startsWith('https://raw.githubusercontent.com/')) {
-      return fallback;
+      return null;
     }
 
     const trimmed = meta.source.replace('https://raw.githubusercontent.com/', '');
     const segments = trimmed.split('/');
     if (segments.length < 4) {
-      return fallback;
+      return null;
     }
 
     const [owner, repo, branch, ...rest] = segments;
     const path = rest.join('/');
 
     if (!owner || !repo || !branch || !path) {
-      return fallback;
+      return null;
     }
 
     return { owner, repo, branch, path };
@@ -436,13 +578,6 @@ export class BibleService {
   }
 }
 
-interface GithubContentItem {
-  name: string;
-  download_url: string;
-  path?: string;
-  type: 'file' | 'dir';
-}
-
 function prettifyId(id: string): string {
   const upper = id.toUpperCase();
   if (upper === 'KJV') {
@@ -456,4 +591,12 @@ function prettifyId(id: string): string {
   return id
     .replace(/[-_]/g, ' ')
     .replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isTranslationSettingsEntry(value: unknown): value is TranslationSettingsEntry {
+  return isPlainObject(value);
 }
