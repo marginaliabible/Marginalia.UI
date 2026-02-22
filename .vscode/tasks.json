@@ -12,10 +12,10 @@
         "background": {
           "activeOnStart": true,
           "beginsPattern": {
-            "regexp": "(.*?)"
+            "regexp": "VITE"
           },
           "endsPattern": {
-            "regexp": "bundle generation complete"
+            "regexp": "ready in"
           }
         }
       }
@@ -30,10 +30,10 @@
         "background": {
           "activeOnStart": true,
           "beginsPattern": {
-            "regexp": "(.*?)"
+            "regexp": "test"
           },
           "endsPattern": {
-            "regexp": "bundle generation complete"
+            "regexp": "Tests:"
           }
         }
       }

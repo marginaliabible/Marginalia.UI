@@ -1,4 +1,3 @@
-import { Injectable, signal } from '@angular/core';
 import { openDB, type DBSchema, type IDBPDatabase } from 'idb';
 import type {
   BibleData,
@@ -31,7 +30,6 @@ interface BibleSettingsFile {
   translations?: TranslationSettingsEntry[];
 }
 
-
 interface TranslationSettingsEntry {
   id?: string;
   label?: string;
@@ -55,43 +53,28 @@ const DEFAULT_LOCAL_TRANSLATION: BibleTranslationMeta = {
   isLocal: true,
   language: 'en'
 };
-const GITHUB_OWNER = 'scrollmapper';
-const GITHUB_REPO = 'bible_databases';
-const GITHUB_BRANCH = 'master';
 
-@Injectable({ providedIn: 'root' })
-export class BibleService {
-  private readonly _availableTranslations = signal<BibleTranslationMeta[]>([
-    DEFAULT_LOCAL_TRANSLATION
-  ]);
-
-  private readonly _currentBible = signal<BibleData | null>(null);
-  private readonly _loading = signal(false);
-  private readonly _error = signal<string | null>(null);
-  private readonly _searchResults = signal<SearchResultSet | null>(null);
-
-  readonly availableTranslations = this._availableTranslations.asReadonly();
-  readonly currentBible = this._currentBible.asReadonly();
-  readonly isLoading = this._loading.asReadonly();
-  readonly error = this._error.asReadonly();
-  readonly searchResults = this._searchResults.asReadonly();
-
+class BibleService {
   private dbPromise: Promise<IDBPDatabase<BibleDB>> | null = null;
   private readonly translationCache = new Map<string, BibleData>();
 
-  async refreshAvailableTranslations(forceRefresh = false): Promise<void> {
+  async refreshAvailableTranslations(forceRefresh = false): Promise<BibleTranslationMeta[]> {
     const cachedMeta = this.readCachedTranslationMeta();
+    let result: BibleTranslationMeta[] = [DEFAULT_LOCAL_TRANSLATION];
+
     if (cachedMeta && !forceRefresh) {
-      this.mergeAndSetTranslations(cachedMeta.items);
+      result = this.mergeTranslations(result, cachedMeta.items);
     }
 
     try {
       const settings = await this.fetchSettings();
-      this.mergeAndSetTranslations(settings);
+      result = this.mergeTranslations(result, settings);
       this.writeCachedTranslationMeta(settings);
     } catch (error) {
       console.error('Failed to refresh translations:', error);
     }
+
+    return result;
   }
 
   private async fetchSettings(): Promise<BibleTranslationMeta[]> {
@@ -101,25 +84,19 @@ export class BibleService {
     }
 
     const payload = (await response.json()) as BibleSettingsFile | null;
-
     const entries = this.normalizeSettingsPayload(payload ?? undefined);
     return this.normalizeTranslationEntries(entries);
   }
 
-  private normalizeSettingsPayload(
-    payload?: BibleSettingsFile
-  ): TranslationSettingsEntry[] {
+  private normalizeSettingsPayload(payload?: BibleSettingsFile): TranslationSettingsEntry[] {
     if (!payload || typeof payload !== 'object') {
       return [];
     }
 
-    const translations = this.normalizeSettingsEntries(payload.translations);
-    return translations;
+    return this.normalizeSettingsEntries(payload.translations);
   }
 
-  private normalizeSettingsEntries(
-    entries?: TranslationSettingsEntry[]
-  ): TranslationSettingsEntry[] {
+  private normalizeSettingsEntries(entries?: TranslationSettingsEntry[]): TranslationSettingsEntry[] {
     if (!entries) {
       return [];
     }
@@ -200,51 +177,38 @@ export class BibleService {
   }
 
   async loadTranslation(id: string): Promise<BibleData> {
-    this._loading.set(true);
-    this._error.set(null);
-
     try {
       const existing = this.translationCache.get(id);
       if (existing) {
-        this._currentBible.set(existing);
-        this.updateLabelFromBible(id, existing);
         return existing;
       }
 
-      const meta = this._availableTranslations().find((entry) => entry.id === id);
-      if (!meta) {
-        throw new Error(`Unknown translation: ${id}`);
-      }
+      const meta: BibleTranslationMeta = {
+        id,
+        label: id,
+        source: this.buildLocalSource(id),
+        isLocal: true
+      };
 
       const fromDb = await this.readFromDatabase(meta);
       if (fromDb) {
         this.translationCache.set(id, fromDb.data);
-        this._currentBible.set(fromDb.data);
-        this.updateLabelFromBible(id, fromDb.data);
         return fromDb.data;
       }
-      
+
       const fetched = await this.fetchTranslation(meta);
       await this.writeToDatabase(meta, fetched);
       this.translationCache.set(id, fetched);
-      this._currentBible.set(fetched);
-      this.updateLabelFromBible(id, fetched);
       return fetched;
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Unable to load translation';
-      this._error.set(message);
       throw error;
-    } finally {
-      this._loading.set(false);
     }
   }
 
-  runSearch(query: string): SearchResultSet | null {
-    const bible = this._currentBible();
+  runSearch(bible: BibleData, query: string): SearchResultSet | null {
     const normalized = query.trim();
 
     if (!bible || !normalized) {
-      this._searchResults.set(null);
       return null;
     }
 
@@ -262,31 +226,21 @@ export class BibleService {
           if (verse.text.toLowerCase().includes(lower)) {
             totalMatches += 1;
             if (matches.length < SEARCH_LIMIT) {
-              matches.push(new SearchMatch(
-                book.name,
-                chapter.chapter,
-                verse.verse,
-                verse.text
-              ));
+              matches.push(
+                new SearchMatch(book.name, chapter.chapter, verse.verse, verse.text)
+              );
             }
           }
         }
       }
     }
 
-    const result: SearchResultSet = {
+    return {
       query: normalized,
       matches,
       total: totalMatches,
       limited: matches.length < totalMatches
     };
-
-    this._searchResults.set(result);
-    return result;
-  }
-
-  clearSearch(): void {
-    this._searchResults.set(null);
   }
 
   readState(): GitBibleState {
@@ -316,18 +270,6 @@ export class BibleService {
     }
   }
 
-  /**
-   * Persists the application state by merging the provided update with the current state
-   * and storing it in localStorage.
-   * 
-   * @param update - Partial state object containing the properties to update
-   * @returns The merged state object after persistence attempt
-   * 
-   * @remarks
-   * - Returns a default state with LOCAL_TRANSLATION_ID if running in a server environment (window is undefined)
-   * - Gracefully handles localStorage errors by logging a warning and continuing execution
-   * - The returned state reflects the intended merge regardless of localStorage success/failure
-   */
   persistState(update: Partial<GitBibleState>): GitBibleState {
     if (typeof window === 'undefined') {
       return { lastTranslationId: LOCAL_TRANSLATION_ID };
@@ -345,23 +287,26 @@ export class BibleService {
     return next;
   }
 
-  private mergeAndSetTranslations(entries: BibleTranslationMeta[]): void {
+  private mergeTranslations(
+    existing: BibleTranslationMeta[],
+    incoming: BibleTranslationMeta[]
+  ): BibleTranslationMeta[] {
     const mergedMap = new Map<string, BibleTranslationMeta>();
 
     const apply = (candidate: BibleTranslationMeta): void => {
-      const existing = mergedMap.get(candidate.id);
-      if (existing) {
-        mergedMap.set(candidate.id, this.choosePreferredMeta(existing, candidate));
+      const existingMeta = mergedMap.get(candidate.id);
+      if (existingMeta) {
+        mergedMap.set(candidate.id, this.choosePreferredMeta(existingMeta, candidate));
       } else {
         mergedMap.set(candidate.id, candidate);
       }
     };
 
-    for (const entry of this._availableTranslations()) {
+    for (const entry of existing) {
       apply(entry);
     }
 
-    for (const entry of entries) {
+    for (const entry of incoming) {
       apply(entry);
     }
 
@@ -369,7 +314,7 @@ export class BibleService {
       apply(DEFAULT_LOCAL_TRANSLATION);
     }
 
-    this._availableTranslations.set(this.sortTranslations(Array.from(mergedMap.values())));
+    return this.sortTranslations(Array.from(mergedMap.values()));
   }
 
   private choosePreferredMeta(
@@ -511,7 +456,6 @@ export class BibleService {
       return Array.from(candidates);
     }
 
-
     const repoInfo = this.extractRepoInfo(meta);
     if (repoInfo) {
       const { owner, repo, branch, path } = repoInfo;
@@ -551,31 +495,6 @@ export class BibleService {
 
     return { owner, repo, branch, path };
   }
-
-  private updateLabelFromBible(id: string, bible: BibleData): void {
-    const current = this._availableTranslations();
-    const target = current.find((entry) => entry.id === id);
-    if (!target) {
-      return;
-    }
-
-    const translationLabel = bible.translation?.trim();
-    if (!translationLabel || translationLabel === target.label) {
-      return;
-    }
-
-    const updated = current.map((entry) =>
-      entry.id === id
-        ? {
-            ...entry,
-            label: translationLabel,
-            lastFetched: Date.now()
-          }
-        : entry
-    );
-
-    this._availableTranslations.set(updated);
-  }
 }
 
 function prettifyId(id: string): string {
@@ -600,3 +519,5 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 function isTranslationSettingsEntry(value: unknown): value is TranslationSettingsEntry {
   return isPlainObject(value);
 }
+
+export const bibleService = new BibleService();
