@@ -1,8 +1,7 @@
-import ChapterSelect from './components/ChapterSelect';
 import VerseDisplay from './components/VerseDisplay';
 import SearchResults from './components/SearchResults';
 import SettingsModal from './components/SettingsModal';
-import { useEffect, useMemo, useRef, FormEvent, ChangeEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, FormEvent, ChangeEvent } from 'react';
 import { useAppDispatch, useAppSelector } from './store/hooks';
 import { loadTranslation, refreshTranslations, runSearch, clearSearch } from './store/slices/bibleSlice';
 import {
@@ -125,6 +124,7 @@ const scrollToVerse = async (target: QuickJumpTarget): Promise<void> => {
 function App() {
   const dispatch = useAppDispatch();
   const modalRef = useRef<any>(null);
+  const [isQuickJumpPreviewHidden, setIsQuickJumpPreviewHidden] = useState(true);
 
   // Redux state
   const {
@@ -303,25 +303,8 @@ function App() {
     }
   };
 
-  const handleBookChange = (bookName: string) => {
-    if (!bookName) return;
-
-    dispatch(setSelectedBook(bookName));
-    const book = books.find((b) => b.name === bookName);
-    const chapter = book?.chapters[0]?.chapter ?? 1;
-    dispatch(setSelectedChapter(chapter));
-    dispatch(setFocusVerse(null));
-  };
-
-  const handleChapterChange = (value: string) => {
-    const parsed = Number.parseInt(value, 10);
-    if (!Number.isFinite(parsed)) return;
-
-    dispatch(setSelectedChapter(parsed));
-    dispatch(setFocusVerse(null));
-  };
-
   const handleSearchInput = (value: string) => {
+    setIsQuickJumpPreviewHidden(false);
     dispatch(setSearchTerm(value));
     if (searchResults) {
       dispatch(clearSearch());
@@ -342,6 +325,7 @@ function App() {
     const quickJump = quickJumpTarget;
     if (quickJump) {
       await goToReference(quickJump);
+      setIsQuickJumpPreviewHidden(true);
       return;
     }
 
@@ -399,23 +383,25 @@ function App() {
   return (
     <div className="container py-4">
       <header className="card border-0 shadow-sm mb-4">
-        <div className="card-body d-flex flex-column flex-lg-row gap-3 align-items-lg-start justify-content-lg-between position-relative">
+        <div className="card-body d-flex flex-column flex-lg-row gap-3 align-items-lg-start justify-content-lg-between">
           <div>
-            <h1 className="display-6 fw-semibold mb-1">GitBible</h1>
+            <div className="d-flex align-items-center gap-2 flex-wrap">
+              <h1 className="display-6 fw-semibold mb-0">GitBible</h1>
+              <button
+                type="button"
+                className="btn btn-outline-secondary rounded-circle d-inline-flex align-items-center justify-content-center"
+                aria-label="Open settings"
+                data-bs-toggle="modal"
+                data-bs-target="#settingsModal"
+                onClick={openSettingsModal}
+              >
+                <i className="bi bi-gear-fill" aria-hidden="true"></i>
+              </button>
+            </div>
             <p className="text-body-secondary mb-0">
               Browse Scripture offline, search quickly, and jump to any verse.
             </p>
           </div>
-          <button
-            type="button"
-            className="btn btn-outline-secondary rounded-circle d-inline-flex align-items-center justify-content-center position-absolute top-0 end-0 m-3"
-            aria-label="Open settings"
-            data-bs-toggle="modal"
-            data-bs-target="#settingsModal"
-            onClick={openSettingsModal}
-          >
-            <i className="bi bi-gear-fill" aria-hidden="true"></i>
-          </button>
           <div className="d-flex flex-wrap align-items-center gap-3 justify-content-end">
             <div className="translation-select d-flex flex-column flex-grow-1 flex-lg-grow-0">
               <label className="form-label fw-semibold small mb-1" htmlFor="translationSelect">
@@ -443,57 +429,49 @@ function App() {
           <form className="row g-2 align-items-center" onSubmit={handleSubmitSearch}>
             <fieldset className="col-12 mb-0">
               <legend className="visually-hidden">Quick search</legend>
-              <div className="input-group input-group-lg">
-                <input
-                  id="searchInput"
-                  type="search"
-                  inputMode="search"
-                  name="search"
-                  className="form-control"
-                  autoComplete="off"
-                  placeholder="Search or jump (e.g. Gen 1:3)"
-                  value={searchTerm}
-                  onChange={(e) => handleSearchInput(e.target.value)}
-                />
-                <button className="btn btn-primary" type="submit">
-                  Go
-                </button>
+              <div className="quick-jump-shell">
+                <div className="input-group input-group-lg">
+                  <input
+                    id="searchInput"
+                    type="search"
+                    inputMode="search"
+                    name="search"
+                    className="form-control"
+                    autoComplete="off"
+                    placeholder="Search or jump (e.g. Gen 1:3)"
+                    value={searchTerm}
+                    onChange={(e) => handleSearchInput(e.target.value)}
+                  />
+                  <button className="btn btn-primary" type="submit">
+                    Go
+                  </button>
+                </div>
+                {quickJumpPreview && (
+                  <div
+                    className={`quick-jump-preview quick-jump-pulldown ${isQuickJumpPreviewHidden ? 'is-hidden' : 'is-visible'}`}
+                    aria-hidden={isQuickJumpPreviewHidden}
+                  >
+                    <span className="text-uppercase fw-semibold small text-primary">Jump to</span>
+                    <span className="reference">
+                      {quickJumpPreview.book} {quickJumpPreview.chapter}
+                      {quickJumpPreview.verse && <>:{quickJumpPreview.verse}</>}
+                    </span>
+                    {quickJumpPreview.text && (
+                      <span className="preview-text text-body-secondary">
+                        "{quickJumpPreview.text}"
+                      </span>
+                    )}
+                  </div>
+                )}
               </div>
             </fieldset>
           </form>
-          {quickJumpPreview && (
-            <div className="alert alert-info quick-jump-preview d-flex flex-wrap align-items-baseline gap-2 mt-3 mb-0">
-              <span className="text-uppercase fw-semibold small text-primary">Jump to</span>
-              <span className="reference">
-                {quickJumpPreview.book} {quickJumpPreview.chapter}
-                {quickJumpPreview.verse && <>:{quickJumpPreview.verse}</>}
-              </span>
-              {quickJumpPreview.text && (
-                <span className="preview-text text-body-secondary">
-                  "{quickJumpPreview.text}"
-                </span>
-              )}
-            </div>
-          )}
         </div>
       </section>
 
       <div className="row g-4 align-items-start">
-        {books.length > 0 && (
-          <div className="col-12 col-lg-3">
-            <ChapterSelect
-              books={books}
-              chapters={chapters}
-              selectedBook={selectedBook}
-              selectedChapter={selectedChapter}
-              handleBookChange={handleBookChange}
-              handleChapterChange={handleChapterChange}
-            />
-          </div>
-        )}
-
         {currentBible && (
-          <div className={`col-12 ${searchResults ? 'col-lg-6' : 'col-lg-9'}`}>
+          <div className={`col-12 ${searchResults ? 'col-lg-9' : 'col-lg-12'}`}>
             <div className="card border-0 shadow-sm">
               <div className="card-body">
                 <div className="d-flex flex-wrap align-items-baseline gap-2 mb-3">
@@ -543,7 +521,6 @@ function App() {
         </section>
       )}
 
-      {/* Settings Modal */}
       <SettingsModal
         theme={theme}
         handleThemeToggle={handleThemeToggle}

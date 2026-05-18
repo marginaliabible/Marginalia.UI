@@ -86,7 +86,7 @@
     },
     {
       "id": "FreJND",
-      "label": "Bible J.N. Darby in French with Strong's numbers",
+      "label": "Bible J.N. Darby in French",
       "language": "fr",
       "location": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/FreJND.json"
     },
@@ -350,13 +350,13 @@
     },
     {
       "id": "KJV",
-      "label": "King James Version (1769) with Strongs Numbers and Morphology and CatchWords",
+      "label": "King James Version (1769)",
       "language": "en",
       "location": "data/bibles/KJV.json"
     },
     {
       "id": "KJVA",
-      "label": "King James Version (1769) with Strongs Numbers and Morphology and CatchWords, including Apocrypha (without glosses)",
+      "label": "King James Version (1769), including Apocrypha",
       "language": "en",
       "location": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/KJVA.json"
     },
@@ -578,7 +578,7 @@
     },
     {
       "id": "RLT",
-      "label": "Revised Literal Translation (2018) of the King James Version with Strongs Numbers and Morphology",
+      "label": "Revised Literal Translation (2018) of the King James Version",
       "language": "en",
       "location": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/RLT.json"
     },
