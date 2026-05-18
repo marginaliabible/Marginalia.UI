@@ -4,11 +4,12 @@ interface SettingsModalProps {
   theme: string;
   handleThemeToggle: (e: React.ChangeEvent<HTMLInputElement>) => void;
   selectedLanguages: string[];
-  handleLanguagesChange: (e: React.ChangeEvent<HTMLSelectElement>) => void;
+  handleLanguagesChange: (selected: string[]) => void;
   languageOptions: { code: string; count: number }[];
   getLanguageDisplayName: (code: string) => string;
   closeSettingsModal: () => void;
 }
+import LanguageTagSelector from './LanguageTagSelector';
 
 const SettingsModal: React.FC<SettingsModalProps> = ({
   theme,
@@ -87,24 +88,15 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
                 {selectedLanguages.length} selected
               </span>
             </div>
-            <select
-              id="languageSelect"
-              className="form-select"
-              multiple
-              size={6}
+            <LanguageTagSelector
+              languageOptions={languageOptions}
+              selectedLanguages={selectedLanguages}
               onChange={handleLanguagesChange}
-              aria-describedby="languageSelectHelp"
-              value={selectedLanguages}
-            >
-              {languageOptions.map((language) => (
-                <option key={language.code} value={language.code}>
-                  {getLanguageDisplayName(language.code)} ({language.count})
-                </option>
-              ))}
-            </select>
-            <p id="languageSelectHelp" className="form-text small mb-0">
+              getLanguageDisplayName={getLanguageDisplayName}
+            />
+            <p id="languageSelectHelp" className="form-text small mb-0 mt-2">
               Selected languages filter the translation dropdown. Defaults follow your browser
-              language plus Hebrew and Greek.
+              language plus Biblical Hebrew and Ancient Greek.
             </p>
           </section>
         </div>

@@ -19,6 +19,7 @@ import {
 import { parseQuickJump } from './utils/reference-parser';
 import { bibleService } from './services/bibleService';
 import type { QuickJumpTarget, ThemePreference, BibleTranslationMeta } from './models/bible';
+import languageOverrides from '../public/data/languageOverrides.json';
 import './App.scss';
 
 // Helper functions
@@ -37,7 +38,7 @@ const normalizeLanguages = (language: BibleTranslationMeta['language']): string[
 };
 
 const detectPreferredLanguages = (): string[] => {
-  const defaults = ['he', 'hbo', 'el', 'grc'];
+  const defaults = ['hbo', 'grc'];
 
   if (typeof navigator === 'undefined') {
     return normalizeLanguageSelection(['en', ...defaults]);
@@ -65,6 +66,12 @@ const verseDomId = (book: string, chapter: number, verse: number): string => {
 };
 
 const getLanguageDisplayName = (code: string): string => {
+  // Check overrides first
+  const overrides = languageOverrides as Record<string, string>;
+  if (overrides[code]) {
+    return overrides[code];
+  }
+
   if (typeof Intl === 'undefined' || typeof Intl.DisplayNames === 'undefined') {
     return code.toUpperCase();
   }
@@ -222,7 +229,11 @@ function App() {
 
     return Array.from(counts.entries())
       .map(([code, count]) => ({ code, count }))
-      .sort((a, b) => a.code.localeCompare(b.code));
+      .sort((a, b) => {
+        const nameA = getLanguageDisplayName(a.code);
+        const nameB = getLanguageDisplayName(b.code);
+        return nameA.localeCompare(nameB);
+      });
   }, [availableTranslations]);
 
   const filteredTranslations = useMemo(() => {
@@ -365,8 +376,7 @@ function App() {
     dispatch(setTheme(e.target.checked ? 'dark' : 'light'));
   };
 
-  const handleLanguagesChange = (e: ChangeEvent<HTMLSelectElement>) => {
-    const selected = Array.from(e.target.selectedOptions).map((option) => option.value);
+  const handleLanguagesChange = (selected: string[]) => {
     dispatch(setSelectedLanguages(normalizeLanguageSelection(selected)));
   };
 

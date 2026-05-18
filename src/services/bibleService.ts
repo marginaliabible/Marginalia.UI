@@ -57,6 +57,9 @@ const DEFAULT_LOCAL_TRANSLATION: BibleTranslationMeta = {
 class BibleService {
   private dbPromise: Promise<IDBPDatabase<BibleDB>> | null = null;
   private readonly translationCache = new Map<string, BibleData>();
+  private translationMetaById = new Map<string, BibleTranslationMeta>([
+    [LOCAL_TRANSLATION_ID, DEFAULT_LOCAL_TRANSLATION]
+  ]);
 
   async refreshAvailableTranslations(forceRefresh = false): Promise<BibleTranslationMeta[]> {
     const cachedMeta = this.readCachedTranslationMeta();
@@ -74,7 +77,20 @@ class BibleService {
       console.error('Failed to refresh translations:', error);
     }
 
+    this.cacheTranslationMeta(result);
     return result;
+  }
+
+  private cacheTranslationMeta(entries: BibleTranslationMeta[]): void {
+    const map = new Map<string, BibleTranslationMeta>([
+      [LOCAL_TRANSLATION_ID, DEFAULT_LOCAL_TRANSLATION]
+    ]);
+
+    for (const entry of entries) {
+      map.set(entry.id, entry);
+    }
+
+    this.translationMetaById = map;
   }
 
   private async fetchSettings(): Promise<BibleTranslationMeta[]> {
@@ -183,12 +199,7 @@ class BibleService {
         return existing;
       }
 
-      const meta: BibleTranslationMeta = {
-        id,
-        label: id,
-        source: this.buildLocalSource(id),
-        isLocal: true
-      };
+      const meta = await this.resolveTranslationMeta(id);
 
       const fromDb = await this.readFromDatabase(meta);
       if (fromDb) {
@@ -203,6 +214,43 @@ class BibleService {
     } catch (error) {
       throw error;
     }
+  }
+
+  private async resolveTranslationMeta(id: string): Promise<BibleTranslationMeta> {
+    const cached = this.translationMetaById.get(id);
+    if (cached) {
+      return cached;
+    }
+
+    const localCachedMeta = this.readCachedTranslationMeta();
+    if (localCachedMeta) {
+      const merged = this.mergeTranslations([DEFAULT_LOCAL_TRANSLATION], localCachedMeta.items);
+      this.cacheTranslationMeta(merged);
+      const fromLocalCache = this.translationMetaById.get(id);
+      if (fromLocalCache) {
+        return fromLocalCache;
+      }
+    }
+
+    try {
+      const remoteMeta = await this.fetchSettings();
+      const merged = this.mergeTranslations([DEFAULT_LOCAL_TRANSLATION], remoteMeta);
+      this.cacheTranslationMeta(merged);
+      this.writeCachedTranslationMeta(remoteMeta);
+      const fromRemote = this.translationMetaById.get(id);
+      if (fromRemote) {
+        return fromRemote;
+      }
+    } catch {
+      // Ignore settings fetch errors and fallback to local path below.
+    }
+
+    return {
+      id,
+      label: id,
+      source: this.buildLocalSource(id),
+      isLocal: true
+    };
   }
 
   runSearch(bible: BibleData, query: string): SearchResultSet | null {
