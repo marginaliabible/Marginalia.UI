@@ -1,3 +1,7 @@
+import ChapterSelect from './components/ChapterSelect';
+import VerseDisplay from './components/VerseDisplay';
+import SearchResults from './components/SearchResults';
+import SettingsModal from './components/SettingsModal';
 import { useEffect, useMemo, useRef, FormEvent, ChangeEvent } from 'react';
 import { useAppDispatch, useAppSelector } from './store/hooks';
 import { loadTranslation, refreshTranslations, runSearch, clearSearch } from './store/slices/bibleSlice';
@@ -467,45 +471,14 @@ function App() {
       <div className="row g-4 align-items-start">
         {books.length > 0 && (
           <div className="col-12 col-lg-3">
-            <div className="card border-0 shadow-sm h-100">
-              <div className="card-body">
-                <h2 className="h6 text-uppercase text-body-secondary mb-3">Navigate</h2>
-                <div className="mb-3">
-                  <label className="form-label small fw-semibold" htmlFor="bookSelect">
-                    Book
-                  </label>
-                  <select
-                    id="bookSelect"
-                    className="form-select"
-                    value={selectedBook ?? ''}
-                    onChange={(e) => handleBookChange(e.target.value)}
-                  >
-                    {books.map((book) => (
-                      <option key={book.name} value={book.name}>
-                        {book.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="form-label small fw-semibold" htmlFor="chapterSelect">
-                    Chapter
-                  </label>
-                  <select
-                    id="chapterSelect"
-                    className="form-select"
-                    value={selectedChapter}
-                    onChange={(e) => handleChapterChange(e.target.value)}
-                  >
-                    {chapters.map((chapter) => (
-                      <option key={chapter.chapter} value={chapter.chapter}>
-                        {chapter.chapter}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-            </div>
+            <ChapterSelect
+              books={books}
+              chapters={chapters}
+              selectedBook={selectedBook}
+              selectedChapter={selectedChapter}
+              handleBookChange={handleBookChange}
+              handleChapterChange={handleChapterChange}
+            />
           </div>
         )}
 
@@ -522,24 +495,14 @@ function App() {
                   )}
                 </div>
                 <p className="text-body-secondary mb-4">{currentBible.translation}</p>
-
                 {currentChapter ? (
-                  <ol className="list-group list-group-flush verses">
-                    {currentChapter.verses.map((verse) => (
-                      <li
-                        key={verse.verse}
-                        id={verseDomId(selectedBook ?? '', currentChapter.chapter, verse.verse)}
-                        className={`list-group-item verse-item ${
-                          focusVerse === verse.verse
-                            ? 'bg-primary-subtle border-primary text-primary-emphasis'
-                            : ''
-                        }`}
-                      >
-                        <span className="verse-number">{verse.verse}</span>
-                        <span className="verse-text">{verse.text}</span>
-                      </li>
-                    ))}
-                  </ol>
+                  <VerseDisplay
+                    verses={currentChapter.verses}
+                    selectedBook={selectedBook}
+                    currentChapter={currentChapter}
+                    focusVerse={focusVerse}
+                    verseDomId={verseDomId}
+                  />
                 ) : (
                   <p className="text-body-secondary mb-0">Select a chapter to begin.</p>
                 )}
@@ -550,43 +513,7 @@ function App() {
 
         {searchResults && (
           <div className="col-12 col-lg-3">
-            <div className="card border-0 shadow-sm h-100">
-              <div className="card-body d-flex flex-column gap-3">
-                <div>
-                  <h3 className="h6 text-uppercase mb-1">Search Results</h3>
-                  <p className="text-body-secondary results-summary mb-0">
-                    {searchResults.total} match{searchResults.total === 1 ? '' : 'es'}
-                    {searchResults.limited && (
-                      <> (showing first {searchResults.matches.length})</>
-                    )}
-                    {' '}for "{searchResults.query}"
-                  </p>
-                </div>
-                <div className="list-group results-list">
-                  {searchResults.matches.map((match) => (
-                    <button
-                      key={match.id}
-                      type="button"
-                      className="list-group-item list-group-item-action text-start"
-                      onClick={() =>
-                        goToReference({
-                          book: match.book,
-                          chapter: match.chapter,
-                          verse: match.verse
-                        })
-                      }
-                    >
-                      <span className="match-reference d-block">
-                        {match.book} {match.chapter}:{match.verse}
-                      </span>
-                      <span className="match-text d-block text-body-secondary">
-                        {match.text}
-                      </span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </div>
+            <SearchResults searchResults={searchResults} goToReference={goToReference} />
           </div>
         )}
       </div>
@@ -607,108 +534,15 @@ function App() {
       )}
 
       {/* Settings Modal */}
-      <div
-        className="modal fade"
-        id="settingsModal"
-        tabIndex={-1}
-        aria-labelledby="settingsModalLabel"
-        aria-hidden="true"
-      >
-        <div className="modal-dialog modal-dialog-centered modal-lg">
-          <div className="modal-content shadow">
-            <div className="modal-header">
-              <h2
-                className="modal-title h5 mb-0 d-flex align-items-center gap-2"
-                id="settingsModalLabel"
-              >
-                <i className="bi bi-gear" aria-hidden="true"></i>
-                Settings
-              </h2>
-              <button
-                type="button"
-                className="btn-close"
-                data-bs-dismiss="modal"
-                aria-label="Close"
-                onClick={closeSettingsModal}
-              ></button>
-            </div>
-            <div className="modal-body d-flex flex-column gap-4">
-              <section className="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-3">
-                <div className="d-flex flex-column">
-                  <span className="text-body-secondary small text-uppercase fw-semibold">
-                    Appearance
-                  </span>
-                  <span className="fw-semibold">Theme</span>
-                  <span className="text-body-secondary small">
-                    Defaults to your browser preference.
-                  </span>
-                </div>
-                <div className="form-check form-switch settings-theme-toggle mb-0 d-flex align-items-center gap-2">
-                  <input
-                    id="themeToggle"
-                    className="form-check-input flex-shrink-0"
-                    type="checkbox"
-                    role="switch"
-                    aria-checked={theme === 'dark'}
-                    checked={theme === 'dark'}
-                    onChange={handleThemeToggle}
-                    aria-label="Toggle dark mode"
-                  />
-                  <label className="form-check-label fw-semibold small mb-0" htmlFor="themeToggle">
-                    {theme === 'dark' ? 'Dark mode' : 'Light mode'}
-                  </label>
-                </div>
-              </section>
-
-              <section>
-                <div className="d-flex align-items-baseline justify-content-between gap-2 mb-2">
-                  <div className="d-flex flex-column">
-                    <span className="text-body-secondary small text-uppercase fw-semibold">
-                      Languages
-                    </span>
-                    <span className="fw-semibold">Available translations</span>
-                    <span className="text-body-secondary small">
-                      Choose which languages to show.
-                    </span>
-                  </div>
-                  <span className="badge bg-primary-subtle text-primary-emphasis">
-                    {selectedLanguages.length} selected
-                  </span>
-                </div>
-                <select
-                  id="languageSelect"
-                  className="form-select"
-                  multiple
-                  size={6}
-                  onChange={handleLanguagesChange}
-                  aria-describedby="languageSelectHelp"
-                  value={selectedLanguages}
-                >
-                  {languageOptions.map((language) => (
-                    <option key={language.code} value={language.code}>
-                      {getLanguageDisplayName(language.code)} ({language.count})
-                    </option>
-                  ))}
-                </select>
-                <p id="languageSelectHelp" className="form-text small mb-0">
-                  Selected languages filter the translation dropdown. Defaults follow your browser
-                  language plus Hebrew and Greek.
-                </p>
-              </section>
-            </div>
-            <div className="modal-footer">
-              <button
-                type="button"
-                className="btn btn-secondary"
-                data-bs-dismiss="modal"
-                onClick={closeSettingsModal}
-              >
-                Close
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
+      <SettingsModal
+        theme={theme}
+        handleThemeToggle={handleThemeToggle}
+        selectedLanguages={selectedLanguages}
+        handleLanguagesChange={handleLanguagesChange}
+        languageOptions={languageOptions}
+        getLanguageDisplayName={getLanguageDisplayName}
+        closeSettingsModal={closeSettingsModal}
+      />
     </div>
   );
 }
