@@ -36,6 +36,7 @@ export interface QuickJumpTarget {
 
 export interface GitBibleState {
   lastTranslationId: string;
+  lastTranslationIds?: string[];
   lastBook?: string;
   lastChapter?: number;
   lastVerse?: number;
@@ -51,11 +52,14 @@ export class SearchMatch {
     public book: string,
     public chapter: number,
     public verse: number,
-    public text: string
+    public text: string,
+    public translationId?: string,
+    public translationLabel?: string
   ) {}
 
   get id(): string {
-    return `${this.book}-${this.chapter}-${this.verse}`;
+    const translationPrefix = this.translationId ? `${this.translationId}-` : '';
+    return `${translationPrefix}${this.book}-${this.chapter}-${this.verse}`;
   }
 }
 

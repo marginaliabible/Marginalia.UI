@@ -2,10 +2,18 @@ import VerseDisplay from './components/VerseDisplay';
 import SearchResults from './components/SearchResults';
 import SettingsModal from './components/SettingsModal';
 import { useEffect, useMemo, useRef, useState, FormEvent, ChangeEvent } from 'react';
+import Select, { MultiValue } from 'react-select';
 import { useAppDispatch, useAppSelector } from './store/hooks';
-import { loadTranslation, refreshTranslations, runSearch, clearSearch } from './store/slices/bibleSlice';
+import {
+  loadTranslations,
+  refreshTranslations,
+  runSearch,
+  clearSearch,
+  setCurrentBibleFromId
+} from './store/slices/bibleSlice';
 import {
   setSelectedTranslationId,
+  setSelectedTranslationIds,
   setSelectedBook,
   setSelectedChapter,
   setFocusVerse,
@@ -20,6 +28,15 @@ import { bibleService } from './services/bibleService';
 import type { QuickJumpTarget, ThemePreference, BibleTranslationMeta } from './models/bible';
 import languageOverrides from '../public/data/languageOverrides.json';
 import './App.scss';
+
+interface TranslationSelectOption {
+  value: string;
+  label: string;
+}
+
+type WorkspacePanelKey = 'search';
+
+const DESKTOP_BREAKPOINT = '(min-width: 992px)';
 
 // Helper functions
 const normalizeLanguageSelection = (values: string[]): string[] => {
@@ -124,12 +141,20 @@ const scrollToVerse = async (target: QuickJumpTarget): Promise<void> => {
 function App() {
   const dispatch = useAppDispatch();
   const modalRef = useRef<any>(null);
+  const workspaceRef = useRef<HTMLDivElement | null>(null);
   const [isQuickJumpPreviewHidden, setIsQuickJumpPreviewHidden] = useState(true);
+  const [mainPaneRatio, setMainPaneRatio] = useState(2 / 3);
+  const [isDesktopLayout, setIsDesktopLayout] = useState(
+    typeof window !== 'undefined' && typeof window.matchMedia === 'function'
+      ? window.matchMedia(DESKTOP_BREAKPOINT).matches
+      : true
+  );
 
   // Redux state
   const {
     availableTranslations,
     currentBible,
+    loadedTranslations,
     isLoading,
     error,
     searchResults
@@ -137,6 +162,7 @@ function App() {
 
   const {
     selectedTranslationId,
+    selectedTranslationIds,
     selectedBook,
     selectedChapter,
     focusVerse,
@@ -150,6 +176,21 @@ function App() {
   useEffect(() => {
     const initApp = async () => {
       const savedState = bibleService.readState();
+      const restoredTranslationIds = Array.from(
+        new Set(
+          (savedState.lastTranslationIds && savedState.lastTranslationIds.length > 0
+            ? savedState.lastTranslationIds
+            : [savedState.lastTranslationId || 'KJV'])
+            .filter((id): id is string => typeof id === 'string' && id.trim().length > 0)
+            .map((id) => id.trim())
+        )
+      );
+
+      const resolvedTranslationIds = restoredTranslationIds.length > 0 ? restoredTranslationIds : ['KJV'];
+      const activeTranslationId =
+        savedState.lastTranslationId && resolvedTranslationIds.includes(savedState.lastTranslationId)
+          ? savedState.lastTranslationId
+          : resolvedTranslationIds[0];
       
       // Apply theme
       applyTheme(savedState.theme ?? detectPreferredTheme());
@@ -158,11 +199,12 @@ function App() {
       await dispatch(refreshTranslations(false));
 
       // Restore state
-      const resolvedLanguages = savedState.languages && savedState.languages.length > 0 
+      const resolvedLanguages = savedState.languages && savedState.languages.length > 0
         ? normalizeLanguageSelection(savedState.languages)
         : detectPreferredLanguages();
       dispatch(restoreState({
-        selectedTranslationId: savedState.lastTranslationId || 'KJV',
+        selectedTranslationId: activeTranslationId,
+        selectedTranslationIds: resolvedTranslationIds,
         selectedBook: savedState.lastBook || null,
         selectedChapter: savedState.lastChapter || 1,
         focusVerse: savedState.lastVerse || null,
@@ -172,21 +214,8 @@ function App() {
         ready: true
       }));
 
-      // Load initial translation
-      if (savedState.lastTranslationId) {
-        await dispatch(loadTranslation(savedState.lastTranslationId));
-        
-        // Restore book after bible loads
-        if (savedState.lastBook) {
-          dispatch(setSelectedBook(savedState.lastBook));
-          if (savedState.lastChapter) {
-            dispatch(setSelectedChapter(savedState.lastChapter));
-          }
-          if (savedState.lastVerse) {
-            dispatch(setFocusVerse(savedState.lastVerse));
-          }
-        }
-      }
+      await dispatch(loadTranslations(resolvedTranslationIds));
+      dispatch(setCurrentBibleFromId(activeTranslationId));
 
       dispatch(setReady(true));
     };
@@ -200,6 +229,7 @@ function App() {
 
     bibleService.persistState({
       lastTranslationId: selectedTranslationId,
+      lastTranslationIds: selectedTranslationIds,
       lastBook: selectedBook || undefined,
       lastChapter: selectedBook ? selectedChapter : undefined,
       lastVerse: focusVerse || undefined,
@@ -207,7 +237,36 @@ function App() {
       theme,
       languages: selectedLanguages
     });
-  }, [selectedTranslationId, selectedBook, selectedChapter, focusVerse, searchTerm, theme, selectedLanguages, ready]);
+  }, [
+    selectedTranslationId,
+    selectedTranslationIds,
+    selectedBook,
+    selectedChapter,
+    focusVerse,
+    searchTerm,
+    theme,
+    selectedLanguages,
+    ready
+  ]);
+
+  useEffect(() => {
+    dispatch(setCurrentBibleFromId(selectedTranslationId));
+  }, [dispatch, selectedTranslationId]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
+      return;
+    }
+
+    const mediaQuery = window.matchMedia(DESKTOP_BREAKPOINT);
+    const updateLayout = (event?: MediaQueryListEvent) => {
+      setIsDesktopLayout(event ? event.matches : mediaQuery.matches);
+    };
+
+    updateLayout();
+    mediaQuery.addEventListener('change', updateLayout);
+    return () => mediaQuery.removeEventListener('change', updateLayout);
+  }, []);
 
   // Apply theme changes
   useEffect(() => {
@@ -216,6 +275,12 @@ function App() {
 
   // Computed values
   const books = useMemo(() => currentBible?.books ?? [], [currentBible]);
+
+  const translationMetadataById = useMemo(
+    () =>
+      new Map(availableTranslations.map((translation) => [translation.id, translation] as const)),
+    [availableTranslations]
+  );
 
   const languageOptions = useMemo(() => {
     const counts = new Map<string, number>();
@@ -254,6 +319,46 @@ function App() {
     return matches.length === 0 ? availableTranslations : matches;
   }, [availableTranslations, selectedLanguages]);
 
+  const selectableTranslations = useMemo(() => {
+    const map = new Map(filteredTranslations.map((translation) => [translation.id, translation] as const));
+    for (const translationId of selectedTranslationIds) {
+      const existing = translationMetadataById.get(translationId);
+      if (existing) {
+        map.set(translationId, existing);
+      }
+    }
+
+    return Array.from(map.values()).sort((a, b) => a.id.localeCompare(b.id));
+  }, [filteredTranslations, selectedTranslationIds, translationMetadataById]);
+
+  const translationSelectOptions = useMemo<TranslationSelectOption[]>(
+    () =>
+      selectableTranslations.map((translation) => ({
+        value: translation.id,
+        label: `${translation.id} - ${translation.label}`
+      })),
+    [selectableTranslations]
+  );
+
+  const selectedTranslationOptions = useMemo<TranslationSelectOption[]>(() => {
+    const optionsById = new Map(translationSelectOptions.map((option) => [option.value, option] as const));
+
+    return selectedTranslationIds
+      .map((id) => {
+        const existing = optionsById.get(id);
+        if (existing) {
+          return existing;
+        }
+
+        const translation = translationMetadataById.get(id);
+        return {
+          value: id,
+          label: translation ? `${translation.id} - ${translation.label}` : id
+        };
+      })
+      .filter((option): option is TranslationSelectOption => option !== null);
+  }, [selectedTranslationIds, translationSelectOptions, translationMetadataById]);
+
   const chapters = useMemo(() => {
     const book = books.find((b) => b.name === selectedBook) ?? books?.[0];
     return book?.chapters ?? [];
@@ -262,6 +367,32 @@ function App() {
   const currentChapter = useMemo(() => {
     return chapters.find((c) => c.chapter === selectedChapter) ?? null;
   }, [chapters, selectedChapter]);
+
+  const chaptersByTranslation = useMemo(() => {
+    const chaptersMap: Record<string, typeof currentChapter> = {};
+
+    for (const translationId of selectedTranslationIds) {
+      const bible = loadedTranslations[translationId] ?? null;
+      if (!bible || !selectedBook) {
+        chaptersMap[translationId] = null;
+        continue;
+      }
+
+      const book = bible.books.find((entry) => entry.name === selectedBook);
+      chaptersMap[translationId] = book?.chapters.find((entry) => entry.chapter === selectedChapter) ?? null;
+    }
+
+    return chaptersMap;
+  }, [loadedTranslations, selectedBook, selectedChapter, selectedTranslationIds, currentChapter]);
+
+  const translationLabels = useMemo(() => {
+    const labels: Record<string, string> = {};
+    for (const translationId of selectedTranslationIds) {
+      const translation = translationMetadataById.get(translationId);
+      labels[translationId] = translation?.label ?? translationId;
+    }
+    return labels;
+  }, [selectedTranslationIds, translationMetadataById]);
 
   const quickJumpTarget = useMemo<QuickJumpTarget | null>(() => {
     if (!ready || !currentBible || !searchTerm) {
@@ -287,19 +418,30 @@ function App() {
     };
   }, [currentBible, quickJumpTarget]);
 
+  const activeWorkspacePanel: WorkspacePanelKey | null = searchResults ? 'search' : null;
+  const hasMultiTranslations = selectedTranslationIds.length > 1;
+  const horizontalElementLength = selectedTranslationIds.length + (Boolean(searchResults) ? 1 : 0);
+  const useWideLayout = horizontalElementLength > 3;
+
   // Event handlers
-  const handleTranslationChange = async (translationId: string) => {
-    dispatch(setSelectedTranslationId(translationId));
-    await dispatch(loadTranslation(translationId));
-    
-    // Reset book selection if current book doesn't exist in new translation
-    if (selectedBook && currentBible) {
-      const bookExists = currentBible.books.some((b) => b.name === selectedBook);
-      if (!bookExists) {
-        dispatch(setSelectedBook(null));
-        dispatch(setSelectedChapter(1));
-        dispatch(setFocusVerse(null));
-      }
+  const handleTranslationSelectionChange = async (selected: MultiValue<TranslationSelectOption>) => {
+    const nextIds = Array.from(new Set(selected.map((option) => option.value)));
+    if (nextIds.length === 0) {
+      return;
+    }
+
+    const nextActiveId = nextIds.includes(selectedTranslationId)
+      ? selectedTranslationId
+      : nextIds[0];
+
+    dispatch(setSelectedTranslationIds(nextIds));
+    dispatch(setSelectedTranslationId(nextActiveId));
+    await dispatch(loadTranslations(nextIds));
+    dispatch(setCurrentBibleFromId(nextActiveId));
+
+    const query = searchTerm.trim();
+    if (query.length > 0) {
+      dispatch(runSearch({ query, translationIds: nextIds }));
     }
   };
 
@@ -329,23 +471,23 @@ function App() {
       return;
     }
 
-    dispatch(runSearch(query));
-    
-    // Navigate to first result
-    if (searchResults && searchResults.matches.length > 0) {
-      const firstMatch = searchResults.matches[0];
-      await goToReference({
-        book: firstMatch.book,
-        chapter: firstMatch.chapter,
-        verse: firstMatch.verse
-      });
-    }
+    dispatch(runSearch({ query, translationIds: selectedTranslationIds }));
   };
 
-  const goToReference = async (target: QuickJumpTarget) => {
-    if (!currentBible) return;
+  const goToReference = async (target: QuickJumpTarget, translationId?: string) => {
+    const nextActiveId = translationId && selectedTranslationIds.includes(translationId)
+      ? translationId
+      : selectedTranslationId;
 
-    if (!currentBible.books.some((book) => book.name === target.book)) {
+    if (nextActiveId !== selectedTranslationId) {
+      dispatch(setSelectedTranslationId(nextActiveId));
+      dispatch(setCurrentBibleFromId(nextActiveId));
+    }
+
+    const activeBible = loadedTranslations[nextActiveId] ?? currentBible;
+    if (!activeBible) return;
+
+    if (!activeBible.books.some((book) => book.name === target.book)) {
       return;
     }
 
@@ -354,6 +496,67 @@ function App() {
     dispatch(setFocusVerse(target.verse ?? null));
 
     await scrollToVerse(target);
+  };
+
+  const handleCloseTranslation = async (translationId: string) => {
+    if (selectedTranslationIds.length <= 1) {
+      return;
+    }
+
+    const nextIds = selectedTranslationIds.filter((id) => id !== translationId);
+    const nextActiveId =
+      selectedTranslationId === translationId
+        ? nextIds[0]
+        : selectedTranslationId;
+
+    dispatch(setSelectedTranslationIds(nextIds));
+    dispatch(setSelectedTranslationId(nextActiveId));
+    await dispatch(loadTranslations(nextIds));
+    dispatch(setCurrentBibleFromId(nextActiveId));
+
+    const query = searchTerm.trim();
+    if (query.length > 0) {
+      dispatch(runSearch({ query, translationIds: nextIds }));
+    }
+  };
+
+  const handleDividerPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (!isDesktopLayout || !activeWorkspacePanel || !workspaceRef.current) {
+      return;
+    }
+
+    event.preventDefault();
+    const workspace = workspaceRef.current;
+    const bounds = workspace.getBoundingClientRect();
+
+    const updateRatio = (clientX: number) => {
+      const ratio = (clientX - bounds.left) / bounds.width;
+      const clamped = Math.min(0.8, Math.max(0.42, ratio));
+      setMainPaneRatio(clamped);
+    };
+
+    const handlePointerMove = (moveEvent: PointerEvent) => {
+      updateRatio(moveEvent.clientX);
+    };
+
+    const handlePointerUp = () => {
+      window.removeEventListener('pointermove', handlePointerMove);
+      window.removeEventListener('pointerup', handlePointerUp);
+    };
+
+    window.addEventListener('pointermove', handlePointerMove);
+    window.addEventListener('pointerup', handlePointerUp);
+  };
+
+  const handleDividerKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (event.key === 'ArrowLeft') {
+      event.preventDefault();
+      setMainPaneRatio((value) => Math.max(0.42, value - 0.03));
+    }
+    if (event.key === 'ArrowRight') {
+      event.preventDefault();
+      setMainPaneRatio((value) => Math.min(0.8, value + 0.03));
+    }
   };
 
   const handleThemeToggle = (e: ChangeEvent<HTMLInputElement>) => {
@@ -380,8 +583,11 @@ function App() {
     modalRef.current?.hide();
   };
 
+  const mainPanePercent = Math.round(mainPaneRatio * 1000) / 10;
+  const sidePanePercent = 100 - mainPanePercent;
+
   return (
-    <div className="container py-4">
+    <div className={`container py-4 app-shell ${useWideLayout ? 'app-shell-wide' : ''}`}>
       <header className="card border-0 shadow-sm mb-4">
         <div className="card-body d-flex flex-column flex-lg-row gap-3 align-items-lg-start justify-content-lg-between">
           <div>
@@ -401,25 +607,6 @@ function App() {
             <p className="text-body-secondary mb-0">
               Browse Scripture offline, search quickly, and jump to any verse.
             </p>
-          </div>
-          <div className="d-flex flex-wrap align-items-center gap-3 justify-content-end">
-            <div className="translation-select d-flex flex-column flex-grow-1 flex-lg-grow-0">
-              <label className="form-label fw-semibold small mb-1" htmlFor="translationSelect">
-                Translation
-              </label>
-              <select
-                id="translationSelect"
-                className="form-select"
-                value={selectedTranslationId}
-                onChange={(e) => handleTranslationChange(e.target.value)}
-              >
-                {filteredTranslations.map((translation) => (
-                  <option key={translation.id} value={translation.id}>
-                    {translation.label}
-                  </option>
-                ))}
-              </select>
-            </div>
           </div>
         </div>
       </header>
@@ -469,41 +656,95 @@ function App() {
         </div>
       </section>
 
-      <div className="row g-4 align-items-start">
+      <div
+        ref={workspaceRef}
+        className={`workspace-layout has-side-panel ${
+          isDesktopLayout ? 'is-desktop' : 'is-mobile'
+        }`}
+      >
         {currentBible && (
-          <div className={`col-12 ${searchResults ? 'col-lg-9' : 'col-lg-12'}`}>
+          <section
+            className="workspace-pane workspace-main"
+            style={
+              isDesktopLayout && activeWorkspacePanel
+                ? { flexBasis: `${mainPanePercent}%` }
+                : undefined
+            }
+          >
             <div className="card border-0 shadow-sm">
-              <div className="card-body">
-                <div className="d-flex flex-wrap align-items-baseline gap-2 mb-3">
-                  <h2 className="h4 mb-0">{selectedBook}</h2>
-                  {selectedChapter && (
-                    <span className="badge bg-secondary-subtle text-secondary-emphasis">
-                      {selectedChapter}
-                    </span>
-                  )}
+              <div className="card-body workspace-scroll">
+                <div className="translation-selector-wrap mb-3">
+                  <label className="form-label fw-semibold small mb-2" htmlFor="translationSelectorInput">
+                    Translations
+                  </label>
+                  <Select
+                    inputId="translationSelectorInput"
+                    isMulti
+                    options={translationSelectOptions}
+                    value={selectedTranslationOptions}
+                    onChange={handleTranslationSelectionChange}
+                    classNamePrefix="translation-select"
+                    className="translation-selector"
+                    placeholder="Select translations..."
+                    isSearchable={true}
+                    closeMenuOnSelect={false}
+                    hideSelectedOptions={true}
+                    noOptionsMessage={() => 'No translations available'}
+                  />
                 </div>
-                <p className="text-body-secondary mb-4">{currentBible.translation}</p>
-                {currentChapter ? (
+                {selectedBook ? (
                   <VerseDisplay
-                    verses={currentChapter.verses}
+                    chaptersByTranslation={chaptersByTranslation}
+                    translationOrder={selectedTranslationIds}
+                    translationLabels={translationLabels}
                     selectedBook={selectedBook}
-                    currentChapter={currentChapter}
+                    selectedChapter={selectedChapter}
                     focusVerse={focusVerse}
+                    showTranslationTags={hasMultiTranslations}
+                    onCloseTranslation={handleCloseTranslation}
                     verseDomId={verseDomId}
+                    chapterName={selectedBook ? `${selectedBook} ${selectedChapter}` : undefined}
                   />
                 ) : (
                   <p className="text-body-secondary mb-0">Select a chapter to begin.</p>
                 )}
               </div>
             </div>
-          </div>
+          </section>
         )}
 
-        {searchResults && (
-          <div className="col-12 col-lg-3">
-            <SearchResults searchResults={searchResults} goToReference={goToReference} />
-          </div>
+        {isDesktopLayout && (
+          <div
+            className="workspace-divider"
+            role="separator"
+            aria-orientation="vertical"
+            aria-label="Resize verse and panel columns"
+            tabIndex={0}
+            onPointerDown={handleDividerPointerDown}
+            onKeyDown={handleDividerKeyDown}
+          />
         )}
+
+        <aside
+          className={`workspace-pane workspace-side ${!activeWorkspacePanel ? 'is-empty' : ''}`}
+          style={
+            isDesktopLayout
+              ? { flexBasis: `${sidePanePercent}%` }
+              : undefined
+          }
+        >
+          <div className="workspace-scroll">
+            {searchResults ? (
+              <SearchResults searchResults={searchResults} goToReference={goToReference} />
+            ) : (
+              <div className="card border-0 shadow-sm h-100">
+                <div className="card-body d-flex flex-column justify-content-center align-items-center text-center">
+                  <p className="text-body-secondary mb-0">Search to find verses</p>
+                </div>
+              </div>
+            )}
+          </div>
+        </aside>
       </div>
 
       {(isLoading || error) && (

@@ -44,7 +44,7 @@ const LOCAL_TRANSLATION_SOURCE = `${BIBLE_DATA_PATH}/${LOCAL_TRANSLATION_ID}.jso
 const META_CACHE_KEY = 'gitbible:translation-meta';
 const STATE_CACHE_KEY = 'gitbible:state';
 const REMOTE_TTL_MS = 1000 * 60 * 60 * 24 * 30; // 30 days
-const SEARCH_LIMIT = 100;
+const SEARCH_LIMIT = 5000;
 const META_TTL_MS = 1000 * 60 * 60 * 24 * 7; // 7 days
 const DEFAULT_LOCAL_TRANSLATION: BibleTranslationMeta = {
   id: LOCAL_TRANSLATION_ID,
@@ -293,18 +293,31 @@ class BibleService {
 
   readState(): GitBibleState {
     if (typeof window === 'undefined') {
-      return { lastTranslationId: LOCAL_TRANSLATION_ID };
+      return { lastTranslationId: LOCAL_TRANSLATION_ID, lastTranslationIds: [LOCAL_TRANSLATION_ID] };
     }
 
     try {
       const raw = window.localStorage.getItem(STATE_CACHE_KEY);
       if (!raw) {
-        return { lastTranslationId: LOCAL_TRANSLATION_ID };
+        return { lastTranslationId: LOCAL_TRANSLATION_ID, lastTranslationIds: [LOCAL_TRANSLATION_ID] };
       }
 
       const parsed = JSON.parse(raw) as GitBibleState;
       if (!parsed.lastTranslationId) {
         parsed.lastTranslationId = LOCAL_TRANSLATION_ID;
+      }
+      if (!parsed.lastTranslationIds || parsed.lastTranslationIds.length === 0) {
+        parsed.lastTranslationIds = [parsed.lastTranslationId];
+      } else {
+        parsed.lastTranslationIds = parsed.lastTranslationIds
+          .filter((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0)
+          .map((entry) => entry.trim());
+        if (parsed.lastTranslationIds.length === 0) {
+          parsed.lastTranslationIds = [parsed.lastTranslationId];
+        }
+      }
+      if (!parsed.lastTranslationIds.includes(parsed.lastTranslationId)) {
+        parsed.lastTranslationId = parsed.lastTranslationIds[0];
       }
       if (parsed.languages) {
         parsed.languages = Array.isArray(parsed.languages)
@@ -314,17 +327,23 @@ class BibleService {
       return parsed;
     } catch (error) {
       console.warn('Failed to parse persisted state', error);
-      return { lastTranslationId: LOCAL_TRANSLATION_ID };
+      return { lastTranslationId: LOCAL_TRANSLATION_ID, lastTranslationIds: [LOCAL_TRANSLATION_ID] };
     }
   }
 
   persistState(update: Partial<GitBibleState>): GitBibleState {
     if (typeof window === 'undefined') {
-      return { lastTranslationId: LOCAL_TRANSLATION_ID };
+      return { lastTranslationId: LOCAL_TRANSLATION_ID, lastTranslationIds: [LOCAL_TRANSLATION_ID] };
     }
 
     const current = this.readState();
     const next: GitBibleState = { ...current, ...update };
+    if (!next.lastTranslationIds || next.lastTranslationIds.length === 0) {
+      next.lastTranslationIds = [next.lastTranslationId || LOCAL_TRANSLATION_ID];
+    }
+    if (!next.lastTranslationId || !next.lastTranslationIds.includes(next.lastTranslationId)) {
+      next.lastTranslationId = next.lastTranslationIds[0] || LOCAL_TRANSLATION_ID;
+    }
 
     try {
       window.localStorage.setItem(STATE_CACHE_KEY, JSON.stringify(next));

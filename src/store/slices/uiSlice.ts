@@ -3,6 +3,7 @@ import type { ThemePreference } from '../../models/bible';
 
 interface UiState {
   selectedTranslationId: string;
+  selectedTranslationIds: string[];
   selectedBook: string | null;
   selectedChapter: number;
   focusVerse: number | null;
@@ -14,6 +15,7 @@ interface UiState {
 
 const initialState: UiState = {
   selectedTranslationId: 'KJV',
+  selectedTranslationIds: ['KJV'],
   selectedBook: null,
   selectedChapter: 1,
   focusVerse: null,
@@ -29,6 +31,16 @@ const uiSlice = createSlice({
   reducers: {
     setSelectedTranslationId: (state, action: PayloadAction<string>) => {
       state.selectedTranslationId = action.payload;
+      if (!state.selectedTranslationIds.includes(action.payload)) {
+        state.selectedTranslationIds = [action.payload, ...state.selectedTranslationIds];
+      }
+    },
+    setSelectedTranslationIds: (state, action: PayloadAction<string[]>) => {
+      const unique = Array.from(new Set(action.payload.filter((entry) => entry.trim().length > 0)));
+      state.selectedTranslationIds = unique.length > 0 ? unique : ['KJV'];
+      if (!state.selectedTranslationIds.includes(state.selectedTranslationId)) {
+        state.selectedTranslationId = state.selectedTranslationIds[0];
+      }
     },
     setSelectedBook: (state, action: PayloadAction<string | null>) => {
       state.selectedBook = action.payload;
@@ -62,6 +74,7 @@ const uiSlice = createSlice({
 
 export const {
   setSelectedTranslationId,
+  setSelectedTranslationIds,
   setSelectedBook,
   setSelectedChapter,
   setFocusVerse,
