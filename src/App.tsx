@@ -142,6 +142,9 @@ function App() {
   const dispatch = useAppDispatch();
   const modalRef = useRef<any>(null);
   const workspaceRef = useRef<HTMLDivElement | null>(null);
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
+  const [isSearchFocused, setIsSearchFocused] = useState(false);
+  const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad|iPod/.test(navigator.platform);
   const [isQuickJumpPreviewHidden, setIsQuickJumpPreviewHidden] = useState(true);
   const [mainPaneRatio, setMainPaneRatio] = useState(2 / 3);
   const [isDesktopLayout, setIsDesktopLayout] = useState(
@@ -171,6 +174,19 @@ function App() {
     theme,
     ready
   } = useAppSelector((state) => state.ui);
+
+  // Ctrl+F to focus search input
+  useEffect(() => {
+    const handleCtrlF = (e: KeyboardEvent) => {
+      if (e.key === 'f' && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault();
+        searchInputRef.current?.focus();
+        searchInputRef.current?.select();
+      }
+    };
+    window.addEventListener('keydown', handleCtrlF);
+    return () => window.removeEventListener('keydown', handleCtrlF);
+  }, []);
 
   // Initialize app
   useEffect(() => {
@@ -617,18 +633,28 @@ function App() {
             <fieldset className="col-12 mb-0">
               <legend className="visually-hidden">Quick search</legend>
               <div className="quick-jump-shell">
-                <div className="input-group input-group-lg">
-                  <input
-                    id="searchInput"
-                    type="search"
-                    inputMode="search"
-                    name="search"
-                    className="form-control"
-                    autoComplete="off"
-                    placeholder="Search or jump (e.g. Gen 1:3)"
-                    value={searchTerm}
-                    onChange={(e) => handleSearchInput(e.target.value)}
-                  />
+                <div className="input-group input-group-lg search-input-group">
+                  <div className="search-input-wrap">
+                    <input
+                      id="searchInput"
+                      ref={searchInputRef}
+                      type="search"
+                      inputMode="search"
+                      name="search"
+                      className="form-control"
+                      autoComplete="off"
+                      placeholder="Search or jump (e.g. Gen 1:3)"
+                      value={searchTerm}
+                      onChange={(e) => handleSearchInput(e.target.value)}
+                      onFocus={() => setIsSearchFocused(true)}
+                      onBlur={() => setIsSearchFocused(false)}
+                    />
+                    {!isSearchFocused && !searchTerm && (
+                      <span className="search-kbd-hint" aria-hidden="true">
+                        <kbd>{isMac ? '⌘' : 'Ctrl'}+F</kbd>
+                      </span>
+                    )}
+                  </div>
                   <button className="btn btn-primary" type="submit">
                     Go
                   </button>

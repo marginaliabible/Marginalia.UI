@@ -2,6 +2,16 @@ import React, { useEffect, useRef } from 'react';
 import type { SearchResultSet } from '../models/bible';
 import type { QuickJumpTarget } from '../models/bible';
 
+const highlightText = (text: string, query: string): React.ReactNode => {
+  if (!query) return text;
+  const parts = text.split(new RegExp(`(${query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi'));
+  return parts.map((part, i) =>
+    part.toLowerCase() === query.toLowerCase()
+      ? <mark key={i} className="search-highlight">{part}</mark>
+      : part
+  );
+};
+
 interface SearchResultsProps {
   searchResults: SearchResultSet;
   goToReference: (target: QuickJumpTarget, translationId?: string) => void;
@@ -80,7 +90,7 @@ const SearchResults: React.FC<SearchResultsProps> = ({ searchResults, goToRefere
                 )}
               </span>
               <span className="match-text d-block text-body-secondary">
-                {match.text}
+                {highlightText(match.text, searchResults.query)}
               </span>
             </button>
           ))}
