@@ -1,6 +1,7 @@
 import { createSlice, createAsyncThunk, type PayloadAction } from '@reduxjs/toolkit';
 import type { BibleData, BibleTranslationMeta, SearchResultSet } from '../../models/bible';
 import { bibleService } from '../../services/bibleService';
+import { searchIndexService } from '../../services/searchIndexService';
 
 interface BibleState {
   availableTranslations: BibleTranslationMeta[];
@@ -92,19 +93,19 @@ const bibleSlice = createSlice({
         state.availableTranslations.map((translation) => [translation.id, translation.label] as const)
       );
 
-      let total = 0;
-      const matches = action.payload.translationIds.flatMap((translationId) => {
+      let allMatches = action.payload.translationIds.flatMap((translationId) => {
         const translation = state.loadedTranslations[translationId];
         if (!translation) {
           return [];
         }
 
-        const result = bibleService.runSearch(translation, query);
+        const meta = state.availableTranslations.find((t) => t.id === translationId);
+        const indexResult = searchIndexService.search(query, translationId, translation, meta?.language);
+        const result = indexResult ?? bibleService.runSearch(translation, query);
         if (!result) {
           return [];
         }
 
-        total += result.total;
         const label = metadataById.get(translationId) ?? translation.translation ?? translationId;
         return result.matches.map(
           (match) => ({
@@ -119,6 +120,18 @@ const bibleSlice = createSlice({
         );
       });
 
+      // Dedupe by verse location (book, chapter, verse), keeping first occurrence
+      const seenVerses = new Set<string>();
+      const matches = allMatches.filter((match) => {
+        const verseKey = `${match.book}:${match.chapter}:${match.verse}`;
+        if (seenVerses.has(verseKey)) {
+          return false;
+        }
+        seenVerses.add(verseKey);
+        return true;
+      });
+
+      const total = matches.length;
       const limitedMatches = matches.slice(0, MAX_SEARCH_MATCHES);
       state.searchResults = {
         query,
