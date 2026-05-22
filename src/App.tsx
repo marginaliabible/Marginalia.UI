@@ -1,8 +1,9 @@
 import VerseDisplay from './components/VerseDisplay';
 import SearchResults from './components/SearchResults';
 import SettingsModal from './components/SettingsModal';
+import TranslationSelectorModal from './components/TranslationSelectorModal';
 import { useEffect, useMemo, useRef, useState, FormEvent, ChangeEvent } from 'react';
-import Select, { MultiValue } from 'react-select';
+import { MultiValue } from 'react-select';
 import { useAppDispatch, useAppSelector } from './store/hooks';
 import {
   loadTranslations,
@@ -44,6 +45,7 @@ import './App.scss';
 function App() {
   const dispatch = useAppDispatch();
   const modalRef = useRef<any>(null);
+  const translationModalRef = useRef<any>(null);
   const workspaceRef = useRef<HTMLDivElement | null>(null);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const [isSearchFocused, setIsSearchFocused] = useState(false);
@@ -502,6 +504,22 @@ function App() {
     modalRef.current?.hide();
   };
 
+  const openTranslationModal = async () => {
+    const el = document.getElementById('translationSelectorModal');
+    if (!el) return;
+
+    if (!translationModalRef.current) {
+      const { default: Modal } = await import('bootstrap/js/dist/modal');
+      translationModalRef.current = Modal.getOrCreateInstance(el);
+    }
+
+    translationModalRef.current?.show();
+  };
+
+  const closeTranslationModal = () => {
+    translationModalRef.current?.hide();
+  };
+
   const mainPanePercent = Math.round(mainPaneRatio * 1000) / 10;
   const sidePanePercent = 100 - mainPanePercent;
 
@@ -602,25 +620,6 @@ function App() {
           >
             <div className="card border-0 shadow-sm">
               <div className="card-body workspace-scroll">
-                <div className="translation-selector-wrap mb-3">
-                  <label className="form-label fw-semibold small mb-2" htmlFor="translationSelectorInput">
-                    Translations
-                  </label>
-                  <Select
-                    inputId="translationSelectorInput"
-                    isMulti
-                    options={translationSelectOptions}
-                    value={selectedTranslationOptions}
-                    onChange={handleTranslationSelectionChange}
-                    classNamePrefix="translation-select"
-                    className="translation-selector"
-                    placeholder="Select translations..."
-                    isSearchable={true}
-                    closeMenuOnSelect={false}
-                    hideSelectedOptions={true}
-                    noOptionsMessage={() => 'No translations available'}
-                  />
-                </div>
                 {selectedBook ? (
                   <VerseDisplay
                     chaptersByTranslation={chaptersByTranslation}
@@ -631,6 +630,7 @@ function App() {
                     focusVerse={focusVerse}
                     showTranslationTags={hasMultiTranslations}
                     onCloseTranslation={handleCloseTranslation}
+                    onOpenTranslationSelector={openTranslationModal}
                     verseDomId={verseDomId}
                     chapterName={selectedBook ? `${selectedBook} ${selectedChapter}` : undefined}
                   />
@@ -698,7 +698,18 @@ function App() {
         handleLanguagesChange={handleLanguagesChange}
         languageOptions={languageOptions}
         getLanguageDisplayName={getLanguageDisplayName}
+        selectedTranslationIds={selectedTranslationIds}
+        translationSelectOptions={translationSelectOptions}
+        selectedTranslationOptions={selectedTranslationOptions}
+        handleTranslationSelectionChange={handleTranslationSelectionChange}
         closeSettingsModal={closeSettingsModal}
+      />
+
+      <TranslationSelectorModal
+        translationSelectOptions={translationSelectOptions}
+        selectedTranslationOptions={selectedTranslationOptions}
+        handleTranslationSelectionChange={handleTranslationSelectionChange}
+        closeTranslationModal={closeTranslationModal}
       />
     </div>
   );

@@ -1,6 +1,7 @@
 import React from 'react';
 import Select, { MultiValue } from 'react-select';
-import '../styles/LanguageTagSelector.scss';
+import '../styles/MultiSelect.scss';
+import { createMultiSelectStyles } from './sharedMultiSelectStyles';
 
 interface LanguageOption {
   code: string;
@@ -75,21 +76,7 @@ const LanguageTagSelector: React.FC<LanguageTagSelectorProps> = ({
       closeMenuOnSelect={false}
       aria-label="Language selection"
       inputId="languageTagSelector"
-      styles={{
-        control: (base) => ({
-          ...base,
-          minHeight: 'auto',
-        }),
-        valueContainer: (base) => ({
-          ...base,
-          flexWrap: 'wrap',
-          gap: '0.25rem',
-        }),
-        multiValue: (base) => ({
-          ...base,
-          minWidth: 'auto',
-        }),
-      }}
+      styles={createMultiSelectStyles<SelectOption>()}
     />
   );
 };

@@ -10,6 +10,7 @@ interface VerseDisplayProps {
   focusVerse: number | null;
   showTranslationTags: boolean;
   onCloseTranslation: (translationId: string) => void;
+  onOpenTranslationSelector?: () => void;
   verseDomId: (book: string, chapter: number, verse: number) => string;
   chapterName?: string;
 }
@@ -23,6 +24,7 @@ const VerseDisplay: React.FC<VerseDisplayProps> = ({
   focusVerse,
   showTranslationTags,
   onCloseTranslation,
+  onOpenTranslationSelector,
   verseDomId,
   chapterName,
 }) => {
@@ -51,16 +53,25 @@ const VerseDisplay: React.FC<VerseDisplayProps> = ({
             {chapterName}
           </div>
         )}
-        <div className="verse-grid-column-headers-row" aria-hidden="true">
-          <span className="verse-grid-verse-label">#</span>
+        <div
+          className="verse-grid-column-headers-row"
+          aria-hidden="true"
+        >
+          <span className="verse-grid-verse-label"></span>
           {showTranslationTags ? (
-            translationOrder.map((translationId) => {
+            translationOrder.map((translationId, index) => {
               const label = translationLabels[translationId] ?? translationId;
+              const chipText = `${translationId}: ${label}`;
+              const showAddButton = Boolean(onOpenTranslationSelector) && index === translationOrder.length - 1;
               return (
-                <span key={translationId} className="verse-grid-column-label verse-grid-column-tag" role="listitem">
-                  <span className="translation-chip" title={label}>
-                    <span className="translation-chip-label" aria-label={`${translationId}: ${label}`}>
-                      {translationId}
+                <span
+                  key={translationId}
+                  className={`verse-grid-column-label verse-grid-column-tag ${showAddButton ? 'has-add-button' : ''}`}
+                  role="listitem"
+                >
+                  <span className="translation-chip" title={chipText}>
+                    <span className="translation-chip-label" aria-label={chipText}>
+                      {chipText}
                     </span>
                     <button
                       type="button"
@@ -72,15 +83,46 @@ const VerseDisplay: React.FC<VerseDisplayProps> = ({
                       x
                     </button>
                   </span>
+                  {showAddButton && (
+                    <button
+                      type="button"
+                      className="btn btn-sm btn-outline-primary verse-grid-add-translation"
+                      onClick={onOpenTranslationSelector}
+                      aria-label="Add or remove translations"
+                      title="Add or remove translations"
+                    >
+                      +
+                    </button>
+                  )}
                 </span>
               );
             })
           ) : (
-            translationOrder.map((translationId) => (
-              <span key={translationId} className="verse-grid-column-label" title={translationLabels[translationId] ?? translationId}>
-                {translationLabels[translationId] ?? translationId}
-              </span>
-            ))
+            translationOrder.map((translationId, index) => {
+              const label = translationLabels[translationId] ?? translationId;
+              const showAddButton = Boolean(onOpenTranslationSelector) && index === translationOrder.length - 1;
+
+              return (
+                <span
+                  key={translationId}
+                  className={`verse-grid-column-label ${showAddButton ? 'has-add-button' : ''}`}
+                  title={label}
+                >
+                  <span className="verse-grid-column-label-text">{label}</span>
+                  {showAddButton && (
+                    <button
+                      type="button"
+                      className="btn btn-sm btn-outline-primary verse-grid-add-translation"
+                      onClick={onOpenTranslationSelector}
+                      aria-label="Add or remove translations"
+                      title="Add or remove translations"
+                    >
+                      +
+                    </button>
+                  )}
+                </span>
+              );
+            })
           )}
         </div>
       </div>
