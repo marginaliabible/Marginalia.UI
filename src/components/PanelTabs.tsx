@@ -75,7 +75,7 @@ const PanelTabs: React.FC<PanelTabsProps> = ({
             aria-label={isDetached ? 'Return to the main browser window' : 'Pop into a new browser window'}
           >
             <i
-              className={`fa-solid ${isDetached ? 'fa-down-left-and-up-right-to-center' : 'fa-up-right-from-square'}`}
+              className={`fa-solid fa-up-right-from-square pop-toggle-icon ${isDetached ? 'is-pop-in' : ''}`}
               aria-hidden="true"
             ></i>
           </button>

@@ -956,6 +956,20 @@ function App() {
                         <kbd>{isMac ? '⌘' : 'Ctrl'}+F</kbd>
                       </span>
                     )}
+                    {searchTerm && (
+                      <button
+                        type="button"
+                        className="search-clear-btn"
+                        aria-label="Clear search"
+                        onMouseDown={(e) => {
+                          e.preventDefault();
+                          handleSearchInput('');
+                          searchInputRef.current?.focus();
+                        }}
+                      >
+                        ×
+                      </button>
+                    )}
                   </div>
                   <button className="btn btn-primary" type="submit">
                     Go
