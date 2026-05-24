@@ -369,9 +369,6 @@ function App() {
   const handleSearchInput = (value: string) => {
     setIsQuickJumpPreviewHidden(false);
     dispatch(setSearchTerm(value));
-    if (searchResults) {
-      dispatch(clearSearch());
-    }
   };
 
   const handleSubmitSearch = async (e: FormEvent) => {
