@@ -1,5 +1,6 @@
 import { createSlice, createAsyncThunk, type PayloadAction } from '@reduxjs/toolkit';
 import type { BibleData, BibleTranslationMeta, SearchResultSet } from '../../models/bible';
+import type { PanelTab } from '../../models/tab';
 import { bibleService } from '../../services/bibleService';
 import { searchIndexService } from '../../services/searchIndexService';
 
@@ -9,7 +10,10 @@ interface BibleState {
   loadedTranslations: Record<string, BibleData>;
   isLoading: boolean;
   error: string | null;
-  searchResults: SearchResultSet | null;
+  tabs: PanelTab[];
+  activeTabId: string | null;
+  isPanelDetached: boolean;
+  detachedPanelName: string | null;
 }
 
 const MAX_SEARCH_MATCHES = 1000;
@@ -26,7 +30,99 @@ const initialState: BibleState = {
   loadedTranslations: {},
   isLoading: false,
   error: null,
-  searchResults: null
+  tabs: [],
+  activeTabId: null,
+  isPanelDetached: false,
+  detachedPanelName: null
+};
+
+const buildSearchResults = (
+  state: BibleState,
+  queryInput: string,
+  translationIds: string[]
+): SearchResultSet | null => {
+  const query = queryInput.trim();
+  if (!query) {
+    return null;
+  }
+
+  const metadataById = new Map(
+    state.availableTranslations.map((translation) => [translation.id, translation.label] as const)
+  );
+
+  const allMatches = translationIds.flatMap((translationId) => {
+    const translation = state.loadedTranslations[translationId];
+    if (!translation) {
+      return [];
+    }
+
+    const meta = state.availableTranslations.find((t) => t.id === translationId);
+    const indexResult = searchIndexService.search(query, translationId, translation, meta?.language);
+    const result = indexResult ?? bibleService.runSearch(translation, query);
+    if (!result) {
+      return [];
+    }
+
+    const label = metadataById.get(translationId) ?? translation.translation ?? translationId;
+    return result.matches.map((match) => ({
+      id: `${translationId}-${match.book}-${match.chapter}-${match.verse}`,
+      book: match.book,
+      chapter: match.chapter,
+      verse: match.verse,
+      text: match.text,
+      translationId,
+      translationLabel: label
+    }));
+  });
+
+  // Dedupe by verse location (book, chapter, verse), keeping first occurrence.
+  const seenVerses = new Set<string>();
+  const matches = allMatches.filter((match) => {
+    const verseKey = `${match.book}:${match.chapter}:${match.verse}`;
+    if (seenVerses.has(verseKey)) {
+      return false;
+    }
+    seenVerses.add(verseKey);
+    return true;
+  });
+
+  const total = matches.length;
+  const limitedMatches = matches.slice(0, MAX_SEARCH_MATCHES);
+  return {
+    query,
+    matches: limitedMatches,
+    total,
+    limited: limitedMatches.length < total
+  };
+};
+
+const createSearchTab = (searchResults: SearchResultSet, translationIds: string[]): PanelTab => {
+  const now = Date.now();
+  return {
+    id: `tab-${now}-${Math.random().toString(36).slice(2, 8)}`,
+    type: 'search',
+    title: searchResults.query,
+    iconClass: 'fa-solid fa-magnifying-glass',
+    searchResults,
+    translationIds,
+    createdAt: now,
+    updatedAt: now
+  };
+};
+
+const updateSearchTab = (tab: PanelTab, searchResults: SearchResultSet, translationIds: string[]): PanelTab => ({
+  ...tab,
+  title: searchResults.query,
+  searchResults,
+  translationIds,
+  updatedAt: Date.now()
+});
+
+const findActiveTabIndex = (state: BibleState): number => {
+  if (!state.activeTabId) {
+    return -1;
+  }
+  return state.tabs.findIndex((tab) => tab.id === state.activeTabId);
 };
 
 export const refreshTranslations = createAsyncThunk(
@@ -83,65 +179,90 @@ const bibleSlice = createSlice({
       state.error = action.payload;
     },
     runSearch: (state, action: PayloadAction<{ query: string; translationIds: string[] }>) => {
-      const query = action.payload.query.trim();
-      if (!query) {
-        state.searchResults = null;
+      const searchResults = buildSearchResults(state, action.payload.query, action.payload.translationIds);
+      if (!searchResults) {
         return;
       }
 
-      const metadataById = new Map(
-        state.availableTranslations.map((translation) => [translation.id, translation.label] as const)
+      const activeIndex = findActiveTabIndex(state);
+      if (activeIndex >= 0 && state.tabs[activeIndex].type === 'search') {
+        state.tabs[activeIndex] = updateSearchTab(state.tabs[activeIndex], searchResults, action.payload.translationIds);
+        return;
+      }
+
+      const searchTab = createSearchTab(searchResults, action.payload.translationIds);
+      state.tabs.push(searchTab);
+      state.activeTabId = searchTab.id;
+    },
+    runSearchInNewTab: (state, action: PayloadAction<{ query: string; translationIds: string[] }>) => {
+      const searchResults = buildSearchResults(state, action.payload.query, action.payload.translationIds);
+      if (!searchResults) {
+        return;
+      }
+
+      const duplicate = state.tabs.find(
+        (tab) =>
+          tab.type === 'search' &&
+          tab.searchResults?.query.toLowerCase() === searchResults.query.toLowerCase()
       );
 
-      let allMatches = action.payload.translationIds.flatMap((translationId) => {
-        const translation = state.loadedTranslations[translationId];
-        if (!translation) {
-          return [];
-        }
+      if (duplicate) {
+        state.activeTabId = duplicate.id;
+        return;
+      }
 
-        const meta = state.availableTranslations.find((t) => t.id === translationId);
-        const indexResult = searchIndexService.search(query, translationId, translation, meta?.language);
-        const result = indexResult ?? bibleService.runSearch(translation, query);
-        if (!result) {
-          return [];
-        }
+      const searchTab = createSearchTab(searchResults, action.payload.translationIds);
+      state.tabs.push(searchTab);
+      state.activeTabId = searchTab.id;
+    },
+    runSearchInTab: (state, action: PayloadAction<{ tabId: string; query: string; translationIds: string[] }>) => {
+      const searchResults = buildSearchResults(state, action.payload.query, action.payload.translationIds);
+      if (!searchResults) {
+        return;
+      }
 
-        const label = metadataById.get(translationId) ?? translation.translation ?? translationId;
-        return result.matches.map(
-          (match) => ({
-            id: `${translationId}-${match.book}-${match.chapter}-${match.verse}`,
-            book: match.book,
-            chapter: match.chapter,
-            verse: match.verse,
-            text: match.text,
-            translationId,
-            translationLabel: label
-          })
-        );
-      });
+      const tabIndex = state.tabs.findIndex((tab) => tab.id === action.payload.tabId);
+      if (tabIndex < 0) {
+        return;
+      }
 
-      // Dedupe by verse location (book, chapter, verse), keeping first occurrence
-      const seenVerses = new Set<string>();
-      const matches = allMatches.filter((match) => {
-        const verseKey = `${match.book}:${match.chapter}:${match.verse}`;
-        if (seenVerses.has(verseKey)) {
-          return false;
-        }
-        seenVerses.add(verseKey);
-        return true;
-      });
+      state.tabs[tabIndex] = updateSearchTab(state.tabs[tabIndex], searchResults, action.payload.translationIds);
+      state.activeTabId = action.payload.tabId;
+    },
+    setActiveTab: (state, action: PayloadAction<string>) => {
+      if (!state.tabs.some((tab) => tab.id === action.payload)) {
+        return;
+      }
+      state.activeTabId = action.payload;
+    },
+    closeTab: (state, action: PayloadAction<string>) => {
+      const closeIndex = state.tabs.findIndex((tab) => tab.id === action.payload);
+      if (closeIndex < 0) {
+        return;
+      }
 
-      const total = matches.length;
-      const limitedMatches = matches.slice(0, MAX_SEARCH_MATCHES);
-      state.searchResults = {
-        query,
-        matches: limitedMatches,
-        total,
-        limited: limitedMatches.length < total
-      };
+      const [removed] = state.tabs.splice(closeIndex, 1);
+      if (removed.id !== state.activeTabId) {
+        return;
+      }
+
+      if (state.tabs.length === 0) {
+        state.activeTabId = null;
+        return;
+      }
+
+      const fallbackIndex = Math.max(0, closeIndex - 1);
+      state.activeTabId = state.tabs[fallbackIndex].id;
+    },
+    setPanelDetached: (state, action: PayloadAction<{ detached: boolean; panelName?: string | null }>) => {
+      state.isPanelDetached = action.payload.detached;
+      if (action.payload.panelName !== undefined) {
+        state.detachedPanelName = action.payload.panelName;
+      }
     },
     clearSearch: (state) => {
-      state.searchResults = null;
+      state.tabs = [];
+      state.activeTabId = null;
     }
   },
   extraReducers: (builder) => {
@@ -201,6 +322,11 @@ export const {
   setCurrentBibleFromId,
   setError,
   runSearch,
+  runSearchInNewTab,
+  runSearchInTab,
+  setActiveTab,
+  closeTab,
+  setPanelDetached,
   clearSearch
 } = bibleSlice.actions;
 

@@ -1,15 +1,23 @@
 import VerseDisplay from './components/VerseDisplay';
 import SearchResults from './components/SearchResults';
+import PanelTabs from './components/PanelTabs';
+import SearchActionDropdown from './components/SearchActionDropdown';
 import SettingsModal from './components/SettingsModal';
 import TranslationSelectorModal from './components/TranslationSelectorModal';
 import { useEffect, useMemo, useRef, useState, FormEvent, ChangeEvent } from 'react';
+import { createPortal } from 'react-dom';
 import { MultiValue } from 'react-select';
 import { useAppDispatch, useAppSelector } from './store/hooks';
 import {
   loadTranslations,
   refreshTranslations,
   runSearch,
+  runSearchInNewTab,
+  runSearchInTab,
+  setActiveTab,
+  closeTab,
   clearSearch,
+  setPanelDetached,
   setCurrentBibleFromId
 } from './store/slices/bibleSlice';
 import {
@@ -48,9 +56,15 @@ function App() {
   const translationModalRef = useRef<any>(null);
   const workspaceRef = useRef<HTMLDivElement | null>(null);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
+  const popupWindowRef = useRef<Window | null>(null);
+  const popupCleanupRef = useRef<(() => void) | null>(null);
   const [isSearchFocused, setIsSearchFocused] = useState(false);
   const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad|iPod/.test(navigator.platform);
   const [isQuickJumpPreviewHidden, setIsQuickJumpPreviewHidden] = useState(true);
+  const [isSearchActionDropdownOpen, setIsSearchActionDropdownOpen] = useState(false);
+  const [isSearchActionDropdownSuppressed, setIsSearchActionDropdownSuppressed] = useState(false);
+  const [searchActionIndex, setSearchActionIndex] = useState(0);
+  const [popupContainer, setPopupContainer] = useState<HTMLElement | null>(null);
   const [mainPaneRatio, setMainPaneRatio] = useState(2 / 3);
   const [isDesktopLayout, setIsDesktopLayout] = useState(
     typeof window !== 'undefined' && typeof window.matchMedia === 'function'
@@ -65,7 +79,10 @@ function App() {
     loadedTranslations,
     isLoading,
     error,
-    searchResults
+    tabs,
+    activeTabId,
+    isPanelDetached,
+    detachedPanelName
   } = useAppSelector((state) => state.bible);
 
   const {
@@ -92,6 +109,28 @@ function App() {
     window.addEventListener('keydown', handleCtrlF);
     return () => window.removeEventListener('keydown', handleCtrlF);
   }, []);
+
+  useEffect(() => {
+    const popupName = sessionStorage.getItem('gitbible-popout-name');
+    if (!popupName) {
+      return;
+    }
+
+    openOrReconnectPopup(false);
+  }, []);
+
+  useEffect(() => {
+    if (!isPanelDetached) {
+      return;
+    }
+
+    const popup = popupWindowRef.current;
+    if (!popup || popup.closed) {
+      dispatch(setPanelDetached({ detached: false, panelName: null }));
+      setPopupContainer(null);
+      sessionStorage.removeItem('gitbible-popout-name');
+    }
+  }, [isPanelDetached, dispatch]);
 
   // Initialize app
   useEffect(() => {
@@ -192,7 +231,19 @@ function App() {
   // Apply theme changes
   useEffect(() => {
     applyTheme(theme);
+
+    const popup = popupWindowRef.current;
+    if (popup && !popup.closed) {
+      popup.document.documentElement.setAttribute('data-theme', theme);
+      popup.document.documentElement.setAttribute('data-bs-theme', theme);
+    }
   }, [theme]);
+
+  useEffect(() => {
+    return () => {
+      popupCleanupRef.current?.();
+    };
+  }, []);
 
   // Computed values
   const books = useMemo(() => currentBible?.books ?? [], [currentBible]);
@@ -339,10 +390,173 @@ function App() {
     };
   }, [currentBible, quickJumpTarget]);
 
-  const activeWorkspacePanel: WorkspacePanelKey | null = searchResults ? 'search' : null;
+  const activeTab = useMemo(() => {
+    if (!activeTabId) {
+      return null;
+    }
+    return tabs.find((tab) => tab.id === activeTabId) ?? null;
+  }, [tabs, activeTabId]);
+
+  const activeWorkspacePanel: WorkspacePanelKey | null = activeTab ? 'search' : null;
   const hasMultiTranslations = selectedTranslationIds.length > 1;
-  const horizontalElementLength = selectedTranslationIds.length + (Boolean(searchResults) ? 1 : 0);
+  const horizontalElementLength = selectedTranslationIds.length + (Boolean(activeTab) ? 1 : 0);
   const useWideLayout = horizontalElementLength > 3;
+  const normalizedSearchTerm = searchTerm.trim();
+  const canShowSearchActionDropdown = Boolean(activeTabId) && tabs.length > 0 && !quickJumpTarget && normalizedSearchTerm.length > 0;
+
+  const focusDetachedPanel = () => {
+    const popup = popupWindowRef.current;
+    if (!popup || popup.closed) {
+      return;
+    }
+
+    popup.focus();
+  };
+
+  const runSearchByAction = (query: string, action: 'replace' | 'new') => {
+    const normalized = query.trim();
+    if (!normalized) {
+      return;
+    }
+
+    if (action === 'new') {
+      dispatch(runSearchInNewTab({ query: normalized, translationIds: selectedTranslationIds }));
+    } else if (activeTabId) {
+      dispatch(runSearchInTab({ tabId: activeTabId, query: normalized, translationIds: selectedTranslationIds }));
+    } else {
+      dispatch(runSearchInNewTab({ query: normalized, translationIds: selectedTranslationIds }));
+    }
+
+    setIsSearchActionDropdownOpen(false);
+    setIsSearchActionDropdownSuppressed(true);
+    setSearchActionIndex(0);
+
+    if (isPanelDetached) {
+      focusDetachedPanel();
+    }
+  };
+
+  const attachPopupWindow = (popup: Window, windowName: string) => {
+    popupWindowRef.current = popup;
+
+    popup.document.title = 'GitBible Panel';
+    popup.document.body.className = document.body.className;
+    popup.document.documentElement.setAttribute('data-theme', theme);
+    popup.document.documentElement.setAttribute('data-bs-theme', theme);
+    popup.document.documentElement.style.height = '100%';
+    popup.document.body.style.height = '100%';
+    popup.document.body.style.margin = '0';
+    popup.document.body.style.padding = '1rem';
+    popup.document.body.style.display = 'flex';
+    popup.document.body.style.flexDirection = 'column';
+
+    const existingRoot = popup.document.getElementById('gitbible-popout-root');
+    const root = existingRoot ?? popup.document.createElement('div');
+    root.id = 'gitbible-popout-root';
+    root.style.display = 'flex';
+    root.style.flexDirection = 'column';
+    root.style.flex = '1 1 auto';
+    root.style.minHeight = '0';
+    if (!existingRoot) {
+      popup.document.body.innerHTML = '';
+      popup.document.body.appendChild(root);
+    }
+
+    if (!popup.document.getElementById('gitbible-popout-base')) {
+      const baseStyle = popup.document.createElement('style');
+      baseStyle.id = 'gitbible-popout-base';
+      baseStyle.textContent = `
+        body {
+          background: var(--bs-body-bg);
+          color: var(--bs-body-color);
+        }
+
+        #gitbible-popout-root .popout-panel-shell {
+          display: flex;
+          flex: 1 1 auto;
+          flex-direction: column;
+          min-height: 0;
+          max-height: none;
+        }
+
+        #gitbible-popout-root .popout-panel-shell .search-results-card {
+          flex: 1 1 auto;
+          min-height: 0;
+        }
+
+        #gitbible-popout-root .popout-panel-shell .search-results-body {
+          flex: 1 1 auto;
+          min-height: 0;
+        }
+      `;
+      popup.document.head.appendChild(baseStyle);
+    }
+
+    document.querySelectorAll('link[rel="stylesheet"], style').forEach((styleNode) => {
+      const clone = styleNode.cloneNode(true) as HTMLElement;
+
+      if (styleNode.tagName === 'LINK') {
+        const href = styleNode.getAttribute('href');
+        if (!href) {
+          return;
+        }
+
+        const existing = Array.from(popup.document.querySelectorAll('link[rel="stylesheet"]')).some((candidate) => candidate.getAttribute('href') === href);
+        if (existing) {
+          return;
+        }
+      }
+
+      if (styleNode.tagName === 'STYLE') {
+        const styleId = styleNode.getAttribute('id');
+        if (styleId) {
+          const existing = popup.document.getElementById(styleId);
+          if (existing) {
+            return;
+          }
+        }
+      }
+
+      popup.document.head.appendChild(clone);
+    });
+
+    const handlePopupBeforeUnload = () => {
+      dispatch(setPanelDetached({ detached: false, panelName: null }));
+      setPopupContainer(null);
+      popupWindowRef.current = null;
+      sessionStorage.removeItem('gitbible-popout-name');
+    };
+
+    popup.addEventListener('beforeunload', handlePopupBeforeUnload);
+    popupCleanupRef.current = () => {
+      popup.removeEventListener('beforeunload', handlePopupBeforeUnload);
+    };
+
+    setPopupContainer(root);
+    dispatch(setPanelDetached({ detached: true, panelName: windowName }));
+    sessionStorage.setItem('gitbible-popout-name', windowName);
+  };
+
+  const openOrReconnectPopup = (forceOpen: boolean) => {
+    const storedName = detachedPanelName ?? sessionStorage.getItem('gitbible-popout-name');
+    const windowName = storedName && storedName.trim().length > 0
+      ? storedName
+      : `gitbible-panel-${Date.now()}`;
+
+    const popup = window.open('', windowName);
+    if (!popup) {
+      return;
+    }
+
+    if (popup.closed) {
+      return;
+    }
+
+    attachPopupWindow(popup, windowName);
+    if (forceOpen) {
+      popup.focus();
+    }
+  };
 
   // Event handlers
   const handleTranslationSelectionChange = async (selected: MultiValue<TranslationSelectOption>) => {
@@ -362,18 +576,71 @@ function App() {
 
     const query = searchTerm.trim();
     if (query.length > 0) {
-      dispatch(runSearch({ query, translationIds: nextIds }));
+      if (activeTabId) {
+        dispatch(runSearchInTab({ tabId: activeTabId, query, translationIds: nextIds }));
+      } else {
+        dispatch(runSearch({ query, translationIds: nextIds }));
+      }
     }
   };
 
   const handleSearchInput = (value: string) => {
     setIsQuickJumpPreviewHidden(false);
+    if (value !== searchTerm) {
+      setIsSearchActionDropdownSuppressed(false);
+    }
+    if (!value.trim()) {
+      setIsSearchActionDropdownOpen(false);
+      setSearchActionIndex(0);
+    }
     dispatch(setSearchTerm(value));
+  };
+
+  const handleSearchInputKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
+    const query = normalizedSearchTerm;
+    if (!canShowSearchActionDropdown) {
+      return;
+    }
+
+    if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
+      event.preventDefault();
+      runSearchByAction(query, 'new');
+      return;
+    }
+
+    if (!isSearchActionDropdownOpen) {
+      return;
+    }
+
+    if (event.key === 'ArrowDown') {
+      event.preventDefault();
+      setSearchActionIndex((index) => Math.min(1, index + 1));
+      return;
+    }
+
+    if (event.key === 'ArrowUp') {
+      event.preventDefault();
+      setSearchActionIndex((index) => Math.max(0, index - 1));
+      return;
+    }
+
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      runSearchByAction(query, searchActionIndex === 0 ? 'replace' : 'new');
+      return;
+    }
+
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      setIsSearchActionDropdownOpen(false);
+      setIsSearchActionDropdownSuppressed(true);
+      setSearchActionIndex(0);
+    }
   };
 
   const handleSubmitSearch = async (e: FormEvent) => {
     e.preventDefault();
-    const query = searchTerm.trim();
+    const query = normalizedSearchTerm;
     dispatch(setSearchTerm(query));
 
     if (!query) {
@@ -386,13 +653,62 @@ function App() {
     if (quickJump) {
       await goToReference(quickJump);
       setIsQuickJumpPreviewHidden(true);
+      setIsSearchActionDropdownOpen(false);
       return;
     }
 
-    dispatch(runSearch({ query, translationIds: selectedTranslationIds }));
+    if (isSearchActionDropdownOpen && activeTabId) {
+      runSearchByAction(query, 'replace');
+      return;
+    }
+
+    if (tabs.length > 0 && activeTabId) {
+      setIsSearchActionDropdownOpen(true);
+      setSearchActionIndex(0);
+      return;
+    }
+
+    runSearchByAction(query, 'new');
   };
 
+  useEffect(() => {
+    const query = normalizedSearchTerm;
+
+    if (!isSearchFocused || !canShowSearchActionDropdown || isSearchActionDropdownSuppressed) {
+      if (isSearchActionDropdownOpen) {
+        setIsSearchActionDropdownOpen(false);
+        setSearchActionIndex(0);
+      }
+      return;
+    }
+
+    if (query.length > 5) {
+      setIsSearchActionDropdownOpen(true);
+      setSearchActionIndex(0);
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      setIsSearchActionDropdownOpen(true);
+      setSearchActionIndex(0);
+    }, 1000);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [
+    normalizedSearchTerm,
+    canShowSearchActionDropdown,
+    isSearchActionDropdownSuppressed,
+    isSearchFocused,
+    isSearchActionDropdownOpen
+  ]);
+
   const goToReference = async (target: QuickJumpTarget, translationId?: string) => {
+    if (isPanelDetached) {
+      window.focus();
+    }
+
     const nextActiveId = translationId && selectedTranslationIds.includes(translationId)
       ? translationId
       : selectedTranslationId;
@@ -434,7 +750,11 @@ function App() {
 
     const query = searchTerm.trim();
     if (query.length > 0) {
-      dispatch(runSearch({ query, translationIds: nextIds }));
+      if (activeTabId) {
+        dispatch(runSearchInTab({ tabId: activeTabId, query, translationIds: nextIds }));
+      } else {
+        dispatch(runSearch({ query, translationIds: nextIds }));
+      }
     }
   };
 
@@ -517,11 +837,74 @@ function App() {
     translationModalRef.current?.hide();
   };
 
+  const handleSelectTab = (tabId: string) => {
+    dispatch(setActiveTab(tabId));
+    if (isPanelDetached) {
+      focusDetachedPanel();
+    }
+  };
+
+  const handleCloseTab = (tabId: string) => {
+    dispatch(closeTab(tabId));
+  };
+
+  const handleToggleDetachPanel = () => {
+    if (isPanelDetached) {
+      dispatch(setPanelDetached({ detached: false, panelName: null }));
+      setPopupContainer(null);
+      sessionStorage.removeItem('gitbible-popout-name');
+      popupCleanupRef.current?.();
+
+      const popup = popupWindowRef.current;
+      popupWindowRef.current = null;
+      if (popup && !popup.closed) {
+        popup.close();
+      }
+
+      window.focus();
+      return;
+    }
+
+    openOrReconnectPopup(true);
+  };
+
   const mainPanePercent = Math.round(mainPaneRatio * 1000) / 10;
   const sidePanePercent = 100 - mainPanePercent;
 
+  const sidePanelContent = (
+    <>
+      <PanelTabs
+        tabs={tabs}
+        activeTabId={activeTabId}
+        onSelectTab={handleSelectTab}
+        onCloseTab={handleCloseTab}
+        isDetached={isPanelDetached}
+        showDetachButton={isDesktopLayout}
+        onToggleDetach={handleToggleDetachPanel}
+      />
+      {activeTab?.type === 'search' && activeTab.searchResults ? (
+        <SearchResults
+          tab={activeTab}
+          goToReference={goToReference}
+          onBeforeNavigate={() => {
+            if (isPanelDetached) {
+              window.focus();
+            }
+          }}
+        />
+      ) : (
+        <div className="card border-0 shadow-sm h-100">
+          <div className="card-body d-flex flex-column justify-content-center align-items-center text-center">
+            <p className="text-body-secondary mb-0">Search to find verses</p>
+          </div>
+        </div>
+      )}
+    </>
+  );
+
   return (
-    <div className={`container py-4 app-shell ${useWideLayout ? 'app-shell-wide' : ''}`}>
+    <>
+      <div className={`container py-4 app-shell ${useWideLayout ? 'app-shell-wide' : ''}`}>
       <header className="card border-0 shadow-sm mb-4">
         <div className="card-body d-flex flex-column flex-lg-row gap-3 align-items-lg-start justify-content-lg-between">
           <div>
@@ -564,6 +947,7 @@ function App() {
                       placeholder="Search or jump (e.g. Gen 1:3)"
                       value={searchTerm}
                       onChange={(e) => handleSearchInput(e.target.value)}
+                      onKeyDown={handleSearchInputKeyDown}
                       onFocus={() => setIsSearchFocused(true)}
                       onBlur={() => setIsSearchFocused(false)}
                     />
@@ -594,6 +978,14 @@ function App() {
                     )}
                   </div>
                 )}
+                {!quickJumpPreview && activeTab && (
+                  <SearchActionDropdown
+                    isOpen={isSearchActionDropdownOpen}
+                    activeTabTitle={activeTab.title}
+                    selectedIndex={searchActionIndex}
+                    onSelectAction={(action) => runSearchByAction(normalizedSearchTerm, action)}
+                  />
+                )}
               </div>
             </fieldset>
           </form>
@@ -602,7 +994,7 @@ function App() {
 
       <div
         ref={workspaceRef}
-        className={`workspace-layout has-side-panel ${
+        className={`workspace-layout ${!isPanelDetached ? 'has-side-panel' : ''} ${
           isDesktopLayout ? 'is-desktop' : 'is-mobile'
         }`}
       >
@@ -610,7 +1002,7 @@ function App() {
           <section
             className="workspace-pane workspace-main"
             style={
-              isDesktopLayout && activeWorkspacePanel
+              isDesktopLayout && activeWorkspacePanel && !isPanelDetached
                 ? { flexBasis: `${mainPanePercent}%` }
                 : undefined
             }
@@ -639,7 +1031,7 @@ function App() {
           </section>
         )}
 
-        {isDesktopLayout && (
+        {isDesktopLayout && !isPanelDetached && activeWorkspacePanel && (
           <div
             className="workspace-divider"
             role="separator"
@@ -651,26 +1043,20 @@ function App() {
           />
         )}
 
-        <aside
-          className={`workspace-pane workspace-side ${!activeWorkspacePanel ? 'is-empty' : ''}`}
-          style={
-            isDesktopLayout
-              ? { flexBasis: `${sidePanePercent}%` }
-              : undefined
-          }
-        >
-          <div className="workspace-scroll">
-            {searchResults ? (
-              <SearchResults searchResults={searchResults} goToReference={goToReference} />
-            ) : (
-              <div className="card border-0 shadow-sm h-100">
-                <div className="card-body d-flex flex-column justify-content-center align-items-center text-center">
-                  <p className="text-body-secondary mb-0">Search to find verses</p>
-                </div>
-              </div>
-            )}
-          </div>
-        </aside>
+        {!isPanelDetached && (
+          <aside
+            className={`workspace-pane workspace-side ${!activeWorkspacePanel ? 'is-empty' : ''}`}
+            style={
+              isDesktopLayout
+                ? { flexBasis: `${sidePanePercent}%` }
+                : undefined
+            }
+          >
+            <div className="workspace-scroll panel-scroll-with-tabs">
+              {sidePanelContent}
+            </div>
+          </aside>
+        )}
       </div>
 
       {(isLoading || error) && (
@@ -708,7 +1094,16 @@ function App() {
         handleTranslationSelectionChange={handleTranslationSelectionChange}
         closeTranslationModal={closeTranslationModal}
       />
-    </div>
+
+      </div>
+
+      {isPanelDetached && popupContainer && createPortal(
+        <div className="workspace-scroll panel-scroll-with-tabs popout-panel-shell">
+          {sidePanelContent}
+        </div>,
+        popupContainer
+      )}
+    </>
   );
 }
 

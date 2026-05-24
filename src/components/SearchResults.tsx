@@ -1,6 +1,6 @@
 import React, { useEffect, useRef } from 'react';
-import type { SearchResultSet } from '../models/bible';
 import type { QuickJumpTarget } from '../models/bible';
+import type { PanelTab } from '../models/tab';
 
 const highlightText = (text: string, query: string): React.ReactNode => {
   if (!query) return text;
@@ -13,15 +13,25 @@ const highlightText = (text: string, query: string): React.ReactNode => {
 };
 
 interface SearchResultsProps {
-  searchResults: SearchResultSet;
+  tab: PanelTab;
   goToReference: (target: QuickJumpTarget, translationId?: string) => void;
+  onBeforeNavigate?: () => void;
 }
 
 const PAGE_SIZE = 50;
 
-const SearchResults: React.FC<SearchResultsProps> = ({ searchResults, goToReference }) => {
+const SearchResults: React.FC<SearchResultsProps> = ({ tab, goToReference, onBeforeNavigate }) => {
+  const searchResults = tab.searchResults;
   const [displayedCount, setDisplayedCount] = React.useState(PAGE_SIZE);
   const sentinelRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    setDisplayedCount(PAGE_SIZE);
+  }, [tab.id]);
+
+  if (!searchResults) {
+    return null;
+  }
 
   const displayedMatches = searchResults.matches.slice(0, displayedCount);
   const hasMore = displayedCount < searchResults.matches.length;
@@ -52,8 +62,8 @@ const SearchResults: React.FC<SearchResultsProps> = ({ searchResults, goToRefere
   }, [hasMore, searchResults.matches.length]);
 
   return (
-    <div className="card border-0 shadow-sm h-100">
-      <div className="card-body d-flex flex-column gap-3">
+    <div className="card border-0 shadow-sm search-results-card">
+      <div className="card-body d-flex flex-column gap-3 search-results-body">
         <div>
           <h3 className="h6 text-uppercase mb-1">Search Results</h3>
           <p className="text-body-secondary results-summary mb-0">
@@ -70,13 +80,14 @@ const SearchResults: React.FC<SearchResultsProps> = ({ searchResults, goToRefere
               key={match.id}
               type="button"
               className="list-group-item list-group-item-action text-start"
-              onClick={() =>
+              onClick={() => {
+                onBeforeNavigate?.();
                 goToReference({
                   book: match.book,
                   chapter: match.chapter,
                   verse: match.verse
-                }, match.translationId)
-              }
+                }, match.translationId);
+              }}
             >
               <span className="match-reference d-block">
                 {match.book} {match.chapter}:{match.verse}
