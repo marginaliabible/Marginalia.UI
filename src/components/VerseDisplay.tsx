@@ -10,7 +10,7 @@ interface VerseDisplayProps {
   focusVerse: number | null;
   showTranslationTags: boolean;
   onCloseTranslation: (translationId: string) => void;
-  onOpenTranslationSelector?: () => void;
+  onVerseClick?: (verse: number) => void;
   verseDomId: (book: string, chapter: number, verse: number) => string;
   chapterName?: string;
 }
@@ -24,7 +24,7 @@ const VerseDisplay: React.FC<VerseDisplayProps> = ({
   focusVerse,
   showTranslationTags,
   onCloseTranslation,
-  onOpenTranslationSelector,
+  onVerseClick,
   verseDomId,
   chapterName,
 }) => {
@@ -59,14 +59,13 @@ const VerseDisplay: React.FC<VerseDisplayProps> = ({
         >
           <span className="verse-grid-verse-label"></span>
           {showTranslationTags ? (
-            translationOrder.map((translationId, index) => {
+            translationOrder.map((translationId) => {
               const label = translationLabels[translationId] ?? translationId;
               const chipText = `${translationId}: ${label}`;
-              const showAddButton = Boolean(onOpenTranslationSelector) && index === translationOrder.length - 1;
               return (
                 <span
                   key={translationId}
-                  className={`verse-grid-column-label verse-grid-column-tag ${showAddButton ? 'has-add-button' : ''}`}
+                  className="verse-grid-column-label verse-grid-column-tag"
                   role="listitem"
                 >
                   <span className="translation-chip" title={chipText}>
@@ -83,43 +82,20 @@ const VerseDisplay: React.FC<VerseDisplayProps> = ({
                       x
                     </button>
                   </span>
-                  {showAddButton && (
-                    <button
-                      type="button"
-                      className="btn btn-sm btn-outline-primary verse-grid-add-translation"
-                      onClick={onOpenTranslationSelector}
-                      aria-label="Add or remove translations"
-                      title="Add or remove translations"
-                    >
-                      +
-                    </button>
-                  )}
                 </span>
               );
             })
           ) : (
-            translationOrder.map((translationId, index) => {
+            translationOrder.map((translationId) => {
               const label = translationLabels[translationId] ?? translationId;
-              const showAddButton = Boolean(onOpenTranslationSelector) && index === translationOrder.length - 1;
 
               return (
                 <span
                   key={translationId}
-                  className={`verse-grid-column-label ${showAddButton ? 'has-add-button' : ''}`}
+                  className="verse-grid-column-label"
                   title={label}
                 >
                   <span className="verse-grid-column-label-text">{label}</span>
-                  {showAddButton && (
-                    <button
-                      type="button"
-                      className="btn btn-sm btn-outline-primary verse-grid-add-translation"
-                      onClick={onOpenTranslationSelector}
-                      aria-label="Add or remove translations"
-                      title="Add or remove translations"
-                    >
-                      +
-                    </button>
-                  )}
                 </span>
               );
             })
@@ -134,7 +110,18 @@ const VerseDisplay: React.FC<VerseDisplayProps> = ({
             className={`verse-grid-row ${focusVerse === verseNumber ? 'is-focused' : ''}`}
             role="listitem"
           >
-            <span className="verse-number">{verseNumber}</span>
+            <a
+              href="#"
+              className="verse-number"
+              onClick={(event) => {
+                event.preventDefault();
+                onVerseClick?.(verseNumber);
+              }}
+              aria-label={`Verse ${verseNumber}`}
+              title={`Verse ${verseNumber}`}
+            >
+              {verseNumber}
+            </a>
             {translationOrder.map((translationId) => {
               const verseText =
                 chaptersByTranslation[translationId]?.verses.find((verse) => verse.verse === verseNumber)?.text ?? '';

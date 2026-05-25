@@ -3,10 +3,9 @@ import SearchResults from './components/SearchResults';
 import PanelTabs from './components/PanelTabs';
 import SearchActionDropdown from './components/SearchActionDropdown';
 import SettingsModal from './components/SettingsModal';
-import TranslationSelectorModal from './components/TranslationSelectorModal';
+import TranslationsPanel from './components/TranslationsPanel';
 import { useEffect, useMemo, useRef, useState, FormEvent, ChangeEvent } from 'react';
 import { createPortal } from 'react-dom';
-import { MultiValue } from 'react-select';
 import { useAppDispatch, useAppSelector } from './store/hooks';
 import {
   loadTranslations,
@@ -18,7 +17,8 @@ import {
   closeTab,
   clearSearch,
   setPanelDetached,
-  setCurrentBibleFromId
+  setCurrentBibleFromId,
+  openTranslationsTab
 } from './store/slices/bibleSlice';
 import {
   setSelectedTranslationId,
@@ -30,13 +30,16 @@ import {
   setSelectedLanguages,
   setTheme,
   setReady,
-  restoreState
+  restoreState,
+  addTranslationRecord,
+  removeTranslationRecord,
+  toggleStarTranslation,
+  reorderTranslations
 } from './store/slices/uiSlice';
 import { parseQuickJump } from './utils/reference-parser';
 import { bibleService } from './services/bibleService';
 import type { QuickJumpTarget } from './models/bible';
 import {
-  type TranslationSelectOption,
   type WorkspacePanelKey,
   DESKTOP_BREAKPOINT,
   normalizeLanguageSelection,
@@ -53,7 +56,6 @@ import './App.scss';
 function App() {
   const dispatch = useAppDispatch();
   const modalRef = useRef<any>(null);
-  const translationModalRef = useRef<any>(null);
   const workspaceRef = useRef<HTMLDivElement | null>(null);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const popupWindowRef = useRef<Window | null>(null);
@@ -88,6 +90,7 @@ function App() {
   const {
     selectedTranslationId,
     selectedTranslationIds,
+    translationRecords,
     selectedBook,
     selectedChapter,
     focusVerse,
@@ -136,21 +139,30 @@ function App() {
   useEffect(() => {
     const initApp = async () => {
       const savedState = bibleService.readState();
-      const restoredTranslationIds = Array.from(
-        new Set(
-          (savedState.lastTranslationIds && savedState.lastTranslationIds.length > 0
-            ? savedState.lastTranslationIds
-            : [savedState.lastTranslationId || 'KJV'])
-            .filter((id): id is string => typeof id === 'string' && id.trim().length > 0)
-            .map((id) => id.trim())
-        )
-      );
+      
+      // Use translationRecords if available, otherwise derive from legacy fields
+      let translationRecords = savedState.translationRecords || [];
+      if (translationRecords.length === 0) {
+        const restoredTranslationIds = Array.from(
+          new Set(
+            (savedState.lastTranslationIds && savedState.lastTranslationIds.length > 0
+              ? savedState.lastTranslationIds
+              : [savedState.lastTranslationId || 'KJV'])
+              .filter((id): id is string => typeof id === 'string' && id.trim().length > 0)
+              .map((id) => id.trim())
+          )
+        );
+        const resolvedTranslationIds = restoredTranslationIds.length > 0 ? restoredTranslationIds : ['KJV'];
+        translationRecords = resolvedTranslationIds.map((id) => ({
+          id,
+          starred: id === (savedState.lastTranslationId || resolvedTranslationIds[0])
+        }));
+      }
 
-      const resolvedTranslationIds = restoredTranslationIds.length > 0 ? restoredTranslationIds : ['KJV'];
-      const activeTranslationId =
-        savedState.lastTranslationId && resolvedTranslationIds.includes(savedState.lastTranslationId)
-          ? savedState.lastTranslationId
-          : resolvedTranslationIds[0];
+      // Extract IDs from translationRecords for loadTranslations and legacy selectedTranslationIds
+      const resolvedTranslationIds = translationRecords.map((r) => r.id);
+      const starredIds = translationRecords.filter((r) => r.starred).map((r) => r.id);
+      const activeTranslationId = starredIds[0] || resolvedTranslationIds[0] || 'KJV';
       
       // Apply theme
       applyTheme(savedState.theme ?? detectPreferredTheme());
@@ -165,6 +177,7 @@ function App() {
       dispatch(restoreState({
         selectedTranslationId: activeTranslationId,
         selectedTranslationIds: resolvedTranslationIds,
+        translationRecords,
         selectedBook: savedState.lastBook || null,
         selectedChapter: savedState.lastChapter || 1,
         focusVerse: savedState.lastVerse || null,
@@ -190,6 +203,7 @@ function App() {
     bibleService.persistState({
       lastTranslationId: selectedTranslationId,
       lastTranslationIds: selectedTranslationIds,
+      translationRecords,
       lastBook: selectedBook || undefined,
       lastChapter: selectedBook ? selectedChapter : undefined,
       lastVerse: focusVerse || undefined,
@@ -200,6 +214,7 @@ function App() {
   }, [
     selectedTranslationId,
     selectedTranslationIds,
+    translationRecords,
     selectedBook,
     selectedChapter,
     focusVerse,
@@ -291,45 +306,22 @@ function App() {
     return matches.length === 0 ? availableTranslations : matches;
   }, [availableTranslations, selectedLanguages]);
 
-  const selectableTranslations = useMemo(() => {
-    const map = new Map(filteredTranslations.map((translation) => [translation.id, translation] as const));
-    for (const translationId of selectedTranslationIds) {
-      const existing = translationMetadataById.get(translationId);
-      if (existing) {
-        map.set(translationId, existing);
-      }
+  // Ensure selectedTranslationId is valid; fallback to first starred or KJV
+  useEffect(() => {
+    const recordIds = new Set(translationRecords.map((r) => r.id));
+    if (!recordIds.has(selectedTranslationId)) {
+      const starredIds = translationRecords.filter((r) => r.starred).map((r) => r.id);
+      const validId = starredIds[0] || translationRecords[0]?.id || 'KJV';
+      dispatch(setSelectedTranslationId(validId));
     }
+  }, [translationRecords, selectedTranslationId, dispatch]);
 
-    return Array.from(map.values()).sort((a, b) => a.id.localeCompare(b.id));
-  }, [filteredTranslations, selectedTranslationIds, translationMetadataById]);
-
-  const translationSelectOptions = useMemo<TranslationSelectOption[]>(
-    () =>
-      selectableTranslations.map((translation) => ({
-        value: translation.id,
-        label: `${translation.id} - ${translation.label}`
-      })),
-    [selectableTranslations]
-  );
-
-  const selectedTranslationOptions = useMemo<TranslationSelectOption[]>(() => {
-    const optionsById = new Map(translationSelectOptions.map((option) => [option.value, option] as const));
-
-    return selectedTranslationIds
-      .map((id) => {
-        const existing = optionsById.get(id);
-        if (existing) {
-          return existing;
-        }
-
-        const translation = translationMetadataById.get(id);
-        return {
-          value: id,
-          label: translation ? `${translation.id} - ${translation.label}` : id
-        };
-      })
-      .filter((option): option is TranslationSelectOption => option !== null);
-  }, [selectedTranslationIds, translationSelectOptions, translationMetadataById]);
+  const addableTranslations = useMemo(() => {
+    const selectedIds = new Set(translationRecords.map((record) => record.id));
+    return filteredTranslations
+      .filter((translation) => !selectedIds.has(translation.id))
+      .sort((a, b) => a.label.localeCompare(b.label));
+  }, [filteredTranslations, translationRecords]);
 
   const chapters = useMemo(() => {
     const book = books.find((b) => b.name === selectedBook) ?? books?.[0];
@@ -340,10 +332,15 @@ function App() {
     return chapters.find((c) => c.chapter === selectedChapter) ?? null;
   }, [chapters, selectedChapter]);
 
+  // Compute starred translation IDs from translationRecords
+  const starredTranslationIds = useMemo(() => {
+    return translationRecords.filter((r) => r.starred).map((r) => r.id);
+  }, [translationRecords]);
+
   const chaptersByTranslation = useMemo(() => {
     const chaptersMap: Record<string, typeof currentChapter> = {};
 
-    for (const translationId of selectedTranslationIds) {
+    for (const translationId of starredTranslationIds) {
       const bible = loadedTranslations[translationId] ?? null;
       if (!bible || !selectedBook) {
         chaptersMap[translationId] = null;
@@ -355,16 +352,16 @@ function App() {
     }
 
     return chaptersMap;
-  }, [loadedTranslations, selectedBook, selectedChapter, selectedTranslationIds, currentChapter]);
+  }, [loadedTranslations, selectedBook, selectedChapter, starredTranslationIds, currentChapter]);
 
   const translationLabels = useMemo(() => {
     const labels: Record<string, string> = {};
-    for (const translationId of selectedTranslationIds) {
+    for (const translationId of starredTranslationIds) {
       const translation = translationMetadataById.get(translationId);
       labels[translationId] = translation?.label ?? translationId;
     }
     return labels;
-  }, [selectedTranslationIds, translationMetadataById]);
+  }, [starredTranslationIds, translationMetadataById]);
 
   const quickJumpTarget = useMemo<QuickJumpTarget | null>(() => {
     if (!ready || !currentBible || !searchTerm) {
@@ -397,12 +394,25 @@ function App() {
     return tabs.find((tab) => tab.id === activeTabId) ?? null;
   }, [tabs, activeTabId]);
 
+  // Keep selectedTranslationIds in sync with translationRecords for backward compatibility
+  useEffect(() => {
+    const recordIds = translationRecords.map((r) => r.id);
+    if (JSON.stringify(selectedTranslationIds) !== JSON.stringify(recordIds)) {
+      dispatch(setSelectedTranslationIds(recordIds));
+    }
+  }, [translationRecords, dispatch, selectedTranslationIds]);
+
   const activeWorkspacePanel: WorkspacePanelKey | null = activeTab ? 'search' : null;
-  const hasMultiTranslations = selectedTranslationIds.length > 1;
-  const horizontalElementLength = selectedTranslationIds.length + (Boolean(activeTab) ? 1 : 0);
+  const hasMultiTranslations = starredTranslationIds.length > 1;
+  const horizontalElementLength = starredTranslationIds.length + (Boolean(activeTab) ? 1 : 0);
   const useWideLayout = horizontalElementLength > 3;
   const normalizedSearchTerm = searchTerm.trim();
-  const canShowSearchActionDropdown = Boolean(activeTabId) && tabs.length > 0 && !quickJumpTarget && normalizedSearchTerm.length > 0;
+  const canShowSearchActionDropdown =
+    activeTab?.type === 'search' &&
+    Boolean(activeTabId) &&
+    tabs.length > 0 &&
+    !quickJumpTarget &&
+    normalizedSearchTerm.length > 0;
 
   const focusDetachedPanel = () => {
     const popup = popupWindowRef.current;
@@ -420,11 +430,11 @@ function App() {
     }
 
     if (action === 'new') {
-      dispatch(runSearchInNewTab({ query: normalized, translationIds: selectedTranslationIds }));
-    } else if (activeTabId) {
-      dispatch(runSearchInTab({ tabId: activeTabId, query: normalized, translationIds: selectedTranslationIds }));
+      dispatch(runSearchInNewTab({ query: normalized, translationIds: starredTranslationIds }));
+    } else if (activeTabId && activeTab?.type === 'search') {
+      dispatch(runSearchInTab({ tabId: activeTabId, query: normalized, translationIds: starredTranslationIds }));
     } else {
-      dispatch(runSearchInNewTab({ query: normalized, translationIds: selectedTranslationIds }));
+      dispatch(runSearchInNewTab({ query: normalized, translationIds: starredTranslationIds }));
     }
 
     setIsSearchActionDropdownOpen(false);
@@ -477,6 +487,21 @@ function App() {
           flex-direction: column;
           min-height: 0;
           max-height: none;
+        }
+
+        #gitbible-popout-root .popout-panel-shell.workspace-scroll {
+          height: 100%;
+          max-height: none;
+          overflow: auto;
+        }
+
+        #gitbible-popout-root .popout-panel-shell > .card {
+          flex: 1 1 auto;
+          min-height: 0;
+        }
+
+        #gitbible-popout-root .popout-panel-shell .card-body {
+          min-height: 0;
         }
 
         #gitbible-popout-root .popout-panel-shell .search-results-card {
@@ -559,31 +584,6 @@ function App() {
   };
 
   // Event handlers
-  const handleTranslationSelectionChange = async (selected: MultiValue<TranslationSelectOption>) => {
-    const nextIds = Array.from(new Set(selected.map((option) => option.value)));
-    if (nextIds.length === 0) {
-      return;
-    }
-
-    const nextActiveId = nextIds.includes(selectedTranslationId)
-      ? selectedTranslationId
-      : nextIds[0];
-
-    dispatch(setSelectedTranslationIds(nextIds));
-    dispatch(setSelectedTranslationId(nextActiveId));
-    await dispatch(loadTranslations(nextIds));
-    dispatch(setCurrentBibleFromId(nextActiveId));
-
-    const query = searchTerm.trim();
-    if (query.length > 0) {
-      if (activeTabId) {
-        dispatch(runSearchInTab({ tabId: activeTabId, query, translationIds: nextIds }));
-      } else {
-        dispatch(runSearch({ query, translationIds: nextIds }));
-      }
-    }
-  };
-
   const handleSearchInput = (value: string) => {
     setIsQuickJumpPreviewHidden(false);
     if (value !== searchTerm) {
@@ -657,12 +657,12 @@ function App() {
       return;
     }
 
-    if (isSearchActionDropdownOpen && activeTabId) {
+    if (isSearchActionDropdownOpen && activeTabId && activeTab?.type === 'search') {
       runSearchByAction(query, 'replace');
       return;
     }
 
-    if (tabs.length > 0 && activeTabId) {
+    if (tabs.length > 0 && activeTabId && activeTab?.type === 'search') {
       setIsSearchActionDropdownOpen(true);
       setSearchActionIndex(0);
       return;
@@ -821,22 +821,6 @@ function App() {
     modalRef.current?.hide();
   };
 
-  const openTranslationModal = async () => {
-    const el = document.getElementById('translationSelectorModal');
-    if (!el) return;
-
-    if (!translationModalRef.current) {
-      const { default: Modal } = await import('bootstrap/js/dist/modal');
-      translationModalRef.current = Modal.getOrCreateInstance(el);
-    }
-
-    translationModalRef.current?.show();
-  };
-
-  const closeTranslationModal = () => {
-    translationModalRef.current?.hide();
-  };
-
   const handleSelectTab = (tabId: string) => {
     dispatch(setActiveTab(tabId));
     if (isPanelDetached) {
@@ -891,6 +875,22 @@ function App() {
               window.focus();
             }
           }}
+        />
+      ) : activeTab?.type === 'translations' ? (
+        <TranslationsPanel
+          tab={activeTab}
+          translationRecords={translationRecords}
+          translationMetadataById={translationMetadataById}
+          loadedTranslations={loadedTranslations}
+          addableTranslations={addableTranslations}
+          onAddTranslation={async (id) => {
+            const nextIds = Array.from(new Set([...translationRecords.map((record) => record.id), id]));
+            dispatch(addTranslationRecord(id));
+            await dispatch(loadTranslations(nextIds));
+          }}
+          onRemoveTranslation={(id) => dispatch(removeTranslationRecord(id))}
+          onToggleStar={(id) => dispatch(toggleStarTranslation(id))}
+          onReorder={(fromIndex, toIndex) => dispatch(reorderTranslations({ fromIndex, toIndex }))}
         />
       ) : (
         <div className="card border-0 shadow-sm h-100">
@@ -1026,14 +1026,21 @@ function App() {
                 {selectedBook ? (
                   <VerseDisplay
                     chaptersByTranslation={chaptersByTranslation}
-                    translationOrder={selectedTranslationIds}
+                    translationOrder={starredTranslationIds}
                     translationLabels={translationLabels}
                     selectedBook={selectedBook}
                     selectedChapter={selectedChapter}
                     focusVerse={focusVerse}
                     showTranslationTags={hasMultiTranslations}
                     onCloseTranslation={handleCloseTranslation}
-                    onOpenTranslationSelector={openTranslationModal}
+                    onVerseClick={(verse) => {
+                      dispatch(setFocusVerse(verse));
+                      dispatch(openTranslationsTab({
+                        book: selectedBook,
+                        chapter: selectedChapter,
+                        verse
+                      }));
+                    }}
                     verseDomId={verseDomId}
                     chapterName={selectedBook ? `${selectedBook} ${selectedChapter}` : undefined}
                   />
@@ -1095,18 +1102,7 @@ function App() {
         handleLanguagesChange={handleLanguagesChange}
         languageOptions={languageOptions}
         getLanguageDisplayName={getLanguageDisplayName}
-        selectedTranslationIds={selectedTranslationIds}
-        translationSelectOptions={translationSelectOptions}
-        selectedTranslationOptions={selectedTranslationOptions}
-        handleTranslationSelectionChange={handleTranslationSelectionChange}
         closeSettingsModal={closeSettingsModal}
-      />
-
-      <TranslationSelectorModal
-        translationSelectOptions={translationSelectOptions}
-        selectedTranslationOptions={selectedTranslationOptions}
-        handleTranslationSelectionChange={handleTranslationSelectionChange}
-        closeTranslationModal={closeTranslationModal}
       />
 
       </div>

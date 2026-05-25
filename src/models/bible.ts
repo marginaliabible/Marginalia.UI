@@ -34,9 +34,15 @@ export interface QuickJumpTarget {
   rangeEnd?: number;
 }
 
+export interface TranslationRecord {
+  id: string;
+  starred: boolean;
+}
+
 export interface GitBibleState {
   lastTranslationId: string;
   lastTranslationIds?: string[];
+  translationRecords?: TranslationRecord[];
   lastBook?: string;
   lastChapter?: number;
   lastVerse?: number;

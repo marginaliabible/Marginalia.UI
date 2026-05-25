@@ -64,66 +64,74 @@ const SearchResults: React.FC<SearchResultsProps> = ({ tab, goToReference, onBef
   return (
     <div className="card border-0 shadow-sm search-results-card">
       <div className="card-body d-flex flex-column gap-3 search-results-body">
-        <div>
-          <h3 className="h6 text-uppercase mb-1">Search Results</h3>
-          <p className="text-body-secondary results-summary mb-0">
-            {searchResults.total} match{searchResults.total === 1 ? '' : 'es'}
-            {searchResults.limited && (
-              <> (showing first {searchResults.matches.length})</>
-            )}
-            {' '}for "{searchResults.query}"
-          </p>
-        </div>
-        <div className="list-group results-list flex-grow-1 overflow-auto">
-          {displayedMatches.map((match: any) => (
-            <button
-              key={match.id}
-              type="button"
-              className="list-group-item list-group-item-action text-start"
-              onClick={() => {
-                onBeforeNavigate?.();
-                goToReference({
-                  book: match.book,
-                  chapter: match.chapter,
-                  verse: match.verse
-                }, match.translationId);
-              }}
-            >
-              <span className="match-reference d-block">
-                {match.book} {match.chapter}:{match.verse}
-                {match.translationId && (
-                  <span
-                    className="badge text-bg-primary-subtle text-primary-emphasis ms-2"
-                    title={match.translationLabel || match.translationId}
-                  >
-                    {match.translationId}
-                  </span>
+        <div className="search-results-layout">
+          <div className="search-results-main">
+            <div>
+              <h3 className="h6 text-uppercase mb-1">Search Results</h3>
+              <p className="text-body-secondary results-summary mb-0">
+                {searchResults.total} match{searchResults.total === 1 ? '' : 'es'}
+                {searchResults.limited && (
+                  <> (showing first {searchResults.matches.length})</>
                 )}
-              </span>
-              <span className="match-text d-block text-body-secondary">
-                {highlightText(match.text, searchResults.query)}
-              </span>
-            </button>
-          ))}
-          {hasMore && (
-            <div
-              ref={sentinelRef}
-              className="list-group-item text-center text-body-secondary py-2"
-              style={{ fontSize: '0.75rem' }}
-            >
-              Loading more...
+                {' '}for "{searchResults.query}"
+              </p>
             </div>
-          )}
+            <div className="results-grid flex-grow-1 overflow-auto" role="list">
+              {displayedMatches.map((match: any) => (
+                <div key={match.id} className="results-grid-item" role="listitem">
+                  <button
+                    type="button"
+                    className="card border list-group-item-action text-start search-result-card-button h-100 w-100"
+                    onClick={() => {
+                      onBeforeNavigate?.();
+                      goToReference({
+                        book: match.book,
+                        chapter: match.chapter,
+                        verse: match.verse
+                      }, match.translationId);
+                    }}
+                  >
+                    <div className="card-body d-flex flex-column gap-2 h-100 p-3">
+                      <span className="match-reference d-block">
+                        {match.book} {match.chapter}:{match.verse}
+                        {match.translationId && (
+                          <span
+                            className="badge text-bg-primary-subtle text-primary-emphasis ms-2"
+                            title={match.translationLabel || match.translationId}
+                          >
+                            {match.translationId}
+                          </span>
+                        )}
+                      </span>
+                      <span className="match-text d-block text-body-secondary">
+                        {highlightText(match.text, searchResults.query)}
+                      </span>
+                    </div>
+                  </button>
+                </div>
+              ))}
+              {hasMore && (
+                <div
+                  ref={sentinelRef}
+                  className="results-grid-sentinel text-center text-body-secondary py-2"
+                  style={{ fontSize: '0.75rem' }}
+                >
+                  Loading more...
+                </div>
+              )}
+            </div>
+            {hasMore && (
+              <button
+                type="button"
+                className="btn btn-sm btn-outline-primary w-100"
+                onClick={() => setDisplayedCount((count) => Math.min(count + PAGE_SIZE, searchResults.matches.length))}
+              >
+                Load more results ({displayedCount} of {searchResults.matches.length})
+              </button>
+            )}
+          </div>
+          <div className="search-results-spacer" aria-hidden="true"></div>
         </div>
-        {hasMore && (
-          <button
-            type="button"
-            className="btn btn-sm btn-outline-primary w-100"
-            onClick={() => setDisplayedCount((count) => Math.min(count + PAGE_SIZE, searchResults.matches.length))}
-          >
-            Load more results ({displayedCount} of {searchResults.matches.length})
-          </button>
-        )}
       </div>
     </div>
   );

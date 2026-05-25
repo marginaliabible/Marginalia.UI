@@ -226,6 +226,14 @@ const bibleSlice = createSlice({
         return;
       }
 
+      // Never replace non-search tabs (e.g. Translations) with search results.
+      if (state.tabs[tabIndex].type !== 'search') {
+        const searchTab = createSearchTab(searchResults, action.payload.translationIds);
+        state.tabs.push(searchTab);
+        state.activeTabId = searchTab.id;
+        return;
+      }
+
       state.tabs[tabIndex] = updateSearchTab(state.tabs[tabIndex], searchResults, action.payload.translationIds);
       state.activeTabId = action.payload.tabId;
     },
@@ -263,6 +271,34 @@ const bibleSlice = createSlice({
     clearSearch: (state) => {
       state.tabs = [];
       state.activeTabId = null;
+    },
+    openTranslationsTab: (state, action: PayloadAction<{ book: string; chapter: number; verse: number }>) => {
+      const { book, chapter, verse } = action.payload;
+      const now = Date.now();
+      
+      // Find existing translations tab
+      const existingTab = state.tabs.find((tab) => tab.type === 'translations');
+      
+      if (existingTab) {
+        // Update existing tab with new verse context
+        existingTab.verseContext = { book, chapter, verse };
+        existingTab.title = 'Translations';
+        existingTab.updatedAt = now;
+        state.activeTabId = existingTab.id;
+      } else {
+        // Create new translations tab
+        const newTab: PanelTab = {
+          id: `tab-translations-${now}`,
+          type: 'translations',
+          title: 'Translations',
+          iconClass: 'fa-solid fa-language',
+          verseContext: { book, chapter, verse },
+          createdAt: now,
+          updatedAt: now
+        };
+        state.tabs.push(newTab);
+        state.activeTabId = newTab.id;
+      }
     }
   },
   extraReducers: (builder) => {
@@ -327,7 +363,8 @@ export const {
   setActiveTab,
   closeTab,
   setPanelDetached,
-  clearSearch
+  clearSearch,
+  openTranslationsTab
 } = bibleSlice.actions;
 
 export default bibleSlice.reducer;

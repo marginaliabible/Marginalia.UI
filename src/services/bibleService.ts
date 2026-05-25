@@ -324,6 +324,38 @@ class BibleService {
           ? parsed.languages.filter((entry): entry is string => typeof entry === 'string')
           : undefined;
       }
+
+      // Migrate old state to new translationRecords format if needed
+      if (!parsed.translationRecords || parsed.translationRecords.length === 0) {
+        const idsToUse = parsed.lastTranslationIds && parsed.lastTranslationIds.length > 0
+          ? parsed.lastTranslationIds
+          : [parsed.lastTranslationId || LOCAL_TRANSLATION_ID];
+        
+        parsed.translationRecords = idsToUse.map((id) => ({
+          id: id.trim(),
+          starred: id === (parsed.lastTranslationId || idsToUse[0])
+        }));
+      } else {
+        // Validate and normalize translationRecords
+        parsed.translationRecords = (Array.isArray(parsed.translationRecords) ? parsed.translationRecords : [])
+          .filter((r): r is { id: string; starred: boolean } => 
+            r && typeof r === 'object' && typeof r.id === 'string' && r.id.trim().length > 0
+          )
+          .map((r) => ({
+            id: r.id.trim(),
+            starred: Boolean(r.starred)
+          }));
+        
+        if (parsed.translationRecords.length === 0) {
+          parsed.translationRecords = [{ id: LOCAL_TRANSLATION_ID, starred: true }];
+        }
+
+        // Ensure at least one starred
+        if (!parsed.translationRecords.some((r) => r.starred)) {
+          parsed.translationRecords[0].starred = true;
+        }
+      }
+
       return parsed;
     } catch (error) {
       console.warn('Failed to parse persisted state', error);
@@ -343,6 +375,26 @@ class BibleService {
     }
     if (!next.lastTranslationId || !next.lastTranslationIds.includes(next.lastTranslationId)) {
       next.lastTranslationId = next.lastTranslationIds[0] || LOCAL_TRANSLATION_ID;
+    }
+
+    // Normalize translationRecords if present
+    if (next.translationRecords && Array.isArray(next.translationRecords)) {
+      next.translationRecords = next.translationRecords
+        .filter((r): r is { id: string; starred: boolean } =>
+          r && typeof r === 'object' && typeof r.id === 'string' && r.id.trim().length > 0
+        )
+        .map((r) => ({
+          id: r.id.trim(),
+          starred: Boolean(r.starred)
+        }));
+      
+      if (next.translationRecords.length === 0) {
+        next.translationRecords = [{ id: LOCAL_TRANSLATION_ID, starred: true }];
+      }
+
+      if (!next.translationRecords.some((r) => r.starred)) {
+        next.translationRecords[0].starred = true;
+      }
     }
 
     try {

@@ -1,7 +1,4 @@
 import React from 'react';
-import type { MultiValue } from 'react-select';
-import type { TranslationSelectOption } from '../App';
-import TranslationSelector from './TranslationSelector';
 import LanguageTagSelector from './LanguageTagSelector';
 
 interface SettingsModalProps {
@@ -11,10 +8,6 @@ interface SettingsModalProps {
   handleLanguagesChange: (selected: string[]) => void;
   languageOptions: { code: string; count: number }[];
   getLanguageDisplayName: (code: string) => string;
-  selectedTranslationIds: string[];
-  translationSelectOptions: TranslationSelectOption[];
-  selectedTranslationOptions: TranslationSelectOption[];
-  handleTranslationSelectionChange: (selected: MultiValue<TranslationSelectOption>) => void | Promise<void>;
   closeSettingsModal: () => void;
 }
 
@@ -25,10 +18,6 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
   handleLanguagesChange,
   languageOptions,
   getLanguageDisplayName,
-  selectedTranslationIds,
-  translationSelectOptions,
-  selectedTranslationOptions,
-  handleTranslationSelectionChange,
   closeSettingsModal,
 }) => (
   <div
@@ -82,30 +71,6 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
                 {theme === 'dark' ? 'Dark mode' : 'Light mode'}
               </label>
             </div>
-          </section>
-
-          <section>
-            <div className="d-flex align-items-baseline justify-content-between gap-2 mb-2">
-              <div className="d-flex flex-column">
-                <span className="text-body-secondary small text-uppercase fw-semibold">
-                  Translations
-                </span>
-                <span className="fw-semibold">Active translations</span>
-                <span className="text-body-secondary small">
-                  Add or remove translations for the verse view.
-                </span>
-              </div>
-              <span className="badge bg-primary-subtle text-primary-emphasis">
-                {selectedTranslationIds.length} selected
-              </span>
-            </div>
-            <TranslationSelector
-              inputId="settingsTranslationSelectorInput"
-              options={translationSelectOptions}
-              value={selectedTranslationOptions}
-              onChange={handleTranslationSelectionChange}
-              label=""
-            />
           </section>
 
           <section>
