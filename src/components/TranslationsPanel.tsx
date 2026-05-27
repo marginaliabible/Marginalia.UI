@@ -1,12 +1,12 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import type { PanelTab, VerseContext } from '../models/tab';
-import type { BibleData, BibleTranslationMeta, TranslationRecord } from '../models/bible';
+import type { BibleTranslationMeta, TranslationRecord } from '../models/bible';
+import { bibleService } from '../services/bibleService';
 
 interface TranslationsPanelProps {
   tab: PanelTab;
   translationRecords: TranslationRecord[];
   translationMetadataById: Map<string, BibleTranslationMeta>;
-  loadedTranslations: Record<string, BibleData>;
   addableTranslations: BibleTranslationMeta[];
   onAddTranslation: (id: string) => void;
   onRemoveTranslation: (id: string) => void;
@@ -18,7 +18,6 @@ const TranslationsPanel: React.FC<TranslationsPanelProps> = ({
   tab,
   translationRecords,
   translationMetadataById,
-  loadedTranslations,
   addableTranslations,
   onAddTranslation,
   onRemoveTranslation,
@@ -27,6 +26,7 @@ const TranslationsPanel: React.FC<TranslationsPanelProps> = ({
 }) => {
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
   const [translationFilter, setTranslationFilter] = useState('');
+  const [verseTextByTranslation, setVerseTextByTranslation] = useState<Map<string, string>>(new Map());
   const verseContext = tab.verseContext as VerseContext | undefined;
 
   const filteredAddableTranslations = useMemo(() => {
@@ -41,29 +41,35 @@ const TranslationsPanel: React.FC<TranslationsPanelProps> = ({
     });
   }, [addableTranslations, translationFilter]);
 
-  const verseTextByTranslation = useMemo(() => {
-    if (!verseContext) {
-      return new Map<string, string>();
-    }
+  useEffect(() => {
+    let cancelled = false;
 
-    const { book, chapter, verse } = verseContext;
-    const result = new Map<string, string>();
-
-    for (const record of translationRecords) {
-      const bible = loadedTranslations[record.id];
-      if (!bible) {
-        result.set(record.id, '');
-        continue;
+    const loadVerseTexts = async () => {
+      if (!verseContext) {
+        if (!cancelled) {
+          setVerseTextByTranslation(new Map());
+        }
+        return;
       }
 
-      const bookData = bible.books.find((b) => b.name === book);
-      const chapterData = bookData?.chapters.find((c) => c.chapter === chapter);
-      const verseData = chapterData?.verses.find((v) => v.verse === verse);
-      result.set(record.id, verseData?.text ?? '');
-    }
+      const { book, chapter, verse } = verseContext;
+      const entries = await Promise.all(
+        translationRecords.map(async (record) => {
+          const text = await bibleService.loadVerseText(record.id, book, chapter, verse);
+          return [record.id, text] as const;
+        })
+      );
 
-    return result;
-  }, [verseContext, translationRecords, loadedTranslations]);
+      if (!cancelled) {
+        setVerseTextByTranslation(new Map(entries));
+      }
+    };
+
+    void loadVerseTexts();
+    return () => {
+      cancelled = true;
+    };
+  }, [verseContext, translationRecords]);
 
   const handleDragStart = (index: number) => {
     setDraggedIndex(index);

@@ -1,5 +1,6 @@
 import { openDB, type DBSchema, type IDBPDatabase } from 'idb';
 import type {
+  BibleChapter,
   BibleData,
   BibleTranslationMeta,
   GitBibleState,
@@ -46,6 +47,9 @@ const STATE_CACHE_KEY = 'gitbible:state';
 const REMOTE_TTL_MS = 1000 * 60 * 60 * 24 * 30; // 30 days
 const SEARCH_LIMIT = 5000;
 const META_TTL_MS = 1000 * 60 * 60 * 24 * 7; // 7 days
+const MAX_FULL_TRANSLATIONS_IN_MEMORY = 2;
+const MAX_CHAPTERS_IN_MEMORY = 8;
+const MAX_VERSES_IN_MEMORY = 128;
 const DEFAULT_LOCAL_TRANSLATION: BibleTranslationMeta = {
   id: LOCAL_TRANSLATION_ID,
   label: 'King James Version (1769)',
@@ -57,9 +61,35 @@ const DEFAULT_LOCAL_TRANSLATION: BibleTranslationMeta = {
 class BibleService {
   private dbPromise: Promise<IDBPDatabase<BibleDB>> | null = null;
   private readonly translationCache = new Map<string, BibleData>();
+  private readonly chapterCache = new Map<string, BibleChapter>();
+  private readonly verseCache = new Map<string, string>();
   private translationMetaById = new Map<string, BibleTranslationMeta>([
     [LOCAL_TRANSLATION_ID, DEFAULT_LOCAL_TRANSLATION]
   ]);
+
+  // Cache diagnostics (dev-only counters)
+  private cacheStats = {
+    chapterHits: 0,
+    chapterMisses: 0,
+    verseHits: 0,
+    verseMisses: 0,
+    translationHits: 0,
+    translationMisses: 0,
+    chapterEvictions: 0,
+    verseEvictions: 0
+  };
+
+  constructor() {
+    // Expose stats on window for dev inspection
+    if (typeof window !== 'undefined') {
+      (window as any).__GITBIBLE_CACHE_STATS__ = () => ({
+        ...this.cacheStats,
+        chapterCacheSize: this.chapterCache.size,
+        verseCacheSize: this.verseCache.size,
+        translationCacheSize: this.translationCache.size
+      });
+    }
+  }
 
   async refreshAvailableTranslations(forceRefresh = false): Promise<BibleTranslationMeta[]> {
     const cachedMeta = this.readCachedTranslationMeta();
@@ -193,27 +223,56 @@ class BibleService {
   }
 
   async loadTranslation(id: string): Promise<BibleData> {
-    try {
-      const existing = this.translationCache.get(id);
-      if (existing) {
-        return existing;
-      }
-
-      const meta = await this.resolveTranslationMeta(id);
-
-      const fromDb = await this.readFromDatabase(meta);
-      if (fromDb) {
-        this.translationCache.set(id, fromDb.data);
-        return fromDb.data;
-      }
-
-      const fetched = await this.fetchTranslation(meta);
-      await this.writeToDatabase(meta, fetched);
-      this.translationCache.set(id, fetched);
-      return fetched;
-    } catch (error) {
-      throw error;
+    const existing = this.translationCache.get(id);
+    if (existing) {
+      this.cacheStats.translationHits++;
+      this.rememberFullTranslation(id, existing);
+      return existing;
     }
+
+    this.cacheStats.translationMisses++;
+    const meta = await this.resolveTranslationMeta(id);
+    const loaded = await this.readOrFetchTranslation(meta);
+    this.rememberFullTranslation(id, loaded);
+    return loaded;
+  }
+
+  async loadChapter(translationId: string, book: string, chapter: number): Promise<BibleChapter | null> {
+    const cacheKey = this.getChapterCacheKey(translationId, book, chapter);
+    const cached = this.chapterCache.get(cacheKey);
+    if (cached) {
+      this.cacheStats.chapterHits++;
+      this.rememberChapter(cacheKey, cached);
+      return cached;
+    }
+
+    this.cacheStats.chapterMisses++;
+    const bible = this.translationCache.get(translationId)
+      ?? await this.loadTranslationWithoutMemoryRetention(translationId);
+    const bookData = bible.books.find((entry) => entry.name === book);
+    const chapterData = bookData?.chapters.find((entry) => entry.chapter === chapter);
+    if (!chapterData) {
+      return null;
+    }
+
+    this.rememberChapter(cacheKey, chapterData);
+    return chapterData;
+  }
+
+  async loadVerseText(translationId: string, book: string, chapter: number, verse: number): Promise<string> {
+    const verseKey = this.getVerseCacheKey(translationId, book, chapter, verse);
+    const cached = this.verseCache.get(verseKey);
+    if (cached !== undefined) {
+      this.cacheStats.verseHits++;
+      return cached;
+    }
+
+    this.cacheStats.verseMisses++;
+    const chapterData = await this.loadChapter(translationId, book, chapter);
+    const verseData = chapterData?.verses.find((entry) => entry.verse === verse);
+    const text = verseData?.text ?? '';
+    this.rememberVerse(verseKey, text);
+    return text;
   }
 
   private async resolveTranslationMeta(id: string): Promise<BibleTranslationMeta> {
@@ -535,6 +594,94 @@ class BibleService {
       fetchedAt: Date.now()
     };
     await db.put('translations', stored, meta.id);
+  }
+
+  private async readOrFetchTranslation(meta: BibleTranslationMeta): Promise<BibleData> {
+    const fromDb = await this.readFromDatabase(meta);
+    if (fromDb) {
+      return fromDb.data;
+    }
+
+    const fetched = await this.fetchTranslation(meta);
+    await this.writeToDatabase(meta, fetched);
+    return fetched;
+  }
+
+  private async loadTranslationWithoutMemoryRetention(id: string): Promise<BibleData> {
+    const meta = await this.resolveTranslationMeta(id);
+    return this.readOrFetchTranslation(meta);
+  }
+
+  private rememberFullTranslation(id: string, bible: BibleData): void {
+    if (this.translationCache.has(id)) {
+      this.translationCache.delete(id);
+    }
+    this.translationCache.set(id, bible);
+
+    while (this.translationCache.size > MAX_FULL_TRANSLATIONS_IN_MEMORY) {
+      const oldestId = this.translationCache.keys().next().value as string | undefined;
+      if (!oldestId) {
+        break;
+      }
+      this.translationCache.delete(oldestId);
+      this.pruneDerivedCachesForTranslation(oldestId);
+    }
+  }
+
+  private rememberChapter(cacheKey: string, chapter: BibleChapter): void {
+    if (this.chapterCache.has(cacheKey)) {
+      this.chapterCache.delete(cacheKey);
+    }
+    this.chapterCache.set(cacheKey, chapter);
+
+    while (this.chapterCache.size > MAX_CHAPTERS_IN_MEMORY) {
+      const oldestKey = this.chapterCache.keys().next().value as string | undefined;
+      if (!oldestKey) {
+        break;
+      }
+      this.cacheStats.chapterEvictions++;
+      this.chapterCache.delete(oldestKey);
+    }
+  }
+
+  private rememberVerse(cacheKey: string, text: string): void {
+    if (this.verseCache.has(cacheKey)) {
+      this.verseCache.delete(cacheKey);
+    }
+    this.verseCache.set(cacheKey, text);
+
+    while (this.verseCache.size > MAX_VERSES_IN_MEMORY) {
+      const oldestKey = this.verseCache.keys().next().value as string | undefined;
+      if (!oldestKey) {
+        break;
+      }
+      this.cacheStats.verseEvictions++;
+      this.verseCache.delete(oldestKey);
+    }
+  }
+
+  private pruneDerivedCachesForTranslation(translationId: string): void {
+    const prefix = `${translationId}\x00`;
+
+    for (const key of this.chapterCache.keys()) {
+      if (key.startsWith(prefix)) {
+        this.chapterCache.delete(key);
+      }
+    }
+
+    for (const key of this.verseCache.keys()) {
+      if (key.startsWith(prefix)) {
+        this.verseCache.delete(key);
+      }
+    }
+  }
+
+  private getChapterCacheKey(translationId: string, book: string, chapter: number): string {
+    return `${translationId}\x00${book}\x00${chapter}`;
+  }
+
+  private getVerseCacheKey(translationId: string, book: string, chapter: number, verse: number): string {
+    return `${translationId}\x00${book}\x00${chapter}\x00${verse}`;
   }
 
   private async fetchTranslation(meta: BibleTranslationMeta): Promise<BibleData> {

@@ -8,6 +8,7 @@ import { useEffect, useMemo, useRef, useState, FormEvent, ChangeEvent } from 're
 import { createPortal } from 'react-dom';
 import { useAppDispatch, useAppSelector } from './store/hooks';
 import {
+  loadTranslation,
   loadTranslations,
   refreshTranslations,
   runSearch,
@@ -38,7 +39,7 @@ import {
 } from './store/slices/uiSlice';
 import { parseQuickJump } from './utils/reference-parser';
 import { bibleService } from './services/bibleService';
-import type { QuickJumpTarget } from './models/bible';
+import type { BibleChapter, QuickJumpTarget } from './models/bible';
 import {
   type WorkspacePanelKey,
   DESKTOP_BREAKPOINT,
@@ -68,6 +69,7 @@ function App() {
   const [searchActionIndex, setSearchActionIndex] = useState(0);
   const [popupContainer, setPopupContainer] = useState<HTMLElement | null>(null);
   const [mainPaneRatio, setMainPaneRatio] = useState(2 / 3);
+  const [chaptersByTranslation, setChaptersByTranslation] = useState<Record<string, BibleChapter | null>>({});
   const [isDesktopLayout, setIsDesktopLayout] = useState(
     typeof window !== 'undefined' && typeof window.matchMedia === 'function'
       ? window.matchMedia(DESKTOP_BREAKPOINT).matches
@@ -78,7 +80,6 @@ function App() {
   const {
     availableTranslations,
     currentBible,
-    loadedTranslations,
     isLoading,
     error,
     tabs,
@@ -159,7 +160,7 @@ function App() {
         }));
       }
 
-      // Extract IDs from translationRecords for loadTranslations and legacy selectedTranslationIds
+      // Extract IDs from translationRecords and legacy selectedTranslationIds
       const resolvedTranslationIds = translationRecords.map((r) => r.id);
       const starredIds = translationRecords.filter((r) => r.starred).map((r) => r.id);
       const activeTranslationId = starredIds[0] || resolvedTranslationIds[0] || 'KJV';
@@ -188,7 +189,7 @@ function App() {
         ready: true
       }));
 
-      await dispatch(loadTranslations(resolvedTranslationIds));
+      await dispatch(loadTranslation(activeTranslationId));
       dispatch(setCurrentBibleFromId(activeTranslationId));
 
       dispatch(setReady(true));
@@ -261,9 +262,6 @@ function App() {
     };
   }, []);
 
-  // Computed values
-  const books = useMemo(() => currentBible?.books ?? [], [currentBible]);
-
   const translationMetadataById = useMemo(
     () =>
       new Map(availableTranslations.map((translation) => [translation.id, translation] as const)),
@@ -324,36 +322,39 @@ function App() {
       .sort((a, b) => a.label.localeCompare(b.label));
   }, [filteredTranslations, translationRecords]);
 
-  const chapters = useMemo(() => {
-    const book = books.find((b) => b.name === selectedBook) ?? books?.[0];
-    return book?.chapters ?? [];
-  }, [books, selectedBook]);
-
-  const currentChapter = useMemo(() => {
-    return chapters.find((c) => c.chapter === selectedChapter) ?? null;
-  }, [chapters, selectedChapter]);
-
   // Compute starred translation IDs from translationRecords
   const starredTranslationIds = useMemo(() => {
     return translationRecords.filter((r) => r.starred).map((r) => r.id);
   }, [translationRecords]);
 
-  const chaptersByTranslation = useMemo(() => {
-    const chaptersMap: Record<string, typeof currentChapter> = {};
+  useEffect(() => {
+    let cancelled = false;
 
-    for (const translationId of starredTranslationIds) {
-      const bible = loadedTranslations[translationId] ?? null;
-      if (!bible || !selectedBook) {
-        chaptersMap[translationId] = null;
-        continue;
+    const loadVisibleChapters = async () => {
+      if (!selectedBook || starredTranslationIds.length === 0) {
+        if (!cancelled) {
+          setChaptersByTranslation({});
+        }
+        return;
       }
 
-      const book = bible.books.find((entry) => entry.name === selectedBook);
-      chaptersMap[translationId] = book?.chapters.find((entry) => entry.chapter === selectedChapter) ?? null;
-    }
+      const entries = await Promise.all(
+        starredTranslationIds.map(async (translationId) => {
+          const chapter = await bibleService.loadChapter(translationId, selectedBook, selectedChapter);
+          return [translationId, chapter] as const;
+        })
+      );
 
-    return chaptersMap;
-  }, [loadedTranslations, selectedBook, selectedChapter, starredTranslationIds, currentChapter]);
+      if (!cancelled) {
+        setChaptersByTranslation(Object.fromEntries(entries));
+      }
+    };
+
+    void loadVisibleChapters();
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedBook, selectedChapter, starredTranslationIds]);
 
   const translationLabels = useMemo(() => {
     const labels: Record<string, string> = {};
@@ -424,11 +425,13 @@ function App() {
     popup.focus();
   };
 
-  const runSearchByAction = (query: string, action: 'replace' | 'new') => {
+  const runSearchByAction = async (query: string, action: 'replace' | 'new') => {
     const normalized = query.trim();
     if (!normalized) {
       return;
     }
+
+    await dispatch(loadTranslations(starredTranslationIds));
 
     if (action === 'new') {
       dispatch(runSearchInNewTab({ query: normalized, translationIds: starredTranslationIds }));
@@ -605,7 +608,7 @@ function App() {
 
     if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
       event.preventDefault();
-      runSearchByAction(query, 'new');
+      void runSearchByAction(query, 'new');
       return;
     }
 
@@ -627,7 +630,7 @@ function App() {
 
     if (event.key === 'Enter') {
       event.preventDefault();
-      runSearchByAction(query, searchActionIndex === 0 ? 'replace' : 'new');
+      void runSearchByAction(query, searchActionIndex === 0 ? 'replace' : 'new');
       return;
     }
 
@@ -659,7 +662,7 @@ function App() {
     }
 
     if (isSearchActionDropdownOpen && activeTabId && activeTab?.type === 'search') {
-      runSearchByAction(query, 'replace');
+      void runSearchByAction(query, 'replace');
       return;
     }
 
@@ -669,7 +672,7 @@ function App() {
       return;
     }
 
-    runSearchByAction(query, 'new');
+    void runSearchByAction(query, 'new');
   };
 
   useEffect(() => {
@@ -714,12 +717,16 @@ function App() {
       ? translationId
       : selectedTranslationId;
 
+    const loadResult = await dispatch(loadTranslation(nextActiveId));
+
     if (nextActiveId !== selectedTranslationId) {
       dispatch(setSelectedTranslationId(nextActiveId));
       dispatch(setCurrentBibleFromId(nextActiveId));
     }
 
-    const activeBible = loadedTranslations[nextActiveId] ?? currentBible;
+    const activeBible = loadTranslation.fulfilled.match(loadResult)
+      ? loadResult.payload
+      : currentBible;
     if (!activeBible) return;
 
     if (!activeBible.books.some((book) => book.name === target.book)) {
@@ -746,7 +753,7 @@ function App() {
 
     dispatch(setSelectedTranslationIds(nextIds));
     dispatch(setSelectedTranslationId(nextActiveId));
-    await dispatch(loadTranslations(nextIds));
+    await dispatch(loadTranslation(nextActiveId));
     dispatch(setCurrentBibleFromId(nextActiveId));
 
     const query = searchTerm.trim();
@@ -882,12 +889,9 @@ function App() {
           tab={activeTab}
           translationRecords={translationRecords}
           translationMetadataById={translationMetadataById}
-          loadedTranslations={loadedTranslations}
           addableTranslations={addableTranslations}
           onAddTranslation={async (id) => {
-            const nextIds = Array.from(new Set([...translationRecords.map((record) => record.id), id]));
             dispatch(addTranslationRecord(id));
-            await dispatch(loadTranslations(nextIds));
           }}
           onRemoveTranslation={(id) => dispatch(removeTranslationRecord(id))}
           onToggleStar={(id) => dispatch(toggleStarTranslation(id))}

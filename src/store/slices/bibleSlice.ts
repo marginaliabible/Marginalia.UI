@@ -320,7 +320,9 @@ const bibleSlice = createSlice({
         state.error = null;
       })
       .addCase(loadTranslation.fulfilled, (state, action) => {
-        state.loadedTranslations[action.meta.arg] = action.payload;
+        state.loadedTranslations = {
+          [action.meta.arg]: action.payload
+        };
         state.currentBible = action.payload;
         state.isLoading = false;
       })
@@ -333,15 +335,7 @@ const bibleSlice = createSlice({
         state.error = null;
       })
       .addCase(loadTranslations.fulfilled, (state, action) => {
-        state.loadedTranslations = {
-          ...state.loadedTranslations,
-          ...action.payload
-        };
-
-        const firstRequestedId = Object.keys(action.payload)[0];
-        if (firstRequestedId && state.loadedTranslations[firstRequestedId]) {
-          state.currentBible = state.loadedTranslations[firstRequestedId];
-        }
+        state.loadedTranslations = action.payload;
 
         state.isLoading = false;
       })

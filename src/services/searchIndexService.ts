@@ -17,6 +17,7 @@ export interface IndexedSearchResult {
 }
 
 const INDEX_SEARCH_LIMIT = 5000;
+const MAX_CACHED_INDEXES = 2;
 
 /**
  * Controls how aggressively MiniSearch tolerates near-stem distance between
@@ -62,7 +63,7 @@ class SearchIndexService {
     }
 
     index.addAll(docs);
-    this.indexes.set(translationId, index);
+    this.touchIndex(translationId, index);
   }
 
   hasIndex(translationId: string): boolean {
@@ -91,6 +92,7 @@ class SearchIndexService {
     if (!index) {
       return null;
     }
+    this.touchIndex(translationId, index);
 
     const searchOptions: SearchOptions = {
       fuzzy: FUZZY_TOLERANCE,
@@ -126,6 +128,22 @@ class SearchIndexService {
   /** Evicts a cached index, e.g. when a translation is reloaded. */
   evict(translationId: string): void {
     this.indexes.delete(translationId);
+  }
+
+  private touchIndex(translationId: string, index: MiniSearch<VerseDocument>): void {
+    if (this.indexes.has(translationId)) {
+      this.indexes.delete(translationId);
+    }
+
+    this.indexes.set(translationId, index);
+
+    while (this.indexes.size > MAX_CACHED_INDEXES) {
+      const oldestId = this.indexes.keys().next().value as string | undefined;
+      if (!oldestId) {
+        break;
+      }
+      this.indexes.delete(oldestId);
+    }
   }
 }
 

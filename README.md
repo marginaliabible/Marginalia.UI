@@ -45,6 +45,25 @@ GitBible is a browser-only React application for exploring and searching Scriptu
 - Translation downloads are stored in IndexedDB for 30 days. You can force a fresh copy by clearing browser storage or using devtools to delete the `gitbible-db` database.
 - Theme preference, last translation, and the most recent verse location persist across browser sessions.
 
+## Performance Monitoring
+
+GitBible includes built-in cache diagnostics for development and tuning:
+
+**View Cache Statistics:**
+Open your browser DevTools console and run:
+```javascript
+__GITBIBLE_CACHE_STATS__()
+```
+
+This returns an object with:
+- `chapterHits` / `chapterMisses` - Chapter cache access patterns
+- `verseHits` / `verseMisses` - Verse cache access patterns
+- `translationHits` / `translationMisses` - Full translation cache access patterns
+- `chapterEvictions` / `verseEvictions` - LRU eviction counts (indicates cache churn)
+- `chapterCacheSize` / `verseCacheSize` / `translationCacheSize` - Current in-memory usage
+
+Use this to monitor cache efficiency while navigating, searching, and jumping between verses. High eviction counts suggest cache sizes may be too small; low hit ratios suggest the cache isn't being effectively reused.
+
 ## Build and Test
 
 - Development: `npm start` or `npm run dev`

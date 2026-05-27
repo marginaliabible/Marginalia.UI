@@ -9,7 +9,7 @@ export function parseQuickJump(query: string, books: readonly BibleBook[]): Quic
     return null;
   }
 
-  const bookMatch = findBook(trimmed);
+  const bookMatch = findBook(trimmed, books);
   if (!bookMatch) {
     return null;
   }
@@ -59,7 +59,8 @@ export function parseQuickJump(query: string, books: readonly BibleBook[]): Quic
   };
 }
 
-function findBook(query: string): { book: string; remainder: string } | null {
+function findBook(query: string, books: readonly BibleBook[]): { book: string; remainder: string } | null {
+  // First try default English alias matching
   for (const matcher of BOOK_ALIAS_MATCHERS) {
     const match = query.match(matcher.regex);
     if (!match) {
@@ -69,6 +70,16 @@ function findBook(query: string): { book: string; remainder: string } | null {
     const matchedAlias = match[0];
     const remainder = query.slice(matchedAlias.length);
     return { book: matcher.book, remainder };
+  }
+
+  // Fallback: try matching directly against book names in the translation
+  const lowerQuery = query.toLowerCase();
+  for (const book of books) {
+    const lowerBookName = book.name.toLowerCase();
+    if (lowerQuery.startsWith(lowerBookName)) {
+      const remainder = query.slice(book.name.length);
+      return { book: book.name, remainder };
+    }
   }
 
   return null;
