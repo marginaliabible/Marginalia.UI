@@ -48,7 +48,7 @@ const SEARCH_LIMIT = 5000;
 const META_TTL_MS = 1000 * 60 * 60 * 24 * 7; // 7 days
 const DEFAULT_LOCAL_TRANSLATION: BibleTranslationMeta = {
   id: LOCAL_TRANSLATION_ID,
-  label: 'KJV (King James Version)',
+  label: 'King James Version (1769)',
   source: LOCAL_TRANSLATION_SOURCE,
   isLocal: true,
   language: 'en'

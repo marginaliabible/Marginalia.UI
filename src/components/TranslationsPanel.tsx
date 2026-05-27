@@ -80,15 +80,6 @@ const TranslationsPanel: React.FC<TranslationsPanelProps> = ({
       return;
     }
 
-    const fromRecord = translationRecords[draggedIndex];
-    const toRecord = translationRecords[targetIndex];
-
-    // Only allow reordering within the same starred/unstarred group
-    if (fromRecord.starred !== toRecord.starred) {
-      setDraggedIndex(null);
-      return;
-    }
-
     onReorder(draggedIndex, targetIndex);
     setDraggedIndex(null);
   };

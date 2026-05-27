@@ -84,10 +84,10 @@ const uiSlice = createSlice({
       if (records.length === 0) {
         state.translationRecords = [{ id: 'KJV', starred: true }];
       } else {
-        // Separate starred and unstarred, then concat (starred first)
-        const starred = records.filter((r) => r.starred).sort((a, b) => a.id.localeCompare(b.id));
-        const unstarred = records.filter((r) => !r.starred).sort((a, b) => a.id.localeCompare(b.id));
-        state.translationRecords = [...starred, ...unstarred];
+        state.translationRecords = records;
+        if (!state.translationRecords.some((r) => r.starred)) {
+          state.translationRecords[0].starred = true;
+        }
       }
     },
     addTranslationRecord: (state, action: PayloadAction<string>) => {
@@ -112,22 +112,32 @@ const uiSlice = createSlice({
     },
     toggleStarTranslation: (state, action: PayloadAction<string>) => {
       const translationId = action.payload.trim();
-      const record = state.translationRecords.find((r) => r.id === translationId);
-      if (!record) {
+      const recordIndex = state.translationRecords.findIndex((r) => r.id === translationId);
+      if (recordIndex < 0) {
         return;
       }
+
+      const record = state.translationRecords[recordIndex];
 
       // Cannot unstar if it's the last starred
       if (record.starred && state.translationRecords.filter((r) => r.starred).length === 1) {
         return;
       }
 
+      state.translationRecords.splice(recordIndex, 1);
+
       record.starred = !record.starred;
 
-      // Re-sort to maintain starred-first invariant
-      const starred = state.translationRecords.filter((r) => r.starred);
-      const unstarred = state.translationRecords.filter((r) => !r.starred);
-      state.translationRecords = [...starred, ...unstarred];
+      if (record.starred) {
+        const firstUnstarredIndex = state.translationRecords.findIndex((r) => !r.starred);
+        const insertIndex = firstUnstarredIndex === -1 ? state.translationRecords.length : firstUnstarredIndex;
+        state.translationRecords.splice(insertIndex, 0, record);
+        return;
+      }
+
+      const firstUnstarredIndex = state.translationRecords.findIndex((r) => !r.starred);
+      const insertIndex = firstUnstarredIndex === -1 ? state.translationRecords.length : firstUnstarredIndex;
+      state.translationRecords.splice(insertIndex, 0, record);
     },
     reorderTranslations: (state, action: PayloadAction<{ fromIndex: number; toIndex: number }>) => {
       const { fromIndex, toIndex } = action.payload;
@@ -140,16 +150,17 @@ const uiSlice = createSlice({
       }
 
       const fromRecord = state.translationRecords[fromIndex];
-
-      // Only allow reordering within the same starred/unstarred group
-      const toRecord = state.translationRecords[toIndex];
-      if (fromRecord.starred !== toRecord.starred) {
-        return;
-      }
+      const targetStarState = state.translationRecords[toIndex].starred;
 
       // Remove and insert
       state.translationRecords.splice(fromIndex, 1);
+      fromRecord.starred = targetStarState;
       state.translationRecords.splice(toIndex, 0, fromRecord);
+
+      // Keep at least one starred translation available for main panel rendering.
+      if (!state.translationRecords.some((record) => record.starred)) {
+        state.translationRecords[0].starred = true;
+      }
     }
   }
 });

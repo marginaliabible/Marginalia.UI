@@ -127,7 +127,7 @@
       "location": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/Wulfila.json"
     },
     {
-      "id": "CPDV",
+      "id": "CATPUB",
       "label": "Catholic Public Domain Version",
       "language": "en",
       "location": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/CPDV.json"
@@ -169,7 +169,7 @@
       "location": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/DaOT1871NT1907.json"
     },
     {
-      "id": "Darby",
+      "id": "DRB",
       "label": "Darby Bible (1889)",
       "language": "en",
       "location": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/Darby.json"
@@ -217,7 +217,7 @@
       "location": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/ArmEastern.json"
     },
     {
-      "id": "Jubilee2000",
+      "id": "J2K",
       "label": "English Jubilee 2000 Bible",
       "language": "en",
       "location": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/Jubilee2000.json"
@@ -253,7 +253,7 @@
       "location": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/FreBBB.json"
     },
     {
-      "id": "Geneva1599",
+      "id": "GEN",
       "label": "Geneva Bible (1599)",
       "language": "en",
       "location": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/Geneva1599.json"
@@ -283,7 +283,7 @@
       "location": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/GerTafel.json"
     },
     {
-      "id": "LITV",
+      "id": "GRLIT",
       "label": "Green's Literal Translation",
       "language": "en",
       "location": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/LITV.json"
@@ -307,7 +307,7 @@
       "location": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/KorHKJV.json"
     },
     {
-      "id": "Anderson",
+      "id": "AND",
       "label": "Henry Tompkins Anderson’s 1864 New Testament",
       "language": "en",
       "location": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/Anderson.json"
@@ -355,13 +355,13 @@
       "location": "data/bibles/KJV.json"
     },
     {
-      "id": "KJVA",
+      "id": "KJVApo",
       "label": "King James Version (1769), including Apocrypha",
       "language": "en",
       "location": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/KJVA.json"
     },
     {
-      "id": "KJVPCE",
+      "id": "KJVCamb",
       "label": "King James Version: Pure Cambridge Edition",
       "language": "en",
       "location": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/KJVPCE.json"
@@ -481,19 +481,19 @@
       "location": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/GreVamvas.json"
     },
     {
-      "id": "NHEB",
+      "id": "NHRT",
       "label": "New Heart English Bible",
       "language": "en",
       "location": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/NHEB.json"
     },
     {
-      "id": "NHEBJE",
+      "id": "NHRTJE",
       "label": "New Heart English Bible: Jehovah Edition",
       "language": "en",
       "location": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/NHEBJE.json"
     },
     {
-      "id": "NHEBME",
+      "id": "NHRTME",
       "label": "New Heart English Bible: Messianic Edition",
       "language": "en",
       "location": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/NHEBME.json"
@@ -523,7 +523,7 @@
       "location": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/PohnOld.json"
     },
     {
-      "id": "OEBcth",
+      "id": "OEBcom",
       "label": "Open English Bible (Commonwealth Spelling)",
       "language": "en",
       "location": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/OEBcth.json"
@@ -565,7 +565,7 @@
       "location": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/SpaRVG.json"
     },
     {
-      "id": "RNKJV",
+      "id": "NAMKJV",
       "label": "Restored Name King James Version",
       "language": "en",
       "location": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/RNKJV.json"
@@ -583,7 +583,7 @@
       "location": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/RLT.json"
     },
     {
-      "id": "RWebster",
+      "id": "WEBREV",
       "label": "Revised Webster Version (1833)",
       "language": "en",
       "location": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/RWebster.json"
@@ -769,7 +769,7 @@
       "location": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/VulgSistine.json"
     },
     {
-      "id": "Webster",
+      "id": "WEB",
       "label": "Webster Bible",
       "language": "en",
       "location": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/Webster.json"

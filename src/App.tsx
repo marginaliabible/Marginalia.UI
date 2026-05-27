@@ -174,13 +174,14 @@ function App() {
       const resolvedLanguages = savedState.languages && savedState.languages.length > 0
         ? normalizeLanguageSelection(savedState.languages)
         : detectPreferredLanguages();
+      const hasSavedBookPosition = Boolean(savedState.lastBook);
       dispatch(restoreState({
         selectedTranslationId: activeTranslationId,
         selectedTranslationIds: resolvedTranslationIds,
         translationRecords,
-        selectedBook: savedState.lastBook || null,
-        selectedChapter: savedState.lastChapter || 1,
-        focusVerse: savedState.lastVerse || null,
+        selectedBook: hasSavedBookPosition ? savedState.lastBook ?? null : 'John',
+        selectedChapter: hasSavedBookPosition ? savedState.lastChapter || 1 : 10,
+        focusVerse: hasSavedBookPosition ? savedState.lastVerse || null : 10,
         searchTerm: savedState.lastSearch || '',
         selectedLanguages: resolvedLanguages,
         theme: savedState.theme || detectPreferredTheme(),
