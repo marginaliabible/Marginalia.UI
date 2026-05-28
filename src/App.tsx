@@ -389,6 +389,14 @@ function App() {
     };
   }, [currentBible, quickJumpTarget]);
 
+  const selectedBookEntry = useMemo(() => {
+    if (!currentBible || !selectedBook) {
+      return null;
+    }
+
+    return currentBible.books.find((book) => book.name === selectedBook) ?? null;
+  }, [currentBible, selectedBook]);
+
   const activeTab = useMemo(() => {
     if (!activeTabId) {
       return null;
@@ -766,6 +774,32 @@ function App() {
     }
   };
 
+  const handleBookSelectionChange = (bookName: string) => {
+    const nextBook = currentBible?.books.find((book) => book.name === bookName);
+    if (!nextBook) {
+      return;
+    }
+
+    const nextChapter = nextBook.chapters[0]?.chapter ?? 1;
+    dispatch(setSelectedBook(bookName));
+    dispatch(setSelectedChapter(nextChapter));
+    dispatch(setFocusVerse(null));
+    void scrollToVerse({ book: bookName, chapter: nextChapter, verse: 1 });
+  };
+
+  const handleChapterSelectionChange = (chapter: number) => {
+    if (!selectedBook) {
+      return;
+    }
+
+    const isValidChapter = selectedBookEntry?.chapters.some((entry) => entry.chapter === chapter) ?? false;
+    const nextChapter = isValidChapter ? chapter : selectedBookEntry?.chapters[0]?.chapter ?? 1;
+
+    dispatch(setSelectedChapter(nextChapter));
+    dispatch(setFocusVerse(null));
+    void scrollToVerse({ book: selectedBook, chapter: nextChapter, verse: 1 });
+  };
+
   const handleDividerPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
     if (!isDesktopLayout || !activeWorkspacePanel || !workspaceRef.current) {
       return;
@@ -1033,11 +1067,15 @@ function App() {
                     chaptersByTranslation={chaptersByTranslation}
                     translationOrder={starredTranslationIds}
                     translationLabels={translationLabels}
+                    books={currentBible.books}
+                    availableChapters={selectedBookEntry?.chapters ?? []}
                     selectedBook={selectedBook}
                     selectedChapter={selectedChapter}
                     focusVerse={focusVerse}
                     showTranslationTags={hasMultiTranslations}
                     onCloseTranslation={handleCloseTranslation}
+                    onBookChange={handleBookSelectionChange}
+                    onChapterChange={handleChapterSelectionChange}
                     onVerseClick={(verse) => {
                       dispatch(setFocusVerse(verse));
                       dispatch(openTranslationsTab({
@@ -1047,7 +1085,6 @@ function App() {
                       }));
                     }}
                     verseDomId={verseDomId}
-                    chapterName={selectedBook ? `${selectedBook} ${selectedChapter}` : undefined}
                   />
                 ) : (
                   <p className="text-body-secondary mb-0">Select a chapter to begin.</p>

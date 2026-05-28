@@ -327,11 +327,43 @@
 
 .verse-grid-chapter-heading {
   padding: 0.5rem 0.3rem;
-  font-weight: 600;
-  font-size: 1rem;
+  display: flex;
+  align-items: flex-end;
+  gap: 0.55rem;
+  flex-wrap: wrap;
   color: var(--bs-body-color);
   line-height: 1.2;
   border-bottom: 1px solid color-mix(in srgb, var(--bs-border-color) 70%, transparent);
+}
+
+.verse-grid-heading-control {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  min-width: 0;
+  flex: 0 1 auto;
+}
+
+.verse-grid-heading-control-book {
+  max-width: 100%;
+}
+
+.verse-grid-heading-control-chapter {
+  flex: 0 0 5.75rem;
+}
+
+.verse-grid-heading-label {
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--bs-secondary-color);
+}
+
+.verse-grid-heading-select {
+  font-weight: 600;
+  max-width: 100%;
+  min-width: 0;
 }
 
 .verse-grid-column-headers-row,
@@ -383,11 +415,13 @@
   color: var(--bs-secondary-color);
   text-align: center;
   padding: 0 0.3rem;
+  max-width: 100%;
 }
 
 .verse-grid-column-label.has-add-button {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
+  min-width: 0;
   align-items: center;
   gap: 0.35rem;
 }
