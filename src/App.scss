@@ -613,10 +613,9 @@
 }
 
 .panel-nav-tabs {
-  flex-wrap: nowrap;
-  white-space: nowrap;
-  overflow-x: auto;
-  overflow-y: hidden;
+  flex-wrap: wrap;
+  white-space: normal;
+  overflow: visible;
   min-width: 0;
 }
 
@@ -629,9 +628,11 @@
 }
 
 .panel-tab-title {
+  display: inline-block;
   max-width: 10rem;
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .panel-tab-close {

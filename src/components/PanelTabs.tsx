@@ -27,7 +27,7 @@ const PanelTabs: React.FC<PanelTabsProps> = ({
   return (
     <div className="panel-tabs">
       <div className="d-flex align-items-center justify-content-between gap-2 panel-tabs-header">
-        <ul className="nav nav-tabs flex-nowrap panel-nav-tabs" role="tablist">
+        <ul className="nav nav-tabs panel-nav-tabs" role="tablist">
           {tabs.map((tab) => {
             const isActive = tab.id === activeTabId;
             return (
