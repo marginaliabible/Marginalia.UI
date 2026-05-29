@@ -907,6 +907,7 @@ function App() {
 
   const mainPanePercent = Math.round(mainPaneRatio * 1000) / 10;
   const sidePanePercent = 100 - mainPanePercent;
+  const hasSidePanel = !isPanelDetached && Boolean(activeWorkspacePanel);
 
   const sidePanelContent = (
     <>
@@ -919,42 +920,39 @@ function App() {
         showDetachButton={isDesktopLayout}
         onToggleDetach={handleToggleDetachPanel}
       />
-      {activeTab?.type === 'search' && activeTab.searchResults ? (
-        <SearchResults
-          tab={activeTab}
-          goToReference={goToReference}
-          onBeforeNavigate={() => {
-            if (isPanelDetached) {
-              window.focus();
-            }
-          }}
-        />
-      ) : activeTab?.type === 'translations' ? (
-        <TranslationsPanel
-          tab={activeTab}
-          translationRecords={translationRecords}
-          translationMetadataById={translationMetadataById}
-          addableTranslations={addableTranslations}
-          onAddTranslation={async (id) => {
-            dispatch(addTranslationRecord(id));
-          }}
-          onRemoveTranslation={(id) => dispatch(removeTranslationRecord(id))}
-          onToggleStar={(id) => dispatch(toggleStarTranslation(id))}
-          onReorder={(fromIndex, toIndex) => dispatch(reorderTranslations({ fromIndex, toIndex }))}
-        />
-      ) : (
-        <div className="card border-0 shadow-sm h-100">
-          <div className="card-body d-flex flex-column justify-content-center align-items-center text-center">
-            <p className="text-body-secondary mb-0">Search to find verses</p>
-          </div>
-        </div>
-      )}
+      <div className="panel-content-scroll">
+        {activeTab?.type === 'search' && activeTab.searchResults ? (
+          <SearchResults
+            tab={activeTab}
+            goToReference={goToReference}
+            onBeforeNavigate={() => {
+              if (isPanelDetached) {
+                window.focus();
+              }
+            }}
+          />
+        ) : activeTab?.type === 'translations' ? (
+          <TranslationsPanel
+            tab={activeTab}
+            translationRecords={translationRecords}
+            translationMetadataById={translationMetadataById}
+            addableTranslations={addableTranslations}
+            onAddTranslation={async (id) => {
+              dispatch(addTranslationRecord(id));
+            }}
+            onRemoveTranslation={(id) => dispatch(removeTranslationRecord(id))}
+            onToggleStar={(id) => dispatch(toggleStarTranslation(id))}
+            onReorder={(fromIndex, toIndex) => dispatch(reorderTranslations({ fromIndex, toIndex }))}
+          />
+        ) : null}
+        <div className="pb-4" aria-hidden="true"></div>
+      </div>
     </>
   );
 
   return (
     <>
-      <div className={`container py-4 app-shell ${useWideLayout ? 'app-shell-wide' : ''}`}>
+      <div className={`container app-shell ${useWideLayout ? 'app-shell-wide' : ''}`}>
       <header className="card border-0 shadow-sm mb-4">
         <div className="card-body d-flex flex-column flex-lg-row gap-3 align-items-lg-start justify-content-lg-between">
           <div>
@@ -1058,7 +1056,7 @@ function App() {
 
       <div
         ref={workspaceRef}
-        className={`workspace-layout ${!isPanelDetached ? 'has-side-panel' : ''} ${
+        className={`workspace-layout ${hasSidePanel ? 'has-side-panel' : ''} ${
           isDesktopLayout ? 'is-desktop' : 'is-mobile'
         }`}
       >
@@ -1072,7 +1070,7 @@ function App() {
             }
           >
             <div className="card border-0 shadow-sm">
-              <div className="card-body workspace-scroll">
+              <div className="card-body workspace-scroll pb-4">
                 {selectedBook ? (
                   <VerseDisplay
                     chaptersByTranslation={chaptersByTranslation}
@@ -1117,9 +1115,9 @@ function App() {
           />
         )}
 
-        {!isPanelDetached && (
+        {hasSidePanel && (
           <aside
-            className={`workspace-pane workspace-side ${!activeWorkspacePanel ? 'is-empty' : ''}`}
+            className="workspace-pane workspace-side"
             style={
               isDesktopLayout
                 ? { flexBasis: `${sidePanePercent}%` }
@@ -1160,7 +1158,7 @@ function App() {
 
       </div>
 
-      {isPanelDetached && popupContainer && createPortal(
+      {isPanelDetached && activeWorkspacePanel && popupContainer && createPortal(
         <div className="workspace-scroll panel-scroll-with-tabs popout-panel-shell">
           {sidePanelContent}
         </div>,

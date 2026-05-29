@@ -230,6 +230,9 @@
 
 .quick-jump-shell {
   position: relative;
+  width: 100%;
+  max-width: 56rem;
+  margin-inline: auto;
 }
 
 .search-kbd-hint {
@@ -369,13 +372,13 @@
 .verse-grid-column-headers-row,
 .verse-grid-row {
   display: grid;
-  grid-template-columns: 3rem repeat(var(--translation-count, 1), minmax(13rem, 1fr));
+  grid-template-columns: 2.25rem repeat(var(--translation-count, 1), minmax(13rem, 1fr));
   gap: 0.85rem;
   align-items: start;
 }
 
 .verse-grid-column-headers-row {
-  padding: 0.4rem 0 0.3rem 0;
+  padding: 0.4rem 0.85rem 0.3rem 0;
   align-items: center;
 }
 
@@ -386,7 +389,7 @@
 }
 
 .verse-grid-row {
-  padding: 0.55rem 0;
+  padding: 0.55rem 0.85rem 0.55rem 0;
   border-bottom: 1px solid color-mix(in srgb, var(--bs-border-color) 80%, transparent);
 }
 
@@ -738,7 +741,7 @@
   flex: 0 0 auto;
 }
 
-.workspace-layout.is-desktop.has-side-panel .panel-scroll-with-tabs > :not(.panel-tabs) {
+.workspace-layout.is-desktop.has-side-panel .panel-content-scroll {
   flex: 1 1 auto;
   min-height: 0;
   overflow: auto;
@@ -802,7 +805,7 @@
     overflow: visible;
   }
 
-  .workspace-layout.is-desktop.has-side-panel .panel-scroll-with-tabs > :not(.panel-tabs) {
+  .workspace-layout.is-desktop.has-side-panel .panel-content-scroll {
     overflow: visible;
   }
 
