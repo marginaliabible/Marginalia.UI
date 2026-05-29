@@ -20,12 +20,14 @@ const INDEX_SEARCH_LIMIT = 5000;
 const DEFAULT_CACHED_INDEXES = 2;
 
 /**
- * Controls how aggressively MiniSearch tolerates near-stem distance between
- * indexed and query tokens. A value of 0.15 allows a difference of ~1
- * character per 7-character term, which bridges stems like "liv" vs "live"
- * that arise after suffix stripping.
+ * Fractional fuzzy tolerance for longer single-word queries.
+ *
+ * MiniSearch rounds fractional edit-distance to the nearest integer, so we
+ * pair this with a short-term cutoff to avoid broad 1-character substitutions
+ * on words like "ponder" -> "yonder".
  */
-const FUZZY_TOLERANCE = 0.15;
+const FUZZY_TOLERANCE = 0.05;
+const MIN_FUZZY_TERM_LENGTH = 7;
 
 class SearchIndexService {
   private readonly indexes = new Map<string, MiniSearch<VerseDocument>>();
@@ -96,7 +98,7 @@ class SearchIndexService {
     this.touchIndex(translationId, index);
 
     const searchOptions: SearchOptions = {
-      fuzzy: FUZZY_TOLERANCE,
+      fuzzy: (term) => (term.length >= MIN_FUZZY_TERM_LENGTH ? FUZZY_TOLERANCE : 0),
       combineWith: 'AND',
     };
 

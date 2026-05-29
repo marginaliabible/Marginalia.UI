@@ -1,12 +1,62 @@
 import React, { useEffect, useRef } from 'react';
 import type { QuickJumpTarget } from '../models/bible';
 import type { PanelTab } from '../models/tab';
+import { normalizeEnglishTerm } from '../services/searchNormalizer';
 
-const highlightText = (text: string, queryRegex: RegExp | null, lowerQuery: string): React.ReactNode => {
-  if (!queryRegex || !lowerQuery) return text;
+const escapeRegex = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+const EN_HIGHLIGHT_STOPWORDS = new Set([
+  'a', 'an', 'the',
+  'and', 'or', 'but', 'nor',
+  'in', 'on', 'at', 'to', 'of', 'for', 'by', 'as', 'up',
+  'is', 'it', 'be', 'so', 'if', 'no',
+]);
+
+const splitQueryTerms = (query: string): string[] => (
+  query
+    .toLowerCase()
+    .split(/[^\p{L}\p{N}']+/u)
+    .filter(Boolean)
+);
+
+const shouldHighlightTerm = (term: string): boolean => {
+  if (!term) {
+    return false;
+  }
+
+  if (/^\d+$/u.test(term)) {
+    return true;
+  }
+
+  return !EN_HIGHLIGHT_STOPWORDS.has(term);
+};
+
+const collectHighlightCandidates = (query: string): string[] => {
+  const phrase = query.toLowerCase();
+  const terms = splitQueryTerms(query).filter(shouldHighlightTerm);
+  const candidates = new Set<string>(terms.length > 0 ? [phrase, ...terms] : [phrase]);
+
+  // Add normalized English roots so stemmed matches are visually highlighted
+  // (e.g. "converse" query highlights "convers" in "conversation").
+  for (const term of terms) {
+    const normalized = normalizeEnglishTerm(term);
+    if (normalized && normalized.length >= 4) {
+      candidates.add(normalized);
+    }
+  }
+
+  return Array.from(candidates).sort((a, b) => b.length - a.length);
+};
+
+const highlightText = (
+  text: string,
+  queryRegex: RegExp | null,
+  highlightTerms: Set<string>
+): React.ReactNode => {
+  if (!queryRegex || highlightTerms.size === 0) return text;
   const parts = text.split(queryRegex);
   return parts.map((part, i) =>
-    part.toLowerCase() === lowerQuery
+    highlightTerms.has(part.toLowerCase())
       ? <mark key={i} className="search-highlight">{part}</mark>
       : part
   );
@@ -35,14 +85,18 @@ const SearchResults: React.FC<SearchResultsProps> = ({ tab, goToReference, onBef
 
   const displayedMatches = searchResults.matches.slice(0, displayedCount);
   const hasMore = displayedCount < searchResults.matches.length;
-  const lowerQuery = searchResults.query.toLowerCase();
-  const queryRegex = React.useMemo(() => {
-    if (!searchResults.query) {
-      return null;
+  const { queryRegex, highlightTerms } = React.useMemo(() => {
+    const trimmedQuery = searchResults.query.trim();
+    if (!trimmedQuery) {
+      return { queryRegex: null, highlightTerms: new Set<string>() };
     }
 
-    const escaped = searchResults.query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    return new RegExp(`(${escaped})`, 'gi');
+    const uniqueTerms = collectHighlightCandidates(trimmedQuery);
+
+    return {
+      queryRegex: new RegExp(`(${uniqueTerms.map(escapeRegex).join('|')})`, 'gi'),
+      highlightTerms: new Set(uniqueTerms),
+    };
   }, [searchResults.query]);
 
   // Auto-load more results when user scrolls near the bottom
@@ -113,7 +167,7 @@ const SearchResults: React.FC<SearchResultsProps> = ({ tab, goToReference, onBef
                         )}
                       </span>
                       <span className="match-text d-block text-body-secondary">
-                        {highlightText(match.text, queryRegex, lowerQuery)}
+                        {highlightText(match.text, queryRegex, highlightTerms)}
                       </span>
                     </div>
                   </button>

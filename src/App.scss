@@ -721,6 +721,29 @@
   min-height: 0;
 }
 
+.workspace-layout.is-desktop.has-side-panel .workspace-pane.workspace-side {
+  position: sticky;
+  top: 1rem;
+  align-self: flex-start;
+  height: calc(100vh - 1rem);
+  max-height: calc(100vh - 1rem);
+}
+
+.workspace-layout.is-desktop.has-side-panel .workspace-pane.workspace-side > .workspace-scroll.panel-scroll-with-tabs {
+  height: 100%;
+  overflow: hidden;
+}
+
+.workspace-layout.is-desktop.has-side-panel .panel-scroll-with-tabs > .panel-tabs {
+  flex: 0 0 auto;
+}
+
+.workspace-layout.is-desktop.has-side-panel .panel-scroll-with-tabs > :not(.panel-tabs) {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+}
+
 .workspace-scroll {
   min-height: 0;
   overflow: auto;
@@ -763,6 +786,23 @@
 @media (max-width: 991.98px) {
   .workspace-scroll {
     max-height: none;
+    overflow: visible;
+  }
+
+  .workspace-layout.is-desktop.has-side-panel .workspace-pane.workspace-side {
+    position: static;
+    top: auto;
+    align-self: stretch;
+    height: auto;
+    max-height: none;
+  }
+
+  .workspace-layout.is-desktop.has-side-panel .workspace-pane.workspace-side > .workspace-scroll.panel-scroll-with-tabs {
+    height: auto;
+    overflow: visible;
+  }
+
+  .workspace-layout.is-desktop.has-side-panel .panel-scroll-with-tabs > :not(.panel-tabs) {
     overflow: visible;
   }
 
