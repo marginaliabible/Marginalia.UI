@@ -50,49 +50,52 @@ const buildSearchResults = (
     state.availableTranslations.map((translation) => [translation.id, translation.label] as const)
   );
 
-  const allMatches = translationIds.flatMap((translationId) => {
+  const seenVerses = new Set<string>();
+  const matches: SearchResultSet['matches'] = [];
+  let total = 0;
+
+  for (const translationId of translationIds) {
     const translation = state.loadedTranslations[translationId];
     if (!translation) {
-      return [];
+      continue;
     }
 
     const meta = state.availableTranslations.find((t) => t.id === translationId);
     const indexResult = searchIndexService.search(query, translationId, translation, meta?.language);
     const result = indexResult ?? bibleService.runSearch(translation, query);
     if (!result) {
-      return [];
+      continue;
     }
 
     const label = metadataById.get(translationId) ?? translation.translation ?? translationId;
-    return result.matches.map((match) => ({
-      id: `${translationId}-${match.book}-${match.chapter}-${match.verse}`,
-      book: match.book,
-      chapter: match.chapter,
-      verse: match.verse,
-      text: match.text,
-      translationId,
-      translationLabel: label
-    }));
-  });
+    for (const match of result.matches) {
+      const verseKey = `${match.book}:${match.chapter}:${match.verse}`;
+      if (seenVerses.has(verseKey)) {
+        continue;
+      }
 
-  // Dedupe by verse location (book, chapter, verse), keeping first occurrence.
-  const seenVerses = new Set<string>();
-  const matches = allMatches.filter((match) => {
-    const verseKey = `${match.book}:${match.chapter}:${match.verse}`;
-    if (seenVerses.has(verseKey)) {
-      return false;
+      seenVerses.add(verseKey);
+      total += 1;
+
+      if (matches.length < MAX_SEARCH_MATCHES) {
+        matches.push({
+          id: `${translationId}-${match.book}-${match.chapter}-${match.verse}`,
+          book: match.book,
+          chapter: match.chapter,
+          verse: match.verse,
+          text: match.text,
+          translationId,
+          translationLabel: label
+        });
+      }
     }
-    seenVerses.add(verseKey);
-    return true;
-  });
+  }
 
-  const total = matches.length;
-  const limitedMatches = matches.slice(0, MAX_SEARCH_MATCHES);
   return {
     query,
-    matches: limitedMatches,
+    matches,
     total,
-    limited: limitedMatches.length < total
+    limited: matches.length < total
   };
 };
 

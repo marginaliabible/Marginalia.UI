@@ -47,7 +47,7 @@ const STATE_CACHE_KEY = 'gitbible:state';
 const REMOTE_TTL_MS = 1000 * 60 * 60 * 24 * 30; // 30 days
 const SEARCH_LIMIT = 5000;
 const META_TTL_MS = 1000 * 60 * 60 * 24 * 7; // 7 days
-const MAX_FULL_TRANSLATIONS_IN_MEMORY = 2;
+const DEFAULT_FULL_TRANSLATIONS_IN_MEMORY = 2;
 const MAX_CHAPTERS_IN_MEMORY = 8;
 const MAX_VERSES_IN_MEMORY = 128;
 const DEFAULT_LOCAL_TRANSLATION: BibleTranslationMeta = {
@@ -63,6 +63,7 @@ class BibleService {
   private readonly translationCache = new Map<string, BibleData>();
   private readonly chapterCache = new Map<string, BibleChapter>();
   private readonly verseCache = new Map<string, string>();
+  private fullTranslationCacheLimit = DEFAULT_FULL_TRANSLATIONS_IN_MEMORY;
   private translationMetaById = new Map<string, BibleTranslationMeta>([
     [LOCAL_TRANSLATION_ID, DEFAULT_LOCAL_TRANSLATION]
   ]);
@@ -109,6 +110,11 @@ class BibleService {
 
     this.cacheTranslationMeta(result);
     return result;
+  }
+
+  setFullTranslationCacheLimit(limit: number): void {
+    this.fullTranslationCacheLimit = Math.max(1, Math.floor(limit) || 1);
+    this.pruneFullTranslationCache();
   }
 
   private cacheTranslationMeta(entries: BibleTranslationMeta[]): void {
@@ -618,7 +624,11 @@ class BibleService {
     }
     this.translationCache.set(id, bible);
 
-    while (this.translationCache.size > MAX_FULL_TRANSLATIONS_IN_MEMORY) {
+    this.pruneFullTranslationCache();
+  }
+
+  private pruneFullTranslationCache(): void {
+    while (this.translationCache.size > this.fullTranslationCacheLimit) {
       const oldestId = this.translationCache.keys().next().value as string | undefined;
       if (!oldestId) {
         break;

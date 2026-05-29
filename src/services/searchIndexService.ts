@@ -17,7 +17,7 @@ export interface IndexedSearchResult {
 }
 
 const INDEX_SEARCH_LIMIT = 5000;
-const MAX_CACHED_INDEXES = 2;
+const DEFAULT_CACHED_INDEXES = 2;
 
 /**
  * Controls how aggressively MiniSearch tolerates near-stem distance between
@@ -29,6 +29,7 @@ const FUZZY_TOLERANCE = 0.15;
 
 class SearchIndexService {
   private readonly indexes = new Map<string, MiniSearch<VerseDocument>>();
+  private indexCacheLimit = DEFAULT_CACHED_INDEXES;
 
   /**
    * Builds and caches a MiniSearch index for one translation.
@@ -130,6 +131,11 @@ class SearchIndexService {
     this.indexes.delete(translationId);
   }
 
+  setIndexCacheLimit(limit: number): void {
+    this.indexCacheLimit = Math.max(1, Math.floor(limit) || 1);
+    this.pruneIndexes();
+  }
+
   private touchIndex(translationId: string, index: MiniSearch<VerseDocument>): void {
     if (this.indexes.has(translationId)) {
       this.indexes.delete(translationId);
@@ -137,7 +143,11 @@ class SearchIndexService {
 
     this.indexes.set(translationId, index);
 
-    while (this.indexes.size > MAX_CACHED_INDEXES) {
+    this.pruneIndexes();
+  }
+
+  private pruneIndexes(): void {
+    while (this.indexes.size > this.indexCacheLimit) {
       const oldestId = this.indexes.keys().next().value as string | undefined;
       if (!oldestId) {
         break;

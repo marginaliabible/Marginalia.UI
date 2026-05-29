@@ -2,11 +2,11 @@ import React, { useEffect, useRef } from 'react';
 import type { QuickJumpTarget } from '../models/bible';
 import type { PanelTab } from '../models/tab';
 
-const highlightText = (text: string, query: string): React.ReactNode => {
-  if (!query) return text;
-  const parts = text.split(new RegExp(`(${query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi'));
+const highlightText = (text: string, queryRegex: RegExp | null, lowerQuery: string): React.ReactNode => {
+  if (!queryRegex || !lowerQuery) return text;
+  const parts = text.split(queryRegex);
   return parts.map((part, i) =>
-    part.toLowerCase() === query.toLowerCase()
+    part.toLowerCase() === lowerQuery
       ? <mark key={i} className="search-highlight">{part}</mark>
       : part
   );
@@ -27,7 +27,7 @@ const SearchResults: React.FC<SearchResultsProps> = ({ tab, goToReference, onBef
 
   useEffect(() => {
     setDisplayedCount(PAGE_SIZE);
-  }, [tab.id]);
+  }, [tab.updatedAt]);
 
   if (!searchResults) {
     return null;
@@ -35,6 +35,15 @@ const SearchResults: React.FC<SearchResultsProps> = ({ tab, goToReference, onBef
 
   const displayedMatches = searchResults.matches.slice(0, displayedCount);
   const hasMore = displayedCount < searchResults.matches.length;
+  const lowerQuery = searchResults.query.toLowerCase();
+  const queryRegex = React.useMemo(() => {
+    if (!searchResults.query) {
+      return null;
+    }
+
+    const escaped = searchResults.query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return new RegExp(`(${escaped})`, 'gi');
+  }, [searchResults.query]);
 
   // Auto-load more results when user scrolls near the bottom
   useEffect(() => {
@@ -104,7 +113,7 @@ const SearchResults: React.FC<SearchResultsProps> = ({ tab, goToReference, onBef
                         )}
                       </span>
                       <span className="match-text d-block text-body-secondary">
-                        {highlightText(match.text, searchResults.query)}
+                        {highlightText(match.text, queryRegex, lowerQuery)}
                       </span>
                     </div>
                   </button>

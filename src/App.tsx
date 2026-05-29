@@ -39,6 +39,7 @@ import {
 } from './store/slices/uiSlice';
 import { parseQuickJump } from './utils/reference-parser';
 import { bibleService } from './services/bibleService';
+import { searchIndexService } from './services/searchIndexService';
 import type { BibleChapter, QuickJumpTarget } from './models/bible';
 import {
   type WorkspacePanelKey,
@@ -326,6 +327,16 @@ function App() {
   const starredTranslationIds = useMemo(() => {
     return translationRecords.filter((r) => r.starred).map((r) => r.id);
   }, [translationRecords]);
+
+  useEffect(() => {
+    const fullTranslationWorkingSetSize = new Set([
+      ...starredTranslationIds,
+      selectedTranslationId,
+    ]).size;
+
+    bibleService.setFullTranslationCacheLimit(fullTranslationWorkingSetSize);
+    searchIndexService.setIndexCacheLimit(Math.max(1, starredTranslationIds.length));
+  }, [selectedTranslationId, starredTranslationIds]);
 
   useEffect(() => {
     let cancelled = false;
