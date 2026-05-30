@@ -11,7 +11,6 @@ import {
   loadTranslation,
   loadTranslations,
   refreshTranslations,
-  runSearch,
   runSearchInNewTab,
   runSearchInTab,
   setActiveTab,
@@ -424,7 +423,6 @@ function App() {
   }, [translationRecords, dispatch, selectedTranslationIds]);
 
   const activeWorkspacePanel: WorkspacePanelKey | null = activeTab ? 'search' : null;
-  const hasMultiTranslations = starredTranslationIds.length > 1;
   const horizontalElementLength = starredTranslationIds.length + (Boolean(activeTab) ? 1 : 0);
   const useWideLayout = horizontalElementLength > 3;
   const normalizedSearchTerm = searchTerm.trim();
@@ -759,32 +757,6 @@ function App() {
     await scrollToVerse(target);
   };
 
-  const handleCloseTranslation = async (translationId: string) => {
-    if (selectedTranslationIds.length <= 1) {
-      return;
-    }
-
-    const nextIds = selectedTranslationIds.filter((id) => id !== translationId);
-    const nextActiveId =
-      selectedTranslationId === translationId
-        ? nextIds[0]
-        : selectedTranslationId;
-
-    dispatch(setSelectedTranslationIds(nextIds));
-    dispatch(setSelectedTranslationId(nextActiveId));
-    await dispatch(loadTranslation(nextActiveId));
-    dispatch(setCurrentBibleFromId(nextActiveId));
-
-    const query = searchTerm.trim();
-    if (query.length > 0) {
-      if (activeTabId) {
-        dispatch(runSearchInTab({ tabId: activeTabId, query, translationIds: nextIds }));
-      } else {
-        dispatch(runSearch({ query, translationIds: nextIds }));
-      }
-    }
-  };
-
   const handleBookSelectionChange = (bookName: string) => {
     const nextBook = currentBible?.books.find((book) => book.name === bookName);
     if (!nextBook) {
@@ -1076,13 +1048,12 @@ function App() {
                     chaptersByTranslation={chaptersByTranslation}
                     translationOrder={starredTranslationIds}
                     translationLabels={translationLabels}
+                    selectedTranslationId={selectedTranslationId}
                     books={currentBible.books}
                     availableChapters={selectedBookEntry?.chapters ?? []}
                     selectedBook={selectedBook}
                     selectedChapter={selectedChapter}
                     focusVerse={focusVerse}
-                    showTranslationTags={hasMultiTranslations}
-                    onCloseTranslation={handleCloseTranslation}
                     onBookChange={handleBookSelectionChange}
                     onChapterChange={handleChapterSelectionChange}
                     onVerseClick={(verse) => {

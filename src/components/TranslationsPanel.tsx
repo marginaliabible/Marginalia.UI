@@ -118,13 +118,15 @@ const TranslationsPanel: React.FC<TranslationsPanelProps> = ({
                   <p className="text-body-secondary text-center mb-0">Select translations above</p>
                 </div>
               ) : (
-                translationRecords.map((record, index) => {
+                (() => {
+                  const starredCount = translationRecords.filter((r) => r.starred).length;
+
+                  return translationRecords.map((record, index) => {
                   const meta = translationMetadataById.get(record.id);
                   const label = meta?.label ?? record.id;
                   const chipText = `${record.id}: ${label}`;
                   const verseText = verseTextByTranslation.get(record.id) ?? '';
-                  const canClose = !record.starred;
-                  const isLastStarred = record.starred && translationRecords.filter((r) => r.starred).length === 1;
+                  const isLastStarred = record.starred && starredCount === 1;
 
                   return (
                     <div key={record.id} className="translations-verse-grid-item">
@@ -155,13 +157,19 @@ const TranslationsPanel: React.FC<TranslationsPanelProps> = ({
                                 }
                               }}
                               disabled={isLastStarred}
-                              aria-label={record.starred ? 'Unstar translation' : 'Star translation'}
+                              aria-label={
+                                isLastStarred
+                                  ? 'Cannot remove the last side-by-side translation'
+                                  : record.starred
+                                    ? 'Remove from side-by-side translations'
+                                    : 'Include in side-by-side translations'
+                              }
                               title={
                                 isLastStarred
                                   ? 'Cannot unstar the last starred translation'
                                   : record.starred
-                                    ? 'Remove from main page'
-                                    : 'Show on main page'
+                                    ? 'Remove from side-by-side translations'
+                                    : 'Include in side-by-side translations'
                               }
                             >
                               <i className={`fa-${record.starred ? 'solid' : 'regular'} fa-star`} aria-hidden="true"></i>
@@ -172,17 +180,21 @@ const TranslationsPanel: React.FC<TranslationsPanelProps> = ({
                           </div>
 
                           <div className="d-flex align-items-center gap-1">
-                            {canClose && (
-                              <button
-                                type="button"
-                                className="btn btn-sm btn-link p-0 text-danger"
-                                onClick={() => onRemoveTranslation(record.id)}
-                                aria-label="Close translation"
-                                title="Remove translation"
-                              >
-                                ×
-                              </button>
-                            )}
+                            <button
+                              type="button"
+                              className="btn btn-sm p-0 border-0 bg-transparent text-body-secondary"
+                              onClick={() => onRemoveTranslation(record.id)}
+                              aria-label={isLastStarred ? 'Cannot remove the last starred translation' : 'Remove translation'}
+                              title={isLastStarred ? 'Cannot remove the last starred translation' : 'Remove translation'}
+                              disabled={isLastStarred}
+                              style={{
+                                fontSize: '1.15rem',
+                                lineHeight: 1,
+                                textDecoration: 'none'
+                              }}
+                            >
+                              ×
+                            </button>
                           </div>
                         </div>
 
@@ -192,7 +204,8 @@ const TranslationsPanel: React.FC<TranslationsPanelProps> = ({
                       </div>
                     </div>
                   );
-                })
+                });
+                })()
               )}
             </div>
           </div>

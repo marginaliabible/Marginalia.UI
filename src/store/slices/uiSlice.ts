@@ -100,7 +100,13 @@ const uiSlice = createSlice({
     removeTranslationRecord: (state, action: PayloadAction<string>) => {
       const translationId = action.payload.trim();
       const recIndex = state.translationRecords.findIndex((r) => r.id === translationId);
-      if (recIndex < 0 || state.translationRecords[recIndex].starred) {
+      if (recIndex < 0) {
+        return;
+      }
+
+      const targetRecord = state.translationRecords[recIndex];
+      const starredCount = state.translationRecords.filter((r) => r.starred).length;
+      if (targetRecord.starred && starredCount === 1) {
         return;
       }
       state.translationRecords.splice(recIndex, 1);
