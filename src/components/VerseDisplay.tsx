@@ -108,7 +108,7 @@ const VerseDisplay: React.FC<VerseDisplayProps> = ({
   const visibleTranslationCount = useMemo(() => {
     const styles = shellRef.current ? window.getComputedStyle(shellRef.current) : null;
     const verseWidth = resolveCssLength(styles?.getPropertyValue('--verse-grid-verse-width') ?? '2.25rem');
-    const translationWidth = resolveCssLength(styles?.getPropertyValue('--verse-grid-translation-min-width') ?? '13rem');
+    const translationWidth = resolveCssLength(styles?.getPropertyValue('--verse-grid-translation-min-width') ?? '15.6rem');
     const columnGap = resolveCssLength(styles?.getPropertyValue('--verse-grid-column-gap') ?? '0.85rem');
 
     if (translationOrder.length === 0) {

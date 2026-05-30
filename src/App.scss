@@ -277,7 +277,7 @@
   width: 100%;
   min-width: 0;
   --verse-grid-verse-width: 2.25rem;
-  --verse-grid-translation-min-width: 13rem;
+  --verse-grid-translation-min-width: 15.6rem;
   --verse-grid-column-gap: 0.85rem;
   --verse-grid-inline-padding-end: 0.85rem;
 }
@@ -833,19 +833,13 @@
     display: none;
   }
 
-  .verse-grid-header,
-  .verse-grid-column-headers-row,
-  .verse-grid-row {
-    grid-template-columns: 2.2rem repeat(var(--translation-count, 1), minmax(11rem, 1fr));
-    gap: 0.6rem;
-  }
-
   .verse-grid-shell {
-    --verse-grid-translation-min-width: 11rem;
+    --verse-grid-translation-min-width: 13.2rem;
     --verse-grid-column-gap: 0.6rem;
     --verse-grid-inline-padding-end: 0.6rem;
   }
 
+  .verse-grid-header,
   .verse-grid-column-headers-row,
   .verse-grid-row {
     grid-template-columns: var(--verse-grid-verse-width) repeat(var(--translation-count, 1), minmax(var(--verse-grid-translation-min-width), 1fr));
