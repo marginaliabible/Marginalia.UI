@@ -13,6 +13,8 @@ interface VerseDisplayProps {
   focusVerse: number | null;
   onBookChange: (bookName: string) => void;
   onChapterChange: (chapter: number) => void;
+  showPanelToggle?: boolean;
+  onOpenPanel?: () => void;
   onVerseClick?: (verse: number) => void;
   verseDomId: (book: string, chapter: number, verse: number) => string;
 }
@@ -29,6 +31,8 @@ const VerseDisplay: React.FC<VerseDisplayProps> = ({
   focusVerse,
   onBookChange,
   onChapterChange,
+  showPanelToggle = false,
+  onOpenPanel,
   onVerseClick,
   verseDomId,
 }) => {
@@ -238,6 +242,19 @@ const VerseDisplay: React.FC<VerseDisplayProps> = ({
               ))}
             </select>
           </div>
+          {showPanelToggle && (
+            <div className="verse-grid-panel-toggle-wrap">
+              <button
+                type="button"
+                className="verse-grid-panel-toggle"
+                aria-label="Open side panel"
+                aria-controls="workspace-side-panel"
+                onClick={() => onOpenPanel?.()}
+              >
+                <i className="bi bi-list" aria-hidden="true"></i>
+              </button>
+            </div>
+          )}
         </div>
         <div className="verse-grid-column-headers-row">
           {hiddenLeftCount > 0 && (

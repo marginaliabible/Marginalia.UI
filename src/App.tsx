@@ -70,6 +70,7 @@ function App() {
   const [popupContainer, setPopupContainer] = useState<HTMLElement | null>(null);
   const [mainPaneRatio, setMainPaneRatio] = useState(2 / 3);
   const [chaptersByTranslation, setChaptersByTranslation] = useState<Record<string, BibleChapter | null>>({});
+  const [isMobilePanelOpen, setIsMobilePanelOpen] = useState(false);
   const [isDesktopLayout, setIsDesktopLayout] = useState(
     typeof window !== 'undefined' && typeof window.matchMedia === 'function'
       ? window.matchMedia(DESKTOP_BREAKPOINT).matches
@@ -425,6 +426,7 @@ function App() {
   const activeWorkspacePanel: WorkspacePanelKey | null = activeTab ? 'search' : null;
   const horizontalElementLength = starredTranslationIds.length + (Boolean(activeTab) ? 1 : 0);
   const useWideLayout = horizontalElementLength > 3;
+  const isMobileLayout = !isDesktopLayout;
   const normalizedSearchTerm = searchTerm.trim();
   const canShowSearchActionDropdown =
     activeTab?.type === 'search' &&
@@ -440,6 +442,10 @@ function App() {
     }
 
     popup.focus();
+  };
+
+  const closeMobilePanel = () => {
+    setIsMobilePanelOpen(false);
   };
 
   const runSearchByAction = async (query: string, action: 'replace' | 'new') => {
@@ -461,6 +467,10 @@ function App() {
     setIsSearchActionDropdownOpen(false);
     setIsSearchActionDropdownSuppressed(true);
     setSearchActionIndex(0);
+
+    if (!isDesktopLayout && !isPanelDetached) {
+      setIsMobilePanelOpen(true);
+    }
 
     if (isPanelDetached) {
       focusDetachedPanel();
@@ -725,6 +735,38 @@ function App() {
     isSearchActionDropdownOpen
   ]);
 
+  useEffect(() => {
+    if (isDesktopLayout || isPanelDetached || !activeWorkspacePanel) {
+      setIsMobilePanelOpen(false);
+    }
+  }, [isDesktopLayout, isPanelDetached, activeWorkspacePanel]);
+
+  useEffect(() => {
+    if (!isMobileLayout || !isMobilePanelOpen) {
+      return;
+    }
+
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setIsMobilePanelOpen(false);
+      }
+    };
+
+    window.addEventListener('keydown', handleEscape);
+    return () => window.removeEventListener('keydown', handleEscape);
+  }, [isMobileLayout, isMobilePanelOpen]);
+
+  useEffect(() => {
+    if (typeof document === 'undefined') {
+      return;
+    }
+
+    document.body.classList.toggle('mobile-panel-open', isMobileLayout && isMobilePanelOpen);
+    return () => {
+      document.body.classList.remove('mobile-panel-open');
+    };
+  }, [isMobileLayout, isMobilePanelOpen]);
+
   const goToReference = async (target: QuickJumpTarget, translationId?: string) => {
     if (isPanelDetached) {
       window.focus();
@@ -883,41 +925,54 @@ function App() {
 
   const sidePanelContent = (
     <>
-      <PanelTabs
-        tabs={tabs}
-        activeTabId={activeTabId}
-        onSelectTab={handleSelectTab}
-        onCloseTab={handleCloseTab}
-        isDetached={isPanelDetached}
-        showDetachButton={isDesktopLayout}
-        onToggleDetach={handleToggleDetachPanel}
-      />
-      <div className="panel-content-scroll">
-        {activeTab?.type === 'search' && activeTab.searchResults ? (
-          <SearchResults
-            tab={activeTab}
-            goToReference={goToReference}
-            onBeforeNavigate={() => {
-              if (isPanelDetached) {
-                window.focus();
-              }
-            }}
-          />
-        ) : activeTab?.type === 'translations' ? (
-          <TranslationsPanel
-            tab={activeTab}
-            translationRecords={translationRecords}
-            translationMetadataById={translationMetadataById}
-            addableTranslations={addableTranslations}
-            onAddTranslation={async (id) => {
-              dispatch(addTranslationRecord(id));
-            }}
-            onRemoveTranslation={(id) => dispatch(removeTranslationRecord(id))}
-            onToggleStar={(id) => dispatch(toggleStarTranslation(id))}
-            onReorder={(fromIndex, toIndex) => dispatch(reorderTranslations({ fromIndex, toIndex }))}
-          />
-        ) : null}
-        <div className="pb-4" aria-hidden="true"></div>
+      {!isMobileLayout && (
+        <PanelTabs
+          tabs={tabs}
+          activeTabId={activeTabId}
+          onSelectTab={handleSelectTab}
+          onCloseTab={handleCloseTab}
+          isDetached={isPanelDetached}
+          showDetachButton={isDesktopLayout}
+          onToggleDetach={handleToggleDetachPanel}
+        />
+      )}
+      <div className="panel-tabs-content">
+        {tabs.map((tab) => (
+          <div
+            key={tab.id}
+            className={`panel-content-scroll${tab.id === activeTabId ? ' is-active' : ''}`}
+          >
+            {tab.type === 'search' && tab.searchResults ? (
+              <SearchResults
+                tab={tab}
+                goToReference={goToReference}
+                onBeforeNavigate={() => {
+                  if (isMobileLayout && isMobilePanelOpen) {
+                    setIsMobilePanelOpen(false);
+                  }
+
+                  if (isPanelDetached) {
+                    window.focus();
+                  }
+                }}
+              />
+            ) : tab.type === 'translations' ? (
+              <TranslationsPanel
+                tab={tab}
+                translationRecords={translationRecords}
+                translationMetadataById={translationMetadataById}
+                addableTranslations={addableTranslations}
+                onAddTranslation={async (id) => {
+                  dispatch(addTranslationRecord(id));
+                }}
+                onRemoveTranslation={(id) => dispatch(removeTranslationRecord(id))}
+                onToggleStar={(id) => dispatch(toggleStarTranslation(id))}
+                onReorder={(fromIndex, toIndex) => dispatch(reorderTranslations({ fromIndex, toIndex }))}
+              />
+            ) : null}
+            <div className="pb-4" aria-hidden="true"></div>
+          </div>
+        ))}
       </div>
     </>
   );
@@ -1057,6 +1112,10 @@ function App() {
                     onBookChange={handleBookSelectionChange}
                     onChapterChange={handleChapterSelectionChange}
                     onVerseClick={(verse) => {
+                      if (isMobileLayout && !isPanelDetached) {
+                        setIsMobilePanelOpen(true);
+                      }
+
                       dispatch(setFocusVerse(verse));
                       dispatch(openTranslationsTab({
                         book: selectedBook,
@@ -1088,17 +1147,91 @@ function App() {
 
         {hasSidePanel && (
           <aside
-            className="workspace-pane workspace-side"
+            id="workspace-side-panel"
+            className={`workspace-pane workspace-side ${isMobilePanelOpen ? 'is-open' : ''}`}
             style={
               isDesktopLayout
                 ? { flexBasis: `${sidePanePercent}%` }
                 : undefined
             }
           >
+            {isMobileLayout && (
+              <div className={`mobile-panel-tab-strip ${isMobilePanelOpen ? 'is-open' : 'is-collapsed'}`}>
+                <button
+                  type="button"
+                  className="mobile-panel-strip-chevron"
+                  aria-label={isMobilePanelOpen ? 'Close side panel' : 'Open side panel'}
+                  onClick={() => {
+                    if (isMobilePanelOpen) {
+                      closeMobilePanel();
+                      return;
+                    }
+
+                    setIsMobilePanelOpen(true);
+                  }}
+                >
+                  <i
+                    className={`bi ${isMobilePanelOpen ? 'bi-chevron-double-right' : 'bi-chevron-double-left'}`}
+                    aria-hidden="true"
+                  ></i>
+                </button>
+                {isMobilePanelOpen && tabs.map((tab) => (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    className={`mobile-panel-vtab${tab.id === activeTabId ? ' is-active' : ''}`}
+                    aria-label={tab.title}
+                    onClick={() => {
+                      dispatch(setActiveTab(tab.id));
+                    }}
+                  >
+                    <span
+                      className={`mobile-panel-vtab-close${tab.id === activeTabId ? '' : ' is-hidden'}`}
+                      role="button"
+                      tabIndex={tab.id === activeTabId ? 0 : -1}
+                      aria-hidden={tab.id === activeTabId ? undefined : true}
+                      aria-label={tab.id === activeTabId ? `Close ${tab.title}` : undefined}
+                      onClick={(event) => {
+                        if (tab.id !== activeTabId) {
+                          return;
+                        }
+
+                        event.stopPropagation();
+                        dispatch(closeTab(tab.id));
+                      }}
+                      onKeyDown={(event) => {
+                        if (tab.id !== activeTabId) {
+                          return;
+                        }
+
+                        if (event.key === 'Enter' || event.key === ' ') {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          dispatch(closeTab(tab.id));
+                        }
+                      }}
+                    >
+                      ×
+                    </span>
+                    <i className={tab.iconClass} aria-hidden="true"></i>
+                    <span className="mobile-panel-vtab-title">{tab.title}</span>
+                  </button>
+                ))}
+              </div>
+            )}
             <div className="workspace-scroll panel-scroll-with-tabs">
               {sidePanelContent}
             </div>
           </aside>
+        )}
+
+        {isMobileLayout && hasSidePanel && isMobilePanelOpen && (
+          <button
+            type="button"
+            className="mobile-panel-backdrop"
+            aria-label="Close side panel"
+            onClick={closeMobilePanel}
+          />
         )}
       </div>
 
