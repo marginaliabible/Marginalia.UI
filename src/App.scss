@@ -1076,3 +1076,14 @@ body.mobile-panel-open {
     gap: var(--verse-grid-column-gap);
   }
 }
+
+@media (max-width: 512px) {
+  .app-shell {
+    padding-left: 0;
+    padding-right: 0;
+  }
+
+  .workspace-pane.workspace-main > .card > .workspace-scroll {
+    padding: 0 !important;
+  }
+}
