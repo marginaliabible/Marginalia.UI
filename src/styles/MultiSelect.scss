@@ -6,17 +6,11 @@
   .translation-select__input {
     color: inherit;
   }
-
-  .language-select__control,
-  .translation-select__control {
-    position: relative;
-    display: flex;
-    flex-wrap: wrap;
-  }
 }
 
 .language-select__control,
 .translation-select__control {
+  position: relative;
   border: 1px solid var(--bs-border-color);
   background-color: var(--bs-body-bg);
   color: var(--bs-body-color);
@@ -29,10 +23,6 @@
   flex-wrap: wrap;
   align-items: center;
   gap: 0.25rem;
-
-  &:hover {
-    border-color: var(--bs-border-color);
-  }
 
   &.language-select__control--is-focused,
   &.translation-select__control--is-focused {
@@ -199,21 +189,12 @@
     background-color: var(--bs-primary-bg-subtle);
     color: var(--bs-primary-text-emphasis);
     font-weight: 500;
-
-    &:hover {
-      background-color: var(--bs-primary-bg-subtle);
-    }
   }
 
   &.language-select__option--is-focused,
   &.translation-select__option--is-focused {
     background-color: var(--bs-primary);
     color: var(--bs-white);
-
-    &.language-select__option--is-selected,
-    &.translation-select__option--is-selected {
-      background-color: var(--bs-primary);
-    }
   }
 
   &.language-select__option--is-disabled,
