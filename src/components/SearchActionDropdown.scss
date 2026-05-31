@@ -1,0 +1,21 @@
+.search-action-dropdown {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.35rem;
+}
+
+.search-action-item {
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-radius: 0.5rem;
+  padding: 0.4rem 0.55rem;
+  color: var(--bs-body-color);
+}
+
+.search-action-item.is-selected,
+.search-action-item:hover {
+  background: color-mix(in srgb, var(--bs-primary) 18%, transparent);
+}

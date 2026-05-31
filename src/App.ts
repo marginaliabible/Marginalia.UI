@@ -1,5 +1,5 @@
 import type { QuickJumpTarget, ThemePreference, BibleTranslationMeta } from './models/bible';
-import languageOverrides from '../public/data/languageOverrides.json';
+import languageOverrides from './data/languageOverrides.json';
 
 export interface TranslationSelectOption {
   value: string;

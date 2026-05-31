@@ -1,24 +1,20 @@
-import VerseDisplay from './components/VerseDisplay';
-import SearchResults from './components/SearchResults';
-import PanelTabs from './components/PanelTabs';
-import SearchActionDropdown from './components/SearchActionDropdown';
+import AppHeader from './components/AppHeader';
+import SearchBar from './components/SearchBar';
+import WorkspaceMainPane from './components/WorkspaceMainPane';
+import WorkspaceDivider from './components/WorkspaceDivider';
+import WorkspaceSidePanel from './components/WorkspaceSidePanel';
+import SidePanelContent from './components/SidePanelContent';
+import LoadingStatus from './components/LoadingStatus';
 import SettingsModal from './components/SettingsModal';
-import TranslationsPanel from './components/TranslationsPanel';
-import { useEffect, useMemo, useRef, useState, FormEvent, ChangeEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, ChangeEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { useAppDispatch, useAppSelector } from './store/hooks';
 import {
   loadTranslation,
-  loadTranslations,
   refreshTranslations,
-  runSearchInNewTab,
-  runSearchInTab,
   setActiveTab,
   closeTab,
-  clearSearch,
-  setPanelDetached,
   setCurrentBibleFromId,
-  openTranslationsTab
 } from './store/slices/bibleSlice';
 import {
   setSelectedTranslationId,
@@ -26,7 +22,6 @@ import {
   setSelectedBook,
   setSelectedChapter,
   setFocusVerse,
-  setSearchTerm,
   setSelectedLanguages,
   setTheme,
   setReady,
@@ -34,48 +29,34 @@ import {
   addTranslationRecord,
   removeTranslationRecord,
   toggleStarTranslation,
-  reorderTranslations
+  reorderTranslations,
 } from './store/slices/uiSlice';
-import { parseQuickJump } from './utils/reference-parser';
 import { bibleService } from './services/bibleService';
-import { searchIndexService } from './services/searchIndexService';
-import type { BibleChapter, QuickJumpTarget } from './models/bible';
+import type { QuickJumpTarget } from './models/bible';
 import {
   type WorkspacePanelKey,
-  DESKTOP_BREAKPOINT,
   normalizeLanguageSelection,
   normalizeLanguages,
   detectPreferredLanguages,
-  verseDomId,
   getLanguageDisplayName,
   applyTheme,
   detectPreferredTheme,
-  scrollToVerse
+  scrollToVerse,
 } from './App';
+import { useDesktopLayout } from './hooks/useDesktopLayout';
+import { useWorkspaceSplit } from './hooks/useWorkspaceSplit';
+import { usePopupPanel } from './hooks/usePopupPanel';
+import { useMobilePanelEffects } from './hooks/useMobilePanelEffects';
 import './App.scss';
+
+const STATE_CACHE_KEY = 'gitbible:state';
 
 function App() {
   const dispatch = useAppDispatch();
   const modalRef = useRef<any>(null);
   const workspaceRef = useRef<HTMLDivElement | null>(null);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
-  const popupWindowRef = useRef<Window | null>(null);
-  const popupCleanupRef = useRef<(() => void) | null>(null);
-  const [isSearchFocused, setIsSearchFocused] = useState(false);
-  const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad|iPod/.test(navigator.platform);
-  const [isQuickJumpPreviewHidden, setIsQuickJumpPreviewHidden] = useState(true);
-  const [isSearchActionDropdownOpen, setIsSearchActionDropdownOpen] = useState(false);
-  const [isSearchActionDropdownSuppressed, setIsSearchActionDropdownSuppressed] = useState(false);
-  const [searchActionIndex, setSearchActionIndex] = useState(0);
-  const [popupContainer, setPopupContainer] = useState<HTMLElement | null>(null);
-  const [mainPaneRatio, setMainPaneRatio] = useState(2 / 3);
-  const [chaptersByTranslation, setChaptersByTranslation] = useState<Record<string, BibleChapter | null>>({});
   const [isMobilePanelOpen, setIsMobilePanelOpen] = useState(false);
-  const [isDesktopLayout, setIsDesktopLayout] = useState(
-    typeof window !== 'undefined' && typeof window.matchMedia === 'function'
-      ? window.matchMedia(DESKTOP_BREAKPOINT).matches
-      : true
-  );
 
   // Redux state
   const {
@@ -83,10 +64,9 @@ function App() {
     currentBible,
     isLoading,
     error,
-    tabs,
     activeTabId,
     isPanelDetached,
-    detachedPanelName
+    detachedPanelName,
   } = useAppSelector((state) => state.bible);
 
   const {
@@ -95,12 +75,39 @@ function App() {
     translationRecords,
     selectedBook,
     selectedChapter,
-    focusVerse,
-    searchTerm,
     selectedLanguages,
     theme,
-    ready
+    ready,
   } = useAppSelector((state) => state.ui);
+
+  const safeAvailableTranslations = Array.isArray(availableTranslations) ? availableTranslations : [];
+  const safeTranslationRecords = Array.isArray(translationRecords) ? translationRecords : [];
+  const safeSelectedTranslationIds = Array.isArray(selectedTranslationIds) ? selectedTranslationIds : [];
+  const safeSelectedLanguages = Array.isArray(selectedLanguages) ? selectedLanguages : [];
+
+  const isDesktopLayout = useDesktopLayout();
+  const isMobileLayout = !isDesktopLayout;
+
+  const activeWorkspacePanel: WorkspacePanelKey | null = activeTabId ? 'search' : null;
+
+  const { popupContainer, focusDetachedPanel, handleToggleDetachPanel } = usePopupPanel({
+    dispatch,
+    theme,
+    isPanelDetached,
+    detachedPanelName,
+  });
+
+  const { mainPanePercent, sidePanePercent, handleDividerPointerDown, handleDividerKeyDown } =
+    useWorkspaceSplit({ workspaceRef, isDesktopLayout, activeWorkspacePanel });
+
+  useMobilePanelEffects({
+    isMobileLayout,
+    isMobilePanelOpen,
+    isDesktopLayout,
+    isPanelDetached,
+    activeWorkspacePanel,
+    setIsMobilePanelOpen,
+  });
 
   // Ctrl+F to focus search input
   useEffect(() => {
@@ -115,84 +122,62 @@ function App() {
     return () => window.removeEventListener('keydown', handleCtrlF);
   }, []);
 
-  useEffect(() => {
-    const popupName = sessionStorage.getItem('gitbible-popout-name');
-    if (!popupName) {
-      return;
-    }
-
-    openOrReconnectPopup(false);
-  }, []);
-
-  useEffect(() => {
-    if (!isPanelDetached) {
-      return;
-    }
-
-    const popup = popupWindowRef.current;
-    if (!popup || popup.closed) {
-      dispatch(setPanelDetached({ detached: false, panelName: null }));
-      setPopupContainer(null);
-      sessionStorage.removeItem('gitbible-popout-name');
-    }
-  }, [isPanelDetached, dispatch]);
-
   // Initialize app
   useEffect(() => {
     const initApp = async () => {
+      const hasPersistedState =
+        typeof window !== 'undefined' && window.localStorage.getItem(STATE_CACHE_KEY) !== null;
       const savedState = bibleService.readState();
-      
-      // Use translationRecords if available, otherwise derive from legacy fields
-      let translationRecords = savedState.translationRecords || [];
-      if (translationRecords.length === 0) {
-        const restoredTranslationIds = Array.from(
-          new Set(
-            (savedState.lastTranslationIds && savedState.lastTranslationIds.length > 0
-              ? savedState.lastTranslationIds
-              : [savedState.lastTranslationId || 'KJV'])
-              .filter((id): id is string => typeof id === 'string' && id.trim().length > 0)
-              .map((id) => id.trim())
-          )
-        );
-        const resolvedTranslationIds = restoredTranslationIds.length > 0 ? restoredTranslationIds : ['KJV'];
-        translationRecords = resolvedTranslationIds.map((id) => ({
-          id,
-          starred: id === (savedState.lastTranslationId || resolvedTranslationIds[0])
-        }));
-      }
 
-      // Extract IDs from translationRecords and legacy selectedTranslationIds
-      const resolvedTranslationIds = translationRecords.map((r) => r.id);
-      const starredIds = translationRecords.filter((r) => r.starred).map((r) => r.id);
-      const activeTranslationId = starredIds[0] || resolvedTranslationIds[0] || 'KJV';
-      
-      // Apply theme
-      applyTheme(savedState.theme ?? detectPreferredTheme());
-      
-      // Refresh translations
-      await dispatch(refreshTranslations(false));
+      const normalizedLanguages = normalizeLanguages(savedState?.languages);
+      const detectedLanguages = detectPreferredLanguages();
+      const finalLanguages = normalizedLanguages.length > 0 ? normalizedLanguages : detectedLanguages;
 
-      // Restore state
-      const resolvedLanguages = savedState.languages && savedState.languages.length > 0
-        ? normalizeLanguageSelection(savedState.languages)
-        : detectPreferredLanguages();
-      const hasSavedBookPosition = Boolean(savedState.lastBook);
+      const hydratedTranslationRecords = Array.isArray(savedState?.translationRecords)
+        ? savedState.translationRecords
+        : undefined;
+      const hydratedTranslationIds = Array.isArray(savedState?.lastTranslationIds)
+        ? savedState.lastTranslationIds.filter((id): id is string => typeof id === 'string' && id.trim().length > 0)
+        : undefined;
+      const fallbackTranslationId = hydratedTranslationRecords?.[0]?.id || hydratedTranslationIds?.[0] || 'KJV';
+      const nextTranslationId =
+        typeof savedState?.lastTranslationId === 'string' && savedState.lastTranslationId.trim().length > 0
+          ? savedState.lastTranslationId
+          : fallbackTranslationId;
+      const nextTranslationIds = hydratedTranslationIds && hydratedTranslationIds.length > 0
+        ? hydratedTranslationIds
+        : [nextTranslationId];
+      const nextTranslationRecords = hydratedTranslationRecords && hydratedTranslationRecords.length > 0
+        ? hydratedTranslationRecords
+        : [{ id: nextTranslationId, starred: true }];
+      const hasSavedReference =
+        hasPersistedState
+        && typeof savedState?.lastBook === 'string'
+        && savedState.lastBook.trim().length > 0
+        && typeof savedState?.lastChapter === 'number'
+        && savedState.lastChapter > 0;
+      const initialBook = hasSavedReference ? savedState.lastBook : 'John';
+      const initialChapter = hasSavedReference ? savedState.lastChapter : 10;
+      const initialVerse =
+        hasSavedReference
+        && typeof savedState?.lastVerse === 'number'
+        && savedState.lastVerse > 0
+          ? savedState.lastVerse
+          : 10;
+
       dispatch(restoreState({
-        selectedTranslationId: activeTranslationId,
-        selectedTranslationIds: resolvedTranslationIds,
-        translationRecords,
-        selectedBook: hasSavedBookPosition ? savedState.lastBook ?? null : 'John',
-        selectedChapter: hasSavedBookPosition ? savedState.lastChapter || 1 : 10,
-        focusVerse: hasSavedBookPosition ? savedState.lastVerse || null : 10,
-        searchTerm: savedState.lastSearch || '',
-        selectedLanguages: resolvedLanguages,
-        theme: savedState.theme || detectPreferredTheme(),
-        ready: true
+        selectedTranslationId: nextTranslationId,
+        selectedTranslationIds: nextTranslationIds,
+        translationRecords: nextTranslationRecords,
+        selectedBook: initialBook,
+        selectedChapter: initialChapter,
+        focusVerse: initialVerse,
+        theme: savedState?.theme ?? detectPreferredTheme(),
+        selectedLanguages: finalLanguages,
       }));
 
-      await dispatch(loadTranslation(activeTranslationId));
-      dispatch(setCurrentBibleFromId(activeTranslationId));
-
+      await dispatch(loadTranslation(nextTranslationId));
+      void dispatch(refreshTranslations(false));
       dispatch(setReady(true));
     };
 
@@ -205,574 +190,136 @@ function App() {
 
     bibleService.persistState({
       lastTranslationId: selectedTranslationId,
-      lastTranslationIds: selectedTranslationIds,
-      translationRecords,
+      lastTranslationIds: safeSelectedTranslationIds,
+      translationRecords: safeTranslationRecords,
       lastBook: selectedBook || undefined,
       lastChapter: selectedBook ? selectedChapter : undefined,
-      lastVerse: focusVerse || undefined,
-      lastSearch: searchTerm.trim() || undefined,
+      lastVerse: undefined,
+      lastSearch: undefined,
       theme,
-      languages: selectedLanguages
+      languages: safeSelectedLanguages,
     });
   }, [
     selectedTranslationId,
-    selectedTranslationIds,
-    translationRecords,
+    safeSelectedTranslationIds,
+    safeTranslationRecords,
     selectedBook,
     selectedChapter,
-    focusVerse,
-    searchTerm,
     theme,
-    selectedLanguages,
-    ready
+    safeSelectedLanguages,
+    ready,
   ]);
 
   useEffect(() => {
     dispatch(setCurrentBibleFromId(selectedTranslationId));
   }, [dispatch, selectedTranslationId]);
 
+  // Safety fallback: if a translation is loaded but selection is missing,
+  // default to John 10:10 (or closest available chapter in John).
   useEffect(() => {
-    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
+    if (!currentBible || selectedBook) {
       return;
     }
 
-    const mediaQuery = window.matchMedia(DESKTOP_BREAKPOINT);
-    const updateLayout = (event?: MediaQueryListEvent) => {
-      setIsDesktopLayout(event ? event.matches : mediaQuery.matches);
-    };
+    const johnBook = currentBible.books.find((book) => book.name === 'John') ?? currentBible.books[0];
+    if (!johnBook) {
+      return;
+    }
 
-    updateLayout();
-    mediaQuery.addEventListener('change', updateLayout);
-    return () => mediaQuery.removeEventListener('change', updateLayout);
-  }, []);
+    const chapterTenExists = johnBook.chapters.some((chapter) => chapter.chapter === 10);
+    const defaultChapter = chapterTenExists
+      ? 10
+      : (johnBook.chapters[0]?.chapter ?? 1);
+    const defaultVerse = chapterTenExists ? 10 : 1;
 
-  // Apply theme changes
+    dispatch(setSelectedBook(johnBook.name));
+    dispatch(setSelectedChapter(defaultChapter));
+    dispatch(setFocusVerse(defaultVerse));
+  }, [currentBible, selectedBook, dispatch]);
+
+  // Apply theme changes to document
   useEffect(() => {
     applyTheme(theme);
-
-    const popup = popupWindowRef.current;
-    if (popup && !popup.closed) {
-      popup.document.documentElement.setAttribute('data-theme', theme);
-      popup.document.documentElement.setAttribute('data-bs-theme', theme);
-    }
   }, [theme]);
-
-  useEffect(() => {
-    return () => {
-      popupCleanupRef.current?.();
-    };
-  }, []);
 
   const translationMetadataById = useMemo(
     () =>
-      new Map(availableTranslations.map((translation) => [translation.id, translation] as const)),
-    [availableTranslations]
+      new Map(safeAvailableTranslations.map((translation) => [translation.id, translation] as const)),
+    [safeAvailableTranslations]
   );
 
   const languageOptions = useMemo(() => {
-    const counts = new Map<string, number>();
-
-    for (const translation of availableTranslations) {
-      const codes = normalizeLanguages(translation.language);
+    const langMap = new Map<string, { code: string; count: number }>();
+    for (const translation of safeAvailableTranslations) {
+      const rawLang = translation.language;
+      const codes = Array.isArray(rawLang) ? rawLang : (rawLang ? [rawLang] : []);
       for (const code of codes) {
-        counts.set(code, (counts.get(code) ?? 0) + 1);
+        const existing = langMap.get(code);
+        if (existing) {
+          existing.count++;
+        } else {
+          langMap.set(code, { code, count: 1 });
+        }
       }
     }
-
-    return Array.from(counts.entries())
-      .map(([code, count]) => ({ code, count }))
+    return Array.from(langMap.values())
       .sort((a, b) => {
         const nameA = getLanguageDisplayName(a.code);
         const nameB = getLanguageDisplayName(b.code);
         return nameA.localeCompare(nameB);
       });
-  }, [availableTranslations]);
+  }, [safeAvailableTranslations]);
 
   const filteredTranslations = useMemo(() => {
-    const selected = normalizeLanguageSelection(selectedLanguages);
-    if (selected.length === 0) {
-      return availableTranslations;
+    if (safeSelectedLanguages.length === 0) {
+      return safeAvailableTranslations;
     }
-
-    const selectionSet = new Set(selected);
-    const matches = availableTranslations.filter((translation) => {
-      const codes = normalizeLanguages(translation.language);
-      if (codes.length === 0) {
-        return true;
-      }
-      return codes.some((code) => selectionSet.has(code));
+    const normalizedCodes = new Set(normalizeLanguages(safeSelectedLanguages));
+    const matches = safeAvailableTranslations.filter((t) => {
+      const langs = Array.isArray(t.language) ? t.language : (t.language ? [t.language] : []);
+      return langs.some((l) => normalizedCodes.has(l));
     });
-
-    return matches.length === 0 ? availableTranslations : matches;
-  }, [availableTranslations, selectedLanguages]);
+    return matches.length === 0 ? safeAvailableTranslations : matches;
+  }, [safeAvailableTranslations, safeSelectedLanguages]);
 
   // Ensure selectedTranslationId is valid; fallback to first starred or KJV
   useEffect(() => {
-    const recordIds = new Set(translationRecords.map((r) => r.id));
+    const recordIds = new Set(safeTranslationRecords.map((r) => r.id));
     if (!recordIds.has(selectedTranslationId)) {
-      const starredIds = translationRecords.filter((r) => r.starred).map((r) => r.id);
-      const validId = starredIds[0] || translationRecords[0]?.id || 'KJV';
+      const starredIds = safeTranslationRecords.filter((r) => r.starred).map((r) => r.id);
+      const validId = starredIds[0] || safeTranslationRecords[0]?.id || 'KJV';
       dispatch(setSelectedTranslationId(validId));
     }
-  }, [translationRecords, selectedTranslationId, dispatch]);
+  }, [safeTranslationRecords, selectedTranslationId, dispatch]);
 
   const addableTranslations = useMemo(() => {
-    const selectedIds = new Set(translationRecords.map((record) => record.id));
+    const selectedIds = new Set(safeTranslationRecords.map((record) => record.id));
     return filteredTranslations
       .filter((translation) => !selectedIds.has(translation.id))
       .sort((a, b) => a.label.localeCompare(b.label));
-  }, [filteredTranslations, translationRecords]);
+  }, [filteredTranslations, safeTranslationRecords]);
 
-  // Compute starred translation IDs from translationRecords
   const starredTranslationIds = useMemo(() => {
-    return translationRecords.filter((r) => r.starred).map((r) => r.id);
-  }, [translationRecords]);
-
-  useEffect(() => {
-    const fullTranslationWorkingSetSize = new Set([
-      ...starredTranslationIds,
-      selectedTranslationId,
-    ]).size;
-
-    bibleService.setFullTranslationCacheLimit(fullTranslationWorkingSetSize);
-    searchIndexService.setIndexCacheLimit(Math.max(1, starredTranslationIds.length));
-  }, [selectedTranslationId, starredTranslationIds]);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    const loadVisibleChapters = async () => {
-      if (!selectedBook || starredTranslationIds.length === 0) {
-        if (!cancelled) {
-          setChaptersByTranslation({});
-        }
-        return;
-      }
-
-      const entries = await Promise.all(
-        starredTranslationIds.map(async (translationId) => {
-          const chapter = await bibleService.loadChapter(translationId, selectedBook, selectedChapter);
-          return [translationId, chapter] as const;
-        })
-      );
-
-      if (!cancelled) {
-        setChaptersByTranslation(Object.fromEntries(entries));
-      }
-    };
-
-    void loadVisibleChapters();
-    return () => {
-      cancelled = true;
-    };
-  }, [selectedBook, selectedChapter, starredTranslationIds]);
-
-  const translationLabels = useMemo(() => {
-    const labels: Record<string, string> = {};
-    for (const translationId of starredTranslationIds) {
-      const translation = translationMetadataById.get(translationId);
-      labels[translationId] = translation?.label ?? translationId;
-    }
-    return labels;
-  }, [starredTranslationIds, translationMetadataById]);
-
-  const quickJumpTarget = useMemo<QuickJumpTarget | null>(() => {
-    if (!ready || !currentBible || !searchTerm) {
-      return null;
-    }
-    return parseQuickJump(searchTerm, currentBible.books);
-  }, [ready, currentBible, searchTerm]);
-
-  const quickJumpPreview = useMemo(() => {
-    if (!currentBible || !quickJumpTarget) {
-      return null;
-    }
-
-    const book = currentBible.books.find((b) => b.name === quickJumpTarget.book);
-    const chapter = book?.chapters.find((c) => c.chapter === quickJumpTarget.chapter);
-    const verseText = quickJumpTarget.verse
-      ? chapter?.verses.find((v) => v.verse === quickJumpTarget.verse)?.text
-      : undefined;
-
-    return {
-      ...quickJumpTarget,
-      text: verseText
-    };
-  }, [currentBible, quickJumpTarget]);
-
-  const selectedBookEntry = useMemo(() => {
-    if (!currentBible || !selectedBook) {
-      return null;
-    }
-
-    return currentBible.books.find((book) => book.name === selectedBook) ?? null;
-  }, [currentBible, selectedBook]);
-
-  const activeTab = useMemo(() => {
-    if (!activeTabId) {
-      return null;
-    }
-    return tabs.find((tab) => tab.id === activeTabId) ?? null;
-  }, [tabs, activeTabId]);
+    return safeTranslationRecords.filter((r) => r.starred).map((r) => r.id);
+  }, [safeTranslationRecords]);
 
   // Keep selectedTranslationIds in sync with translationRecords for backward compatibility
   useEffect(() => {
-    const recordIds = translationRecords.map((r) => r.id);
-    if (JSON.stringify(selectedTranslationIds) !== JSON.stringify(recordIds)) {
+    const recordIds = safeTranslationRecords.map((r) => r.id);
+    if (JSON.stringify(safeSelectedTranslationIds) !== JSON.stringify(recordIds)) {
       dispatch(setSelectedTranslationIds(recordIds));
     }
-  }, [translationRecords, dispatch, selectedTranslationIds]);
+  }, [safeTranslationRecords, dispatch, safeSelectedTranslationIds]);
 
-  const activeWorkspacePanel: WorkspacePanelKey | null = activeTab ? 'search' : null;
-  const horizontalElementLength = starredTranslationIds.length + (Boolean(activeTab) ? 1 : 0);
-  const useWideLayout = horizontalElementLength > 3;
-  const isMobileLayout = !isDesktopLayout;
-  const normalizedSearchTerm = searchTerm.trim();
-  const canShowSearchActionDropdown =
-    activeTab?.type === 'search' &&
-    Boolean(activeTabId) &&
-    tabs.length > 0 &&
-    !quickJumpTarget &&
-    normalizedSearchTerm.length > 0;
-
-  const focusDetachedPanel = () => {
-    const popup = popupWindowRef.current;
-    if (!popup || popup.closed) {
-      return;
-    }
-
-    popup.focus();
-  };
-
-  const closeMobilePanel = () => {
-    setIsMobilePanelOpen(false);
-  };
-
-  const runSearchByAction = async (query: string, action: 'replace' | 'new') => {
-    const normalized = query.trim();
-    if (!normalized) {
-      return;
-    }
-
-    await dispatch(loadTranslations(starredTranslationIds));
-
-    if (action === 'new') {
-      dispatch(runSearchInNewTab({ query: normalized, translationIds: starredTranslationIds }));
-    } else if (activeTabId && activeTab?.type === 'search') {
-      dispatch(runSearchInTab({ tabId: activeTabId, query: normalized, translationIds: starredTranslationIds }));
-    } else {
-      dispatch(runSearchInNewTab({ query: normalized, translationIds: starredTranslationIds }));
-    }
-
-    setIsSearchActionDropdownOpen(false);
-    setIsSearchActionDropdownSuppressed(true);
-    setSearchActionIndex(0);
-
-    if (!isDesktopLayout && !isPanelDetached) {
-      setIsMobilePanelOpen(true);
-    }
-
-    if (isPanelDetached) {
-      focusDetachedPanel();
-    }
-  };
-
-  const attachPopupWindow = (popup: Window, windowName: string) => {
-    popupWindowRef.current = popup;
-
-    popup.document.title = 'GitBible Panel';
-    popup.document.body.className = document.body.className;
-    popup.document.documentElement.setAttribute('data-theme', theme);
-    popup.document.documentElement.setAttribute('data-bs-theme', theme);
-    popup.document.documentElement.style.height = '100%';
-    popup.document.body.style.height = '100%';
-    popup.document.body.style.margin = '0';
-    popup.document.body.style.padding = '1rem';
-    popup.document.body.style.display = 'flex';
-    popup.document.body.style.flexDirection = 'column';
-
-    const existingRoot = popup.document.getElementById('gitbible-popout-root');
-    const root = existingRoot ?? popup.document.createElement('div');
-    root.id = 'gitbible-popout-root';
-    root.style.display = 'flex';
-    root.style.flexDirection = 'column';
-    root.style.flex = '1 1 auto';
-    root.style.minHeight = '0';
-    if (!existingRoot) {
-      popup.document.body.innerHTML = '';
-      popup.document.body.appendChild(root);
-    }
-
-    if (!popup.document.getElementById('gitbible-popout-base')) {
-      const baseStyle = popup.document.createElement('style');
-      baseStyle.id = 'gitbible-popout-base';
-      baseStyle.textContent = `
-        body {
-          background: var(--bs-body-bg);
-          color: var(--bs-body-color);
-        }
-
-        #gitbible-popout-root .popout-panel-shell {
-          display: flex;
-          flex: 1 1 auto;
-          flex-direction: column;
-          min-height: 0;
-          max-height: none;
-        }
-
-        #gitbible-popout-root .popout-panel-shell.workspace-scroll {
-          height: 100%;
-          max-height: none;
-          overflow: auto;
-        }
-
-        #gitbible-popout-root .popout-panel-shell > .card {
-          flex: 1 1 auto;
-          min-height: 0;
-        }
-
-        #gitbible-popout-root .popout-panel-shell .card-body {
-          min-height: 0;
-        }
-
-        #gitbible-popout-root .popout-panel-shell .search-results-card {
-          flex: 1 1 auto;
-          min-height: 0;
-        }
-
-        #gitbible-popout-root .popout-panel-shell .search-results-body {
-          flex: 1 1 auto;
-          min-height: 0;
-        }
-      `;
-      popup.document.head.appendChild(baseStyle);
-    }
-
-    document.querySelectorAll('link[rel="stylesheet"], style').forEach((styleNode) => {
-      const clone = styleNode.cloneNode(true) as HTMLElement;
-
-      if (styleNode.tagName === 'LINK') {
-        const href = styleNode.getAttribute('href');
-        if (!href) {
-          return;
-        }
-
-        const existing = Array.from(popup.document.querySelectorAll('link[rel="stylesheet"]')).some((candidate) => candidate.getAttribute('href') === href);
-        if (existing) {
-          return;
-        }
-      }
-
-      if (styleNode.tagName === 'STYLE') {
-        const styleId = styleNode.getAttribute('id');
-        if (styleId) {
-          const existing = popup.document.getElementById(styleId);
-          if (existing) {
-            return;
-          }
-        }
-      }
-
-      popup.document.head.appendChild(clone);
-    });
-
-    const handlePopupBeforeUnload = () => {
-      dispatch(setPanelDetached({ detached: false, panelName: null }));
-      setPopupContainer(null);
-      popupWindowRef.current = null;
-      sessionStorage.removeItem('gitbible-popout-name');
-    };
-
-    popup.addEventListener('beforeunload', handlePopupBeforeUnload);
-    popupCleanupRef.current = () => {
-      popup.removeEventListener('beforeunload', handlePopupBeforeUnload);
-    };
-
-    setPopupContainer(root);
-    dispatch(setPanelDetached({ detached: true, panelName: windowName }));
-    sessionStorage.setItem('gitbible-popout-name', windowName);
-  };
-
-  const openOrReconnectPopup = (forceOpen: boolean) => {
-    const storedName = detachedPanelName ?? sessionStorage.getItem('gitbible-popout-name');
-    const windowName = storedName && storedName.trim().length > 0
-      ? storedName
-      : `gitbible-panel-${Date.now()}`;
-
-    const popup = window.open('', windowName);
-    if (!popup) {
-      return;
-    }
-
-    if (popup.closed) {
-      return;
-    }
-
-    attachPopupWindow(popup, windowName);
-    if (forceOpen) {
-      popup.focus();
-    }
-  };
-
-  // Event handlers
-  const handleSearchInput = (value: string) => {
-    setIsQuickJumpPreviewHidden(false);
-    if (value !== searchTerm) {
-      setIsSearchActionDropdownSuppressed(false);
-    }
-    if (!value.trim()) {
-      setIsSearchActionDropdownOpen(false);
-      setSearchActionIndex(0);
-    }
-    dispatch(setSearchTerm(value));
-  };
-
-  const handleSearchInputKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
-    const query = normalizedSearchTerm;
-    if (!canShowSearchActionDropdown) {
-      return;
-    }
-
-    if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
-      event.preventDefault();
-      void runSearchByAction(query, 'new');
-      return;
-    }
-
-    if (!isSearchActionDropdownOpen) {
-      return;
-    }
-
-    if (event.key === 'ArrowDown') {
-      event.preventDefault();
-      setSearchActionIndex((index) => Math.min(1, index + 1));
-      return;
-    }
-
-    if (event.key === 'ArrowUp') {
-      event.preventDefault();
-      setSearchActionIndex((index) => Math.max(0, index - 1));
-      return;
-    }
-
-    if (event.key === 'Enter') {
-      event.preventDefault();
-      void runSearchByAction(query, searchActionIndex === 0 ? 'replace' : 'new');
-      return;
-    }
-
-    if (event.key === 'Escape') {
-      event.preventDefault();
-      setIsSearchActionDropdownOpen(false);
-      setIsSearchActionDropdownSuppressed(true);
-      setSearchActionIndex(0);
-    }
-  };
-
-  const handleSubmitSearch = async (e: FormEvent) => {
-    e.preventDefault();
-    const query = normalizedSearchTerm;
-    dispatch(setSearchTerm(query));
-
-    if (!query) {
-      dispatch(clearSearch());
-      dispatch(setFocusVerse(null));
-      return;
-    }
-
-    const quickJump = quickJumpTarget;
-    if (quickJump) {
-      await goToReference(quickJump);
-      setIsQuickJumpPreviewHidden(true);
-      setIsSearchActionDropdownOpen(false);
-      return;
-    }
-
-    if (isSearchActionDropdownOpen && activeTabId && activeTab?.type === 'search') {
-      void runSearchByAction(query, 'replace');
-      return;
-    }
-
-    if (tabs.length > 0 && activeTabId && activeTab?.type === 'search') {
-      setIsSearchActionDropdownOpen(true);
-      setSearchActionIndex(0);
-      return;
-    }
-
-    void runSearchByAction(query, 'new');
-  };
-
-  useEffect(() => {
-    const query = normalizedSearchTerm;
-
-    if (!isSearchFocused || !canShowSearchActionDropdown || isSearchActionDropdownSuppressed) {
-      if (isSearchActionDropdownOpen) {
-        setIsSearchActionDropdownOpen(false);
-        setSearchActionIndex(0);
-      }
-      return;
-    }
-
-    if (query.length > 5) {
-      setIsSearchActionDropdownOpen(true);
-      setSearchActionIndex(0);
-      return;
-    }
-
-    const timeoutId = window.setTimeout(() => {
-      setIsSearchActionDropdownOpen(true);
-      setSearchActionIndex(0);
-    }, 1000);
-
-    return () => {
-      window.clearTimeout(timeoutId);
-    };
-  }, [
-    normalizedSearchTerm,
-    canShowSearchActionDropdown,
-    isSearchActionDropdownSuppressed,
-    isSearchFocused,
-    isSearchActionDropdownOpen
-  ]);
-
-  useEffect(() => {
-    if (isDesktopLayout || isPanelDetached || !activeWorkspacePanel) {
-      setIsMobilePanelOpen(false);
-    }
-  }, [isDesktopLayout, isPanelDetached, activeWorkspacePanel]);
-
-  useEffect(() => {
-    if (!isMobileLayout || !isMobilePanelOpen) {
-      return;
-    }
-
-    const handleEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        setIsMobilePanelOpen(false);
-      }
-    };
-
-    window.addEventListener('keydown', handleEscape);
-    return () => window.removeEventListener('keydown', handleEscape);
-  }, [isMobileLayout, isMobilePanelOpen]);
-
-  useEffect(() => {
-    if (typeof document === 'undefined') {
-      return;
-    }
-
-    document.body.classList.toggle('mobile-panel-open', isMobileLayout && isMobilePanelOpen);
-    return () => {
-      document.body.classList.remove('mobile-panel-open');
-    };
-  }, [isMobileLayout, isMobilePanelOpen]);
+  const useWideLayout = starredTranslationIds.length + (activeTabId ? 1 : 0) > 3;
+  const hasSidePanel = !isPanelDetached && Boolean(activeWorkspacePanel);
 
   const goToReference = async (target: QuickJumpTarget, translationId?: string) => {
     if (isPanelDetached) {
       window.focus();
     }
 
-    const nextActiveId = translationId && selectedTranslationIds.includes(translationId)
+    const nextActiveId = translationId && safeSelectedTranslationIds.includes(translationId)
       ? translationId
       : selectedTranslationId;
 
@@ -797,71 +344,6 @@ function App() {
     dispatch(setFocusVerse(target.verse ?? null));
 
     await scrollToVerse(target);
-  };
-
-  const handleBookSelectionChange = (bookName: string) => {
-    const nextBook = currentBible?.books.find((book) => book.name === bookName);
-    if (!nextBook) {
-      return;
-    }
-
-    const nextChapter = nextBook.chapters[0]?.chapter ?? 1;
-    dispatch(setSelectedBook(bookName));
-    dispatch(setSelectedChapter(nextChapter));
-    dispatch(setFocusVerse(null));
-    void scrollToVerse({ book: bookName, chapter: nextChapter, verse: 1 });
-  };
-
-  const handleChapterSelectionChange = (chapter: number) => {
-    if (!selectedBook) {
-      return;
-    }
-
-    const isValidChapter = selectedBookEntry?.chapters.some((entry) => entry.chapter === chapter) ?? false;
-    const nextChapter = isValidChapter ? chapter : selectedBookEntry?.chapters[0]?.chapter ?? 1;
-
-    dispatch(setSelectedChapter(nextChapter));
-    dispatch(setFocusVerse(null));
-    void scrollToVerse({ book: selectedBook, chapter: nextChapter, verse: 1 });
-  };
-
-  const handleDividerPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
-    if (!isDesktopLayout || !activeWorkspacePanel || !workspaceRef.current) {
-      return;
-    }
-
-    event.preventDefault();
-    const workspace = workspaceRef.current;
-    const bounds = workspace.getBoundingClientRect();
-
-    const updateRatio = (clientX: number) => {
-      const ratio = (clientX - bounds.left) / bounds.width;
-      const clamped = Math.min(0.8, Math.max(0.42, ratio));
-      setMainPaneRatio(clamped);
-    };
-
-    const handlePointerMove = (moveEvent: PointerEvent) => {
-      updateRatio(moveEvent.clientX);
-    };
-
-    const handlePointerUp = () => {
-      window.removeEventListener('pointermove', handlePointerMove);
-      window.removeEventListener('pointerup', handlePointerUp);
-    };
-
-    window.addEventListener('pointermove', handlePointerMove);
-    window.addEventListener('pointerup', handlePointerUp);
-  };
-
-  const handleDividerKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
-    if (event.key === 'ArrowLeft') {
-      event.preventDefault();
-      setMainPaneRatio((value) => Math.max(0.42, value - 0.03));
-    }
-    if (event.key === 'ArrowRight') {
-      event.preventDefault();
-      setMainPaneRatio((value) => Math.min(0.8, value + 0.03));
-    }
   };
 
   const handleThemeToggle = (e: ChangeEvent<HTMLInputElement>) => {
@@ -899,372 +381,109 @@ function App() {
     dispatch(closeTab(tabId));
   };
 
-  const handleToggleDetachPanel = () => {
-    if (isPanelDetached) {
-      dispatch(setPanelDetached({ detached: false, panelName: null }));
-      setPopupContainer(null);
-      sessionStorage.removeItem('gitbible-popout-name');
-      popupCleanupRef.current?.();
-
-      const popup = popupWindowRef.current;
-      popupWindowRef.current = null;
-      if (popup && !popup.closed) {
-        popup.close();
-      }
-
-      window.focus();
-      return;
-    }
-
-    openOrReconnectPopup(true);
-  };
-
-  const mainPanePercent = Math.round(mainPaneRatio * 1000) / 10;
-  const sidePanePercent = 100 - mainPanePercent;
-  const hasSidePanel = !isPanelDetached && Boolean(activeWorkspacePanel);
-
-  const sidePanelContent = (
-    <>
-      {!isMobileLayout && (
-        <PanelTabs
-          tabs={tabs}
-          activeTabId={activeTabId}
-          onSelectTab={handleSelectTab}
-          onCloseTab={handleCloseTab}
-          isDetached={isPanelDetached}
-          showDetachButton={isDesktopLayout}
-          onToggleDetach={handleToggleDetachPanel}
-        />
-      )}
-      <div className="panel-tabs-content">
-        {tabs.map((tab) => (
-          <div
-            key={tab.id}
-            className={`panel-content-scroll${tab.id === activeTabId ? ' is-active' : ''}`}
-          >
-            {tab.type === 'search' && tab.searchResults ? (
-              <SearchResults
-                tab={tab}
-                goToReference={goToReference}
-                onBeforeNavigate={() => {
-                  if (isMobileLayout && isMobilePanelOpen) {
-                    setIsMobilePanelOpen(false);
-                  }
-
-                  if (isPanelDetached) {
-                    window.focus();
-                  }
-                }}
-              />
-            ) : tab.type === 'translations' ? (
-              <TranslationsPanel
-                tab={tab}
-                translationRecords={translationRecords}
-                translationMetadataById={translationMetadataById}
-                addableTranslations={addableTranslations}
-                onAddTranslation={async (id) => {
-                  dispatch(addTranslationRecord(id));
-                }}
-                onRemoveTranslation={(id) => dispatch(removeTranslationRecord(id))}
-                onToggleStar={(id) => dispatch(toggleStarTranslation(id))}
-                onReorder={(fromIndex, toIndex) => dispatch(reorderTranslations({ fromIndex, toIndex }))}
-              />
-            ) : null}
-            <div className="pb-4" aria-hidden="true"></div>
-          </div>
-        ))}
-      </div>
-    </>
-  );
-
   return (
     <>
       <div className={`container app-shell ${useWideLayout ? 'app-shell-wide' : ''}`}>
-      <header className="card border-0 shadow-sm mb-4">
-        <div className="card-body d-flex flex-column flex-lg-row gap-3 align-items-lg-start justify-content-lg-between">
-          <div>
-            <div className="d-flex align-items-center gap-2 flex-wrap">
-              <h1 className="display-6 fw-semibold mb-0">GitBible</h1>
-              <button
-                type="button"
-                className="btn btn-outline-secondary rounded-circle d-inline-flex align-items-center justify-content-center"
-                aria-label="Open settings"
-                data-bs-toggle="modal"
-                data-bs-target="#settingsModal"
-                onClick={openSettingsModal}
-              >
-                <i className="bi bi-gear-fill" aria-hidden="true"></i>
-              </button>
-            </div>
-            <p className="text-body-secondary mb-0">
-              Browse Scripture offline, search quickly, and jump to any verse.
-            </p>
-          </div>
-        </div>
-      </header>
+        <AppHeader onOpenSettings={openSettingsModal} />
 
-      <section className="card border-0 shadow-sm mb-4">
-        <div className="card-body">
-          <form className="row g-2 align-items-center" onSubmit={handleSubmitSearch}>
-            <fieldset className="col-12 mb-0">
-              <legend className="visually-hidden">Quick search</legend>
-              <div className="quick-jump-shell">
-                <div className="input-group input-group-lg search-input-group">
-                  <div className="search-input-wrap">
-                    <input
-                      id="searchInput"
-                      ref={searchInputRef}
-                      type="search"
-                      inputMode="search"
-                      name="search"
-                      className="form-control"
-                      autoComplete="off"
-                      placeholder="Search or jump (e.g. Gen 1:3)"
-                      value={searchTerm}
-                      onChange={(e) => handleSearchInput(e.target.value)}
-                      onKeyDown={handleSearchInputKeyDown}
-                      onFocus={() => setIsSearchFocused(true)}
-                      onBlur={() => setIsSearchFocused(false)}
-                    />
-                    {!isSearchFocused && !searchTerm && (
-                      <span className="search-kbd-hint" aria-hidden="true">
-                        <kbd>{isMac ? '⌘' : 'Ctrl'}+F</kbd>
-                      </span>
-                    )}
-                    {searchTerm && (
-                      <button
-                        type="button"
-                        className="search-clear-btn"
-                        aria-label="Clear search"
-                        onMouseDown={(e) => {
-                          e.preventDefault();
-                          handleSearchInput('');
-                          searchInputRef.current?.focus();
-                        }}
-                      >
-                        ×
-                      </button>
-                    )}
-                  </div>
-                  <button className="btn btn-primary" type="submit">
-                    Go
-                  </button>
-                </div>
-                {quickJumpPreview && (
-                  <div
-                    className={`quick-jump-preview quick-jump-pulldown ${isQuickJumpPreviewHidden ? 'is-hidden' : 'is-visible'}`}
-                    aria-hidden={isQuickJumpPreviewHidden}
-                  >
-                    <span className="text-uppercase fw-semibold small text-primary">Jump to</span>
-                    <span className="reference">
-                      {quickJumpPreview.book} {quickJumpPreview.chapter}
-                      {quickJumpPreview.verse && <>:{quickJumpPreview.verse}</>}
-                    </span>
-                    {quickJumpPreview.text && (
-                      <span className="preview-text text-body-secondary">
-                        "{quickJumpPreview.text}"
-                      </span>
-                    )}
-                  </div>
-                )}
-                {!quickJumpPreview && activeTab && (
-                  <SearchActionDropdown
-                    isOpen={isSearchActionDropdownOpen}
-                    activeTabTitle={activeTab.title}
-                    selectedIndex={searchActionIndex}
-                    onSelectAction={(action) => runSearchByAction(normalizedSearchTerm, action)}
-                  />
-                )}
-              </div>
-            </fieldset>
-          </form>
-        </div>
-      </section>
+        <SearchBar
+          searchInputRef={searchInputRef}
+          starredTranslationIds={starredTranslationIds}
+          goToReference={goToReference}
+          isPanelDetached={isPanelDetached}
+          focusDetachedPanel={focusDetachedPanel}
+          isDesktopLayout={isDesktopLayout}
+          setIsMobilePanelOpen={setIsMobilePanelOpen}
+        />
 
-      <div
-        ref={workspaceRef}
-        className={`workspace-layout ${hasSidePanel ? 'has-side-panel' : ''} ${
-          isDesktopLayout ? 'is-desktop' : 'is-mobile'
-        }`}
-      >
-        {currentBible && (
-          <section
-            className="workspace-pane workspace-main"
-            style={
-              isDesktopLayout && activeWorkspacePanel && !isPanelDetached
-                ? { flexBasis: `${mainPanePercent}%` }
-                : undefined
-            }
-          >
-            <div className="card border-0 shadow-sm">
-              <div className="card-body workspace-scroll pb-4">
-                {selectedBook ? (
-                  <VerseDisplay
-                    chaptersByTranslation={chaptersByTranslation}
-                    translationOrder={starredTranslationIds}
-                    translationLabels={translationLabels}
-                    selectedTranslationId={selectedTranslationId}
-                    books={currentBible.books}
-                    availableChapters={selectedBookEntry?.chapters ?? []}
-                    selectedBook={selectedBook}
-                    selectedChapter={selectedChapter}
-                    focusVerse={focusVerse}
-                    onBookChange={handleBookSelectionChange}
-                    onChapterChange={handleChapterSelectionChange}
-                    onVerseClick={(verse) => {
-                      if (isMobileLayout && !isPanelDetached) {
-                        setIsMobilePanelOpen(true);
-                      }
-
-                      dispatch(setFocusVerse(verse));
-                      dispatch(openTranslationsTab({
-                        book: selectedBook,
-                        chapter: selectedChapter,
-                        verse
-                      }));
-                    }}
-                    verseDomId={verseDomId}
-                  />
-                ) : (
-                  <p className="text-body-secondary mb-0">Select a chapter to begin.</p>
-                )}
-              </div>
-            </div>
-          </section>
-        )}
-
-        {isDesktopLayout && !isPanelDetached && activeWorkspacePanel && (
-          <div
-            className="workspace-divider"
-            role="separator"
-            aria-orientation="vertical"
-            aria-label="Resize verse and panel columns"
-            tabIndex={0}
-            onPointerDown={handleDividerPointerDown}
-            onKeyDown={handleDividerKeyDown}
+        <div
+          ref={workspaceRef}
+          className={`workspace-layout ${hasSidePanel ? 'has-side-panel' : ''} ${
+            isDesktopLayout ? 'is-desktop' : 'is-mobile'
+          }`}
+        >
+          <WorkspaceMainPane
+            isDesktopLayout={isDesktopLayout}
+            isPanelDetached={isPanelDetached}
+            activeWorkspacePanel={activeWorkspacePanel}
+            mainPanePercent={mainPanePercent}
+            isMobileLayout={isMobileLayout}
+            setIsMobilePanelOpen={setIsMobilePanelOpen}
+            translationMetadataById={translationMetadataById}
           />
-        )}
 
-        {hasSidePanel && (
-          <aside
-            id="workspace-side-panel"
-            className={`workspace-pane workspace-side ${isMobilePanelOpen ? 'is-open' : ''}`}
-            style={
-              isDesktopLayout
-                ? { flexBasis: `${sidePanePercent}%` }
-                : undefined
-            }
-          >
-            {isMobileLayout && (
-              <div className={`mobile-panel-tab-strip ${isMobilePanelOpen ? 'is-open' : 'is-collapsed'}`}>
-                <button
-                  type="button"
-                  className="mobile-panel-strip-chevron"
-                  aria-label={isMobilePanelOpen ? 'Close side panel' : 'Open side panel'}
-                  onClick={() => {
-                    if (isMobilePanelOpen) {
-                      closeMobilePanel();
-                      return;
-                    }
-
-                    setIsMobilePanelOpen(true);
-                  }}
-                >
-                  <i
-                    className={`bi ${isMobilePanelOpen ? 'bi-chevron-double-right' : 'bi-chevron-double-left'}`}
-                    aria-hidden="true"
-                  ></i>
-                </button>
-                {isMobilePanelOpen && tabs.map((tab) => (
-                  <button
-                    key={tab.id}
-                    type="button"
-                    className={`mobile-panel-vtab${tab.id === activeTabId ? ' is-active' : ''}`}
-                    aria-label={tab.title}
-                    onClick={() => {
-                      dispatch(setActiveTab(tab.id));
-                    }}
-                  >
-                    <span
-                      className={`mobile-panel-vtab-close${tab.id === activeTabId ? '' : ' is-hidden'}`}
-                      role="button"
-                      tabIndex={tab.id === activeTabId ? 0 : -1}
-                      aria-hidden={tab.id === activeTabId ? undefined : true}
-                      aria-label={tab.id === activeTabId ? `Close ${tab.title}` : undefined}
-                      onClick={(event) => {
-                        if (tab.id !== activeTabId) {
-                          return;
-                        }
-
-                        event.stopPropagation();
-                        dispatch(closeTab(tab.id));
-                      }}
-                      onKeyDown={(event) => {
-                        if (tab.id !== activeTabId) {
-                          return;
-                        }
-
-                        if (event.key === 'Enter' || event.key === ' ') {
-                          event.preventDefault();
-                          event.stopPropagation();
-                          dispatch(closeTab(tab.id));
-                        }
-                      }}
-                    >
-                      ×
-                    </span>
-                    <i className={tab.iconClass} aria-hidden="true"></i>
-                    <span className="mobile-panel-vtab-title">{tab.title}</span>
-                  </button>
-                ))}
-              </div>
-            )}
-            <div className="workspace-scroll panel-scroll-with-tabs">
-              {sidePanelContent}
-            </div>
-          </aside>
-        )}
-
-        {isMobileLayout && hasSidePanel && isMobilePanelOpen && (
-          <button
-            type="button"
-            className="mobile-panel-backdrop"
-            aria-label="Close side panel"
-            onClick={closeMobilePanel}
-          />
-        )}
-      </div>
-
-      {(isLoading || error) && (
-        <section className="mt-4">
-          {isLoading && (
-            <div
-              className="alert alert-info d-inline-flex align-items-center gap-2 py-2 mb-0"
-              role="status"
-            >
-              <span className="spinner-border spinner-border-sm" aria-hidden="true"></span>
-              <span>Loading...</span>
-            </div>
+          {isDesktopLayout && !isPanelDetached && activeWorkspacePanel && (
+            <WorkspaceDivider
+              onPointerDown={handleDividerPointerDown}
+              onKeyDown={handleDividerKeyDown}
+            />
           )}
-          {error && <div className="alert alert-danger mt-3 mb-0">{error}</div>}
-        </section>
-      )}
 
-      <SettingsModal
-        theme={theme}
-        handleThemeToggle={handleThemeToggle}
-        selectedLanguages={selectedLanguages}
-        handleLanguagesChange={handleLanguagesChange}
-        languageOptions={languageOptions}
-        getLanguageDisplayName={getLanguageDisplayName}
-        closeSettingsModal={closeSettingsModal}
-      />
+          {hasSidePanel && (
+            <WorkspaceSidePanel
+              isMobileLayout={isMobileLayout}
+              isDesktopLayout={isDesktopLayout}
+              isPanelDetached={isPanelDetached}
+              isMobilePanelOpen={isMobilePanelOpen}
+              setIsMobilePanelOpen={setIsMobilePanelOpen}
+              sidePanePercent={sidePanePercent}
+              goToReference={goToReference}
+              translationRecords={safeTranslationRecords}
+              translationMetadataById={translationMetadataById}
+              addableTranslations={addableTranslations}
+              onAddTranslation={(id) => dispatch(addTranslationRecord(id))}
+              onRemoveTranslation={(id) => dispatch(removeTranslationRecord(id))}
+              onToggleStar={(id) => dispatch(toggleStarTranslation(id))}
+              onReorder={(fromIndex, toIndex) => dispatch(reorderTranslations({ fromIndex, toIndex }))}
+              onSelectTab={handleSelectTab}
+              onCloseTab={handleCloseTab}
+              onToggleDetach={handleToggleDetachPanel}
+            />
+          )}
 
+          {isMobileLayout && hasSidePanel && isMobilePanelOpen && (
+            <button
+              type="button"
+              className="mobile-panel-backdrop"
+              aria-label="Close side panel"
+              onClick={() => setIsMobilePanelOpen(false)}
+            />
+          )}
+        </div>
+
+        <LoadingStatus isLoading={isLoading} error={error} />
+
+        <SettingsModal
+          theme={theme}
+          handleThemeToggle={handleThemeToggle}
+          selectedLanguages={safeSelectedLanguages}
+          handleLanguagesChange={handleLanguagesChange}
+          languageOptions={languageOptions}
+          getLanguageDisplayName={getLanguageDisplayName}
+          closeSettingsModal={closeSettingsModal}
+        />
       </div>
 
       {isPanelDetached && activeWorkspacePanel && popupContainer && createPortal(
         <div className="workspace-scroll panel-scroll-with-tabs popout-panel-shell">
-          {sidePanelContent}
+          <SidePanelContent
+            isMobileLayout={false}
+            isDesktopLayout={true}
+            isPanelDetached={isPanelDetached}
+            isMobilePanelOpen={false}
+            setIsMobilePanelOpen={() => {}}
+            goToReference={goToReference}
+            translationRecords={safeTranslationRecords}
+            translationMetadataById={translationMetadataById}
+            addableTranslations={addableTranslations}
+            onAddTranslation={(id) => dispatch(addTranslationRecord(id))}
+            onRemoveTranslation={(id) => dispatch(removeTranslationRecord(id))}
+            onToggleStar={(id) => dispatch(toggleStarTranslation(id))}
+            onReorder={(fromIndex, toIndex) => dispatch(reorderTranslations({ fromIndex, toIndex }))}
+            onSelectTab={handleSelectTab}
+            onCloseTab={handleCloseTab}
+            onToggleDetach={handleToggleDetachPanel}
+          />
         </div>,
         popupContainer
       )}

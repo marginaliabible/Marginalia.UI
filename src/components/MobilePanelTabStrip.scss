@@ -1,0 +1,153 @@
+.mobile-panel-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1040;
+  border: 0;
+  background: color-mix(in srgb, #000 34%, transparent);
+  padding: 0;
+}
+
+body.mobile-panel-open {
+  overflow: hidden;
+}
+
+@media (max-width: 991.98px) {
+  .workspace-layout.is-mobile.has-side-panel .workspace-pane.workspace-side .mobile-panel-tab-strip {
+    pointer-events: auto;
+  }
+
+  .mobile-panel-tab-strip {
+    position: absolute;
+    top: 0.9rem;
+    left: 0;
+    transform: translateX(-100%);
+    width: 1.8rem;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    max-height: calc(100dvh - 1.8rem);
+    border-right: 1px solid color-mix(in srgb, var(--bs-border-color) 80%, transparent);
+    border-top: 1px solid color-mix(in srgb, var(--bs-border-color) 80%, transparent);
+    border-bottom: 1px solid color-mix(in srgb, var(--bs-border-color) 80%, transparent);
+    border-left: 1px solid color-mix(in srgb, var(--bs-border-color) 80%, transparent);
+    border-radius: 0.55rem 0 0 0.55rem;
+    background: var(--bs-body-bg);
+    overflow: auto;
+    box-shadow: -5px 0 18px color-mix(in srgb, #000 12%, transparent);
+  }
+
+  .mobile-panel-tab-strip.is-collapsed {
+    width: 1.45rem;
+    overflow: hidden;
+  }
+
+  .mobile-panel-strip-chevron {
+    flex: 0 0 2.35rem;
+    width: 100%;
+    border: 0;
+    border-bottom: 1px solid color-mix(in srgb, var(--bs-border-color) 80%, transparent);
+    background: transparent;
+    color: var(--bs-body-color);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    cursor: pointer;
+  }
+
+  .mobile-panel-tab-strip.is-collapsed .mobile-panel-strip-chevron {
+    border-bottom: 0;
+  }
+
+  .mobile-panel-strip-chevron:hover,
+  .mobile-panel-strip-chevron:focus-visible {
+    color: var(--bs-primary);
+  }
+
+  .mobile-panel-tab-strip.is-open .mobile-panel-strip-chevron,
+  .mobile-panel-tab-strip.is-open .mobile-panel-strip-chevron:hover,
+  .mobile-panel-tab-strip.is-open .mobile-panel-strip-chevron:focus-visible {
+    color: color-mix(in srgb, var(--bs-body-color) 60%, var(--bs-secondary-color));
+  }
+
+  .mobile-panel-vtab {
+    width: 100%;
+    flex: 0 0 auto;
+    border: 0;
+    border-bottom: 1px solid color-mix(in srgb, var(--bs-border-color) 80%, transparent);
+    background: transparent;
+    color: var(--bs-secondary-color);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.45rem 0.1rem 0.35rem;
+    gap: 0.55rem;
+    cursor: pointer;
+  }
+
+  .mobile-panel-vtab.is-active {
+    color: var(--bs-primary);
+    background: color-mix(in srgb, var(--bs-primary) 8%, transparent);
+  }
+
+  .mobile-panel-vtab:hover,
+  .mobile-panel-vtab:focus-visible {
+    color: var(--bs-primary);
+    background: color-mix(in srgb, var(--bs-primary) 6%, transparent);
+  }
+
+  .mobile-panel-vtab-title {
+    writing-mode: vertical-lr;
+    transform: rotate(180deg);
+    font-size: 0.65rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    line-height: 1.05;
+    max-width: 1.55rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: normal;
+    text-align: center;
+  }
+
+  .mobile-panel-vtab > i {
+    order: 2;
+    font-size: 0.85rem;
+    display: inline-block;
+    transform: rotate(-90deg);
+    margin-bottom: 0.8rem;
+  }
+
+  .mobile-panel-vtab-close {
+    order: 0;
+    align-self: center;
+    margin: 0.02rem 0.08rem;
+    width: 0.82rem;
+    height: 0.82rem;
+    border-radius: 999px;
+    font-size: 0.78rem;
+    font-weight: 700;
+    line-height: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: color-mix(in srgb, var(--bs-body-bg) 82%, transparent);
+    color: inherit;
+  }
+
+  .mobile-panel-vtab-close:hover,
+  .mobile-panel-vtab-close:focus-visible {
+    background: color-mix(in srgb, var(--bs-primary) 16%, var(--bs-body-bg));
+  }
+
+  .mobile-panel-vtab-close.is-hidden {
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .mobile-panel-vtab-title {
+    order: 1;
+  }
+}
