@@ -8,10 +8,10 @@
       "request": "launch",
       "preLaunchTask": "npm: start",
       "url": "http://localhost:3000/",
-      "webRoot": "${workspaceFolder}/src",
+      "webRoot": "${workspaceFolder}",
       "sourceMaps": true,
       "sourceMapPathOverrides": {
-        "webpack:///src/*": "${webRoot}/*"
+        "webpack:///src/*": "${webRoot}/src/*"
       }
     },
     {
@@ -20,7 +20,7 @@
       "request": "attach",
       "port": 9222,
       "url": "http://localhost:3000/",
-      "webRoot": "${workspaceFolder}/src"
+      "webRoot": "${workspaceFolder}"
     },
     {
       "name": "Debug Jest Tests",

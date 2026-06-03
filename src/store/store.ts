@@ -6,7 +6,13 @@ export const store = configureStore({
   reducer: {
     bible: bibleReducer,
     ui: uiReducer
-  }
+  },
+  middleware: (getDefaultMiddleware) =>
+    getDefaultMiddleware({
+      // Keep dev safety checks on, but avoid noisy warnings for large startup state.
+      serializableCheck: { warnAfter: 128 },
+      immutableCheck: { warnAfter: 128 }
+    })
 });
 
 export type RootState = ReturnType<typeof store.getState>;
