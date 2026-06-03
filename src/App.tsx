@@ -109,17 +109,17 @@ function App() {
     setIsMobilePanelOpen,
   });
 
-  // Ctrl+F to focus search input
+  // Ctrl/Cmd+K to focus search input
   useEffect(() => {
-    const handleCtrlF = (e: KeyboardEvent) => {
-      if (e.key === 'f' && (e.ctrlKey || e.metaKey)) {
+    const handleSearchShortcut = (e: KeyboardEvent) => {
+      if (e.key.toLowerCase() === 'k' && (e.ctrlKey || e.metaKey)) {
         e.preventDefault();
         searchInputRef.current?.focus();
         searchInputRef.current?.select();
       }
     };
-    window.addEventListener('keydown', handleCtrlF);
-    return () => window.removeEventListener('keydown', handleCtrlF);
+    window.addEventListener('keydown', handleSearchShortcut);
+    return () => window.removeEventListener('keydown', handleSearchShortcut);
   }, []);
 
   // Initialize app

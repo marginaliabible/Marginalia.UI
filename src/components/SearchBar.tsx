@@ -242,7 +242,7 @@ const SearchBar: React.FC<SearchBarProps> = ({
                   />
                   {!isSearchFocused && !searchTerm && (
                     <span className="search-kbd-hint" aria-hidden="true">
-                      <kbd>{isMac ? '⌘' : 'Ctrl'}+F</kbd>
+                      <kbd>{isMac ? '⌘' : 'Ctrl'}+K</kbd>
                     </span>
                   )}
                   {searchTerm && (
