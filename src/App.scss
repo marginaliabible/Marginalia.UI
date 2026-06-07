@@ -6,6 +6,7 @@
 @use './components/SearchActionDropdown';
 @use './components/MobilePanelTabStrip';
 @use './components/TranslationsPanel';
+@use './components/AppHeader';
 
 .app-shell.app-shell-wide {
   max-width: 100%;
