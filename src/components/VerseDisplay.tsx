@@ -1,6 +1,8 @@
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { BibleBook, BibleChapter } from '../models/bible';
 
+type VerseSelectionMode = 'single' | 'toggle' | 'range' | 'mobile-range';
+
 interface VerseDisplayProps {
   chaptersByTranslation: Record<string, BibleChapter | null>;
   translationOrder: string[];
@@ -10,12 +12,17 @@ interface VerseDisplayProps {
   availableChapters: BibleChapter[];
   selectedBook: string | null;
   selectedChapter: number;
-  focusVerse: number | null;
+  isMobileLayout: boolean;
+  selectedVerseTranslationId: string | null;
+  selectedVerses: number[];
+  selectionAnchorVerse: number | null;
   onBookChange: (bookName: string) => void;
   onChapterChange: (chapter: number) => void;
   showPanelToggle?: boolean;
   onOpenPanel?: () => void;
-  onVerseClick?: (verse: number) => void;
+  onVerseNumberClick?: (verse: number) => void;
+  onVerseCellSelect?: (verse: number, translationId: string, mode: VerseSelectionMode) => void;
+  onCopySelectedVerses: () => Promise<void> | void;
   verseDomId: (book: string, chapter: number, verse: number) => string;
 }
 
@@ -28,18 +35,33 @@ const VerseDisplay: React.FC<VerseDisplayProps> = ({
   availableChapters,
   selectedBook,
   selectedChapter,
-  focusVerse,
+  isMobileLayout,
+  selectedVerseTranslationId,
+  selectedVerses,
+  selectionAnchorVerse,
   onBookChange,
   onChapterChange,
   showPanelToggle = false,
   onOpenPanel,
-  onVerseClick,
+  onVerseNumberClick,
+  onVerseCellSelect,
+  onCopySelectedVerses,
   verseDomId,
 }) => {
   const shellRef = useRef<HTMLDivElement | null>(null);
+  const longPressTimeoutRef = useRef<number | null>(null);
+  const longPressTriggeredRef = useRef(false);
+  const suppressClickUntilRef = useRef(0);
   const [translationWindowStart, setTranslationWindowStart] = useState(0);
   const [layoutWidth, setLayoutWidth] = useState(0);
   const [slideDirection, setSlideDirection] = useState<'left' | 'right' | null>(null);
+  const [hoveredCell, setHoveredCell] = useState<{ translationId: string; verse: number } | null>(null);
+  const [isCtrlLikeDown, setIsCtrlLikeDown] = useState(false);
+  const [isShiftDown, setIsShiftDown] = useState(false);
+  const [mobileMultiSelectMode, setMobileMultiSelectMode] = useState<{
+    translationId: string;
+    anchorVerse: number;
+  } | null>(null);
 
   const resolveCssLength = (value: string): number => {
     const trimmed = value.trim();
@@ -196,6 +218,150 @@ const VerseDisplay: React.FC<VerseDisplayProps> = ({
     )
   )).sort((a, b) => a - b);
 
+  const selectedVerseSet = useMemo(() => new Set(selectedVerses), [selectedVerses]);
+
+  const shiftPreviewSet = useMemo(() => {
+    if (!isShiftDown || !hoveredCell || !selectedVerseTranslationId || selectedVerses.length === 0) {
+      return new Set<number>();
+    }
+
+    if (hoveredCell.translationId !== selectedVerseTranslationId) {
+      return new Set<number>();
+    }
+
+    const anchorVerse = selectionAnchorVerse ?? selectedVerses[0] ?? hoveredCell.verse;
+    const min = Math.min(anchorVerse, hoveredCell.verse);
+    const max = Math.max(anchorVerse, hoveredCell.verse);
+    return new Set(Array.from({ length: max - min + 1 }, (_, index) => min + index));
+  }, [hoveredCell, isShiftDown, selectedVerseTranslationId, selectedVerses, selectionAnchorVerse]);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.ctrlKey || event.metaKey) {
+        setIsCtrlLikeDown(true);
+      }
+      if (event.shiftKey) {
+        setIsShiftDown(true);
+      }
+    };
+
+    const handleKeyUp = (event: KeyboardEvent) => {
+      setIsCtrlLikeDown(event.ctrlKey || event.metaKey);
+      setIsShiftDown(event.shiftKey);
+    };
+
+    const handleWindowBlur = () => {
+      setIsCtrlLikeDown(false);
+      setIsShiftDown(false);
+      setHoveredCell(null);
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keyup', handleKeyUp);
+    window.addEventListener('blur', handleWindowBlur);
+
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keyup', handleKeyUp);
+      window.removeEventListener('blur', handleWindowBlur);
+    };
+  }, []);
+
+  useEffect(() => {
+    setMobileMultiSelectMode(null);
+    if (longPressTimeoutRef.current) {
+      window.clearTimeout(longPressTimeoutRef.current);
+      longPressTimeoutRef.current = null;
+    }
+  }, [selectedBook, selectedChapter]);
+
+  useEffect(() => {
+    if (selectedVerses.length <= 1 && mobileMultiSelectMode) {
+      setMobileMultiSelectMode(null);
+    }
+  }, [mobileMultiSelectMode, selectedVerses.length]);
+
+  const clearPendingLongPress = () => {
+    if (longPressTimeoutRef.current) {
+      window.clearTimeout(longPressTimeoutRef.current);
+      longPressTimeoutRef.current = null;
+    }
+  };
+
+  const handleVerseCellClick = (
+    event: React.MouseEvent<HTMLSpanElement>,
+    translationId: string,
+    verse: number
+  ) => {
+    if (Date.now() < suppressClickUntilRef.current) {
+      event.preventDefault();
+      return;
+    }
+
+    if (mobileMultiSelectMode) {
+      event.preventDefault();
+      return;
+    }
+
+    const mode: VerseSelectionMode = (event.ctrlKey || event.metaKey)
+      ? 'toggle'
+      : (event.shiftKey ? 'range' : 'single');
+
+    onVerseCellSelect?.(verse, translationId, mode);
+  };
+
+  const handleVerseTouchStart = (translationId: string, verse: number) => {
+    if (!isMobileLayout) {
+      return;
+    }
+
+    longPressTriggeredRef.current = false;
+    clearPendingLongPress();
+    longPressTimeoutRef.current = window.setTimeout(() => {
+      longPressTriggeredRef.current = true;
+      suppressClickUntilRef.current = Date.now() + 700;
+      setMobileMultiSelectMode({ translationId, anchorVerse: verse });
+      onVerseCellSelect?.(verse, translationId, 'single');
+
+      if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
+        navigator.vibrate(20);
+      }
+    }, 450);
+  };
+
+  const handleVerseTouchMove = () => {
+    clearPendingLongPress();
+  };
+
+  const handleVerseTouchEnd = (
+    event: React.TouchEvent<HTMLSpanElement>,
+    translationId: string,
+    verse: number
+  ) => {
+    if (!isMobileLayout) {
+      return;
+    }
+
+    clearPendingLongPress();
+
+    if (longPressTriggeredRef.current) {
+      event.preventDefault();
+      return;
+    }
+
+    if (mobileMultiSelectMode) {
+      event.preventDefault();
+      if (mobileMultiSelectMode.translationId === translationId) {
+        onVerseCellSelect?.(verse, translationId, 'mobile-range');
+        setMobileMultiSelectMode(null);
+      }
+      return;
+    }
+
+    onVerseCellSelect?.(verse, translationId, 'single');
+    event.preventDefault();
+  };
+
   if (verseNumbers.length === 0) {
     return <p className="text-body-secondary mb-0">Select a chapter to begin.</p>;
   }
@@ -229,18 +395,29 @@ const VerseDisplay: React.FC<VerseDisplayProps> = ({
             <label className="verse-grid-heading-label" htmlFor="verse-grid-chapter-select">
               Chapter
             </label>
-            <select
-              id="verse-grid-chapter-select"
-              className="form-select form-select-sm verse-grid-heading-select w-auto"
-              value={selectedChapter}
-              onChange={(event) => onChapterChange(Number.parseInt(event.target.value, 10))}
-            >
-              {availableChapters.map((chapter) => (
-                <option key={chapter.chapter} value={chapter.chapter}>
-                  {chapter.chapter}
-                </option>
-              ))}
-            </select>
+            <div className="verse-grid-heading-control-inline">
+              <select
+                id="verse-grid-chapter-select"
+                className="form-select form-select-sm verse-grid-heading-select w-auto"
+                value={selectedChapter}
+                onChange={(event) => onChapterChange(Number.parseInt(event.target.value, 10))}
+              >
+                {availableChapters.map((chapter) => (
+                  <option key={chapter.chapter} value={chapter.chapter}>
+                    {chapter.chapter}
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                className="verse-grid-copy-button"
+                aria-label="Copy selected verses (Ctrl+C)"
+                title="Copy selected verses (Ctrl+C)"
+                onClick={() => void onCopySelectedVerses()}
+              >
+                <i className="fa-regular fa-copy" aria-hidden="true"></i>
+              </button>
+            </div>
           </div>
           {showPanelToggle && (
             <div className="verse-grid-panel-toggle-wrap">
@@ -298,7 +475,7 @@ const VerseDisplay: React.FC<VerseDisplayProps> = ({
           <div
             key={verseNumber}
             id={verseDomId(selectedBook ?? '', selectedChapter, verseNumber)}
-            className={`verse-grid-row ${focusVerse === verseNumber ? 'is-focused' : ''}`}
+            className="verse-grid-row"
             role="listitem"
           >
             <a
@@ -306,7 +483,7 @@ const VerseDisplay: React.FC<VerseDisplayProps> = ({
               className="verse-number"
               onClick={(event) => {
                 event.preventDefault();
-                onVerseClick?.(verseNumber);
+                onVerseNumberClick?.(verseNumber);
               }}
               aria-label={`Verse ${verseNumber}`}
               title={`Verse ${verseNumber}`}
@@ -316,9 +493,47 @@ const VerseDisplay: React.FC<VerseDisplayProps> = ({
             {visibleTranslationIds.map((translationId) => {
               const verseText =
                 chaptersByTranslation[translationId]?.verses.find((verse) => verse.verse === verseNumber)?.text ?? '';
+              const isSelected = selectedVerseTranslationId === translationId && selectedVerseSet.has(verseNumber);
+              const isTranslationEligible =
+                selectedVerses.length === 0
+                || !selectedVerseTranslationId
+                || selectedVerseTranslationId === translationId;
+              const isHoverTarget = hoveredCell?.translationId === translationId && hoveredCell?.verse === verseNumber;
+              const isCtrlEligible = isHoverTarget && isCtrlLikeDown && isTranslationEligible;
+              const isRangePreview = selectedVerseTranslationId === translationId && shiftPreviewSet.has(verseNumber);
+              const isMobileAnchor =
+                mobileMultiSelectMode?.translationId === translationId
+                && mobileMultiSelectMode.anchorVerse === verseNumber;
 
               return (
-                <span key={`${translationId}-${verseNumber}`} className="verse-text">
+                <span
+                  key={`${translationId}-${verseNumber}`}
+                  className={[
+                    'verse-text',
+                    isSelected ? 'is-selected' : '',
+                    isCtrlEligible ? 'is-ctrl-eligible' : '',
+                    isRangePreview ? 'is-range-preview' : '',
+                    isMobileAnchor ? 'is-mobile-anchor' : '',
+                  ].filter(Boolean).join(' ')}
+                  data-translation-id={translationId}
+                  data-verse={verseNumber}
+                  onMouseDown={(event) => {
+                    if (event.shiftKey) {
+                      event.preventDefault();
+                    }
+                  }}
+                  onClick={(event) => handleVerseCellClick(event, translationId, verseNumber)}
+                  onMouseEnter={() => setHoveredCell({ translationId, verse: verseNumber })}
+                  onMouseLeave={() => setHoveredCell((current) => {
+                    if (!current || current.translationId !== translationId || current.verse !== verseNumber) {
+                      return current;
+                    }
+                    return null;
+                  })}
+                  onTouchStart={() => handleVerseTouchStart(translationId, verseNumber)}
+                  onTouchMove={handleVerseTouchMove}
+                  onTouchEnd={(event) => handleVerseTouchEnd(event, translationId, verseNumber)}
+                >
                   {verseText || '-'}
                 </span>
               );

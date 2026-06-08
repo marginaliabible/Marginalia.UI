@@ -7,7 +7,8 @@ import {
 import {
   setSelectedBook,
   setSelectedChapter,
-  setFocusVerse,
+  setVerseSelection,
+  clearVerseSelection,
 } from '../store/slices/uiSlice';
 import { bibleService } from '../services/bibleService';
 import { searchIndexService } from '../services/searchIndexService';
@@ -23,7 +24,17 @@ interface WorkspaceMainPaneProps {
   isMobileLayout: boolean;
   setIsMobilePanelOpen: (open: boolean) => void;
   translationMetadataById: Map<string, BibleTranslationMeta>;
+  onCopySelectedVerses: () => Promise<void> | void;
+  mainPaneRef: React.RefObject<HTMLDivElement | null>;
 }
+
+type VerseSelectionMode = 'single' | 'toggle' | 'range' | 'mobile-range';
+
+const getVerseRange = (start: number, end: number): number[] => {
+  const min = Math.min(start, end);
+  const max = Math.max(start, end);
+  return Array.from({ length: max - min + 1 }, (_, index) => min + index);
+};
 
 const WorkspaceMainPane: React.FC<WorkspaceMainPaneProps> = ({
   isDesktopLayout,
@@ -33,6 +44,8 @@ const WorkspaceMainPane: React.FC<WorkspaceMainPaneProps> = ({
   isMobileLayout,
   setIsMobilePanelOpen,
   translationMetadataById,
+  onCopySelectedVerses,
+  mainPaneRef,
 }) => {
   const dispatch = useAppDispatch();
   const { currentBible } = useAppSelector((state) => state.bible);
@@ -41,7 +54,9 @@ const WorkspaceMainPane: React.FC<WorkspaceMainPaneProps> = ({
     translationRecords,
     selectedBook,
     selectedChapter,
-    focusVerse,
+    selectedVerseTranslationId,
+    selectedVerses,
+    selectionAnchorVerse,
   } = useAppSelector((state) => state.ui);
 
   const [chaptersByTranslation, setChaptersByTranslation] = useState<Record<string, BibleChapter | null>>({});
@@ -110,7 +125,7 @@ const WorkspaceMainPane: React.FC<WorkspaceMainPaneProps> = ({
     const nextChapter = nextBook.chapters[0]?.chapter ?? 1;
     dispatch(setSelectedBook(bookName));
     dispatch(setSelectedChapter(nextChapter));
-    dispatch(setFocusVerse(null));
+    dispatch(clearVerseSelection());
     void scrollToVerse({ book: bookName, chapter: nextChapter, verse: 1 });
   };
 
@@ -121,19 +136,81 @@ const WorkspaceMainPane: React.FC<WorkspaceMainPaneProps> = ({
     const nextChapter = isValidChapter ? chapter : selectedBookEntry?.chapters[0]?.chapter ?? 1;
 
     dispatch(setSelectedChapter(nextChapter));
-    dispatch(setFocusVerse(null));
+    dispatch(clearVerseSelection());
     void scrollToVerse({ book: selectedBook, chapter: nextChapter, verse: 1 });
   };
 
-  const handleVerseClick = (verse: number) => {
+  const openVersePanel = (verse: number) => {
     if (isMobileLayout && !isPanelDetached) {
       setIsMobilePanelOpen(true);
     }
 
-    dispatch(setFocusVerse(verse));
-
     if (selectedBook) {
       dispatch(openTranslationsTab({ book: selectedBook, chapter: selectedChapter, verse }));
+    }
+  };
+
+  const handleVerseNumberClick = (verse: number) => {
+    openVersePanel(verse);
+  };
+
+  const focusMainPane = () => {
+    mainPaneRef.current?.focus({ preventScroll: true });
+  };
+
+  const handleVerseCellSelect = (
+    verse: number,
+    translationId: string,
+    mode: VerseSelectionMode
+  ) => {
+    focusMainPane();
+
+    const hasSelection = selectedVerses.length > 0 && Boolean(selectedVerseTranslationId);
+    const translationLocked = hasSelection && selectedVerseTranslationId !== translationId;
+
+    if (translationLocked && mode !== 'single') {
+      return;
+    }
+
+    if (mode === 'single') {
+      dispatch(setVerseSelection({ translationId, verses: [verse], anchorVerse: verse }));
+      openVersePanel(verse);
+      return;
+    }
+
+    if (mode === 'toggle') {
+      const currentSet = new Set(selectedVerses);
+      if (selectedVerseTranslationId !== translationId) {
+        dispatch(setVerseSelection({ translationId, verses: [verse], anchorVerse: verse }));
+        openVersePanel(verse);
+        return;
+      }
+
+      if (currentSet.has(verse)) {
+        currentSet.delete(verse);
+      } else {
+        currentSet.add(verse);
+      }
+
+      const nextVerses = Array.from(currentSet).sort((a, b) => a - b);
+      if (nextVerses.length === 0) {
+        dispatch(clearVerseSelection());
+      } else {
+        dispatch(setVerseSelection({ translationId, verses: nextVerses, anchorVerse: verse }));
+      }
+      openVersePanel(verse);
+      return;
+    }
+
+    if (mode === 'range' || mode === 'mobile-range') {
+      if (selectedVerseTranslationId && selectedVerseTranslationId !== translationId) {
+        return;
+      }
+
+      const anchorVerse = selectionAnchorVerse ?? selectedVerses[0] ?? verse;
+      const range = getVerseRange(anchorVerse, verse);
+      dispatch(setVerseSelection({ translationId, verses: range, anchorVerse }));
+      openVersePanel(verse);
     }
   };
 
@@ -144,6 +221,9 @@ const WorkspaceMainPane: React.FC<WorkspaceMainPaneProps> = ({
   return (
     <section
       className="workspace-pane workspace-main"
+      ref={mainPaneRef}
+      tabIndex={-1}
+      onPointerDownCapture={focusMainPane}
       style={
         isDesktopLayout && activeWorkspacePanel && !isPanelDetached
           ? { flexBasis: `${mainPanePercent}%` }
@@ -162,10 +242,15 @@ const WorkspaceMainPane: React.FC<WorkspaceMainPaneProps> = ({
               availableChapters={selectedBookEntry?.chapters ?? []}
               selectedBook={selectedBook}
               selectedChapter={selectedChapter}
-              focusVerse={focusVerse}
+              isMobileLayout={isMobileLayout}
+              selectedVerseTranslationId={selectedVerseTranslationId}
+              selectedVerses={selectedVerses}
+              selectionAnchorVerse={selectionAnchorVerse}
               onBookChange={handleBookSelectionChange}
               onChapterChange={handleChapterSelectionChange}
-              onVerseClick={handleVerseClick}
+              onVerseNumberClick={handleVerseNumberClick}
+              onVerseCellSelect={handleVerseCellSelect}
+              onCopySelectedVerses={onCopySelectedVerses}
               verseDomId={verseDomId}
             />
           ) : (

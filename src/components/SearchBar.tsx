@@ -7,7 +7,7 @@ import {
   runSearchInTab,
   clearSearch,
 } from '../store/slices/bibleSlice';
-import { setSearchTerm, setFocusVerse } from '../store/slices/uiSlice';
+import { setSearchTerm, clearVerseSelection } from '../store/slices/uiSlice';
 import { parseQuickJump } from '../utils/reference-parser';
 import type { QuickJumpTarget } from '../models/bible';
 
@@ -156,7 +156,7 @@ const SearchBar: React.FC<SearchBarProps> = ({
 
     if (!query) {
       dispatch(clearSearch());
-      dispatch(setFocusVerse(null));
+      dispatch(clearVerseSelection());
       return;
     }
 

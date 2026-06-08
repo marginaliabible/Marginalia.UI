@@ -94,7 +94,7 @@ const TranslationsPanel: React.FC<TranslationsPanelProps> = ({
     return (
       <div className="card border-0 shadow-sm h-100">
         <div className="card-body d-flex flex-column justify-content-center align-items-center text-center">
-          <p className="text-body-secondary mb-0">Click a verse number to open translations</p>
+          <p className="text-body-secondary mb-0">Click a verse or verse number to open translations</p>
         </div>
       </div>
     );

@@ -6,7 +6,7 @@ import WorkspaceSidePanel from './components/WorkspaceSidePanel';
 import SidePanelContent from './components/SidePanelContent';
 import LoadingStatus from './components/LoadingStatus';
 import SettingsModal from './components/SettingsModal';
-import { useEffect, useMemo, useRef, useState, ChangeEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, ChangeEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { useAppDispatch, useAppSelector } from './store/hooks';
 import {
@@ -21,7 +21,8 @@ import {
   setSelectedTranslationIds,
   setSelectedBook,
   setSelectedChapter,
-  setFocusVerse,
+  setVerseSelection,
+  clearVerseSelection,
   setSelectedLanguages,
   setTheme,
   setReady,
@@ -55,6 +56,7 @@ function App() {
   const dispatch = useAppDispatch();
   const modalRef = useRef<any>(null);
   const workspaceRef = useRef<HTMLDivElement | null>(null);
+  const mainPaneRef = useRef<HTMLDivElement | null>(null);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const [isMobilePanelOpen, setIsMobilePanelOpen] = useState(false);
 
@@ -75,6 +77,7 @@ function App() {
     translationRecords,
     selectedBook,
     selectedChapter,
+    selectedVerses,
     selectedLanguages,
     theme,
     ready,
@@ -109,18 +112,109 @@ function App() {
     setIsMobilePanelOpen,
   });
 
-  // Ctrl/Cmd+K to focus search input
+  const handleCopySelectedVerses = useCallback(async () => {
+    if (!currentBible || !selectedBook) {
+      return;
+    }
+
+    const book = currentBible.books.find((entry) => entry.name === selectedBook);
+    const chapter = book?.chapters.find((entry) => entry.chapter === selectedChapter);
+    if (!book || !chapter) {
+      return;
+    }
+
+    const availableVerseNumbers = chapter.verses.map((verse) => verse.verse);
+    const chosenVerses = selectedVerses.length > 0
+      ? selectedVerses.filter((verse) => availableVerseNumbers.includes(verse))
+      : [chapter.verses[0]?.verse].filter((verse): verse is number => typeof verse === 'number');
+
+    if (chosenVerses.length === 0) {
+      return;
+    }
+
+    const normalizedVerses = Array.from(new Set(chosenVerses)).sort((left, right) => left - right);
+    const verseTexts = normalizedVerses
+      .map((verseNumber) => ({
+        verseNumber,
+        text: chapter.verses.find((verse) => verse.verse === verseNumber)?.text ?? '',
+      }))
+      .filter((entry) => entry.text.length > 0);
+
+    if (verseTexts.length === 0) {
+      return;
+    }
+
+    const compressedReferenceParts: string[] = [];
+    let rangeStart = normalizedVerses[0];
+    let previousVerse = normalizedVerses[0];
+
+    for (let index = 1; index < normalizedVerses.length; index += 1) {
+      const verseNumber = normalizedVerses[index];
+      if (verseNumber === previousVerse + 1) {
+        previousVerse = verseNumber;
+        continue;
+      }
+
+      const rangeLength = previousVerse - rangeStart + 1;
+      compressedReferenceParts.push(
+        rangeLength > 2 ? `${rangeStart}-${previousVerse}` : normalizedVerses.slice(normalizedVerses.indexOf(rangeStart), normalizedVerses.indexOf(previousVerse) + 1).join(', ')
+      );
+
+      rangeStart = verseNumber;
+      previousVerse = verseNumber;
+    }
+
+    const finalRangeLength = previousVerse - rangeStart + 1;
+    compressedReferenceParts.push(
+      finalRangeLength > 2 ? `${rangeStart}-${previousVerse}` : normalizedVerses.slice(normalizedVerses.indexOf(rangeStart), normalizedVerses.indexOf(previousVerse) + 1).join(', ')
+    );
+
+    const referenceSuffix = compressedReferenceParts.join(', ');
+
+    const header = `${selectedBook} ${selectedChapter}:${referenceSuffix}`;
+    const body = verseTexts.length === 1
+      ? verseTexts[0].text
+      : verseTexts.map((entry) => `${entry.verseNumber}\u00A0 ${entry.text}`).join('\n');
+    const copyText = `${header}\n${body}`;
+
+    try {
+      await navigator.clipboard.writeText(copyText);
+    } catch {
+      const fallback = document.createElement('textarea');
+      fallback.value = copyText;
+      fallback.setAttribute('readonly', 'true');
+      fallback.style.position = 'fixed';
+      fallback.style.opacity = '0';
+      document.body.appendChild(fallback);
+      fallback.select();
+      document.execCommand('copy');
+      document.body.removeChild(fallback);
+    }
+  }, [currentBible, selectedBook, selectedChapter, selectedVerses]);
+
+  // Ctrl/Cmd+K to focus search input; Ctrl+C to copy selected verses from the focused main pane.
   useEffect(() => {
-    const handleSearchShortcut = (e: KeyboardEvent) => {
+    const handleShortcut = (e: KeyboardEvent) => {
       if (e.key.toLowerCase() === 'k' && (e.ctrlKey || e.metaKey)) {
         e.preventDefault();
         searchInputRef.current?.focus();
         searchInputRef.current?.select();
+        return;
+      }
+
+      const isMainPaneFocused = Boolean(
+        mainPaneRef.current && document.activeElement && mainPaneRef.current.contains(document.activeElement)
+      );
+
+      if (isMainPaneFocused && e.ctrlKey && !e.altKey && !e.metaKey && e.key.toLowerCase() === 'c') {
+        e.preventDefault();
+        void handleCopySelectedVerses();
       }
     };
-    window.addEventListener('keydown', handleSearchShortcut);
-    return () => window.removeEventListener('keydown', handleSearchShortcut);
-  }, []);
+
+    window.addEventListener('keydown', handleShortcut, true);
+    return () => window.removeEventListener('keydown', handleShortcut, true);
+  }, [handleCopySelectedVerses]);
 
   // Initialize app
   useEffect(() => {
@@ -158,20 +252,12 @@ function App() {
         && savedState.lastChapter > 0;
       const initialBook = hasSavedReference ? savedState.lastBook : 'John';
       const initialChapter = hasSavedReference ? savedState.lastChapter : 10;
-      const initialVerse =
-        hasSavedReference
-        && typeof savedState?.lastVerse === 'number'
-        && savedState.lastVerse > 0
-          ? savedState.lastVerse
-          : 10;
-
       dispatch(restoreState({
         selectedTranslationId: nextTranslationId,
         selectedTranslationIds: nextTranslationIds,
         translationRecords: nextTranslationRecords,
         selectedBook: initialBook,
         selectedChapter: initialChapter,
-        focusVerse: initialVerse,
         theme: savedState?.theme ?? detectPreferredTheme(),
         selectedLanguages: finalLanguages,
       }));
@@ -230,11 +316,9 @@ function App() {
     const defaultChapter = chapterTenExists
       ? 10
       : (johnBook.chapters[0]?.chapter ?? 1);
-    const defaultVerse = chapterTenExists ? 10 : 1;
-
     dispatch(setSelectedBook(johnBook.name));
     dispatch(setSelectedChapter(defaultChapter));
-    dispatch(setFocusVerse(defaultVerse));
+    dispatch(clearVerseSelection());
   }, [currentBible, selectedBook, dispatch]);
 
   // Apply theme changes to document
@@ -341,7 +425,15 @@ function App() {
 
     dispatch(setSelectedBook(target.book));
     dispatch(setSelectedChapter(target.chapter));
-    dispatch(setFocusVerse(target.verse ?? null));
+    if (target.verse) {
+      dispatch(setVerseSelection({
+        translationId: nextActiveId,
+        verses: [target.verse],
+        anchorVerse: target.verse,
+      }));
+    } else {
+      dispatch(clearVerseSelection());
+    }
 
     await scrollToVerse(target);
   };
@@ -410,6 +502,8 @@ function App() {
             isMobileLayout={isMobileLayout}
             setIsMobilePanelOpen={setIsMobilePanelOpen}
             translationMetadataById={translationMetadataById}
+            onCopySelectedVerses={handleCopySelectedVerses}
+            mainPaneRef={mainPaneRef}
           />
 
           {isDesktopLayout && !isPanelDetached && activeWorkspacePanel && (

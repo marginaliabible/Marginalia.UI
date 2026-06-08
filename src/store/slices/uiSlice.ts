@@ -12,7 +12,9 @@ interface UiState {
   translationRecords: TranslationRecord[];
   selectedBook: string | null;
   selectedChapter: number;
-  focusVerse: number | null;
+  selectedVerseTranslationId: string | null;
+  selectedVerses: number[];
+  selectionAnchorVerse: number | null;
   searchTerm: string;
   selectedLanguages: string[];
   theme: ThemePreference;
@@ -25,7 +27,9 @@ const initialState: UiState = {
   translationRecords: [{ id: 'KJV', starred: true }],
   selectedBook: null,
   selectedChapter: 1,
-  focusVerse: null,
+  selectedVerseTranslationId: null,
+  selectedVerses: [],
+  selectionAnchorVerse: null,
   searchTerm: '',
   selectedLanguages: [],
   theme: 'light',
@@ -55,8 +59,36 @@ const uiSlice = createSlice({
     setSelectedChapter: (state, action: PayloadAction<number>) => {
       state.selectedChapter = action.payload;
     },
-    setFocusVerse: (state, action: PayloadAction<number | null>) => {
-      state.focusVerse = action.payload;
+    setVerseSelection: (
+      state,
+      action: PayloadAction<{
+        translationId: string | null;
+        verses: number[];
+        anchorVerse?: number | null;
+      }>
+    ) => {
+      const translationId = action.payload.translationId?.trim() ?? '';
+      const normalizedVerses = Array.from(new Set(
+        action.payload.verses
+          .filter((verse): verse is number => Number.isInteger(verse) && verse > 0)
+          .map((verse) => Number(verse))
+      )).sort((a, b) => a - b);
+
+      if (!translationId || normalizedVerses.length === 0) {
+        state.selectedVerseTranslationId = null;
+        state.selectedVerses = [];
+        state.selectionAnchorVerse = null;
+        return;
+      }
+
+      state.selectedVerseTranslationId = translationId;
+      state.selectedVerses = normalizedVerses;
+      state.selectionAnchorVerse = action.payload.anchorVerse ?? normalizedVerses[0];
+    },
+    clearVerseSelection: (state) => {
+      state.selectedVerseTranslationId = null;
+      state.selectedVerses = [];
+      state.selectionAnchorVerse = null;
     },
     setSearchTerm: (state, action: PayloadAction<string>) => {
       state.searchTerm = action.payload;
@@ -176,7 +208,8 @@ export const {
   setSelectedTranslationIds,
   setSelectedBook,
   setSelectedChapter,
-  setFocusVerse,
+  setVerseSelection,
+  clearVerseSelection,
   setSearchTerm,
   setSelectedLanguages,
   setTheme,
