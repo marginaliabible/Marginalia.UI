@@ -1,0 +1,64 @@
+.panel-scroll-with-tabs {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  min-height: 0;
+}
+
+.panel-tabs-content {
+  display: contents;
+}
+
+.panel-content-scroll {
+  display: none;
+}
+
+.panel-content-scroll.is-active {
+  display: block;
+}
+
+.panel-nav-tabs {
+  flex-wrap: wrap;
+  white-space: normal;
+  overflow: visible;
+  min-width: 0;
+}
+
+.panel-nav-tabs .nav-link {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding-right: 0.5rem;
+}
+
+.panel-tab-title {
+  display: inline-block;
+  max-width: 10rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.panel-tab-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.15rem;
+  height: 1.15rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  line-height: 1;
+}
+
+.panel-tab-close:hover {
+  background: color-mix(in srgb, var(--bs-body-color) 10%, transparent);
+}
+
+.pop-toggle-icon {
+  display: inline-block;
+}
+
+.pop-toggle-icon.is-pop-in {
+  transform: scale(-1, -1);
+}

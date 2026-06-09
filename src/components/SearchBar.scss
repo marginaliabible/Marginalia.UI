@@ -1,0 +1,118 @@
+.search-input-group {
+  align-items: stretch;
+}
+
+.search-input-wrap {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.search-input-wrap .form-control {
+  height: 100%;
+  padding-right: 2.5rem;
+}
+
+.search-input-wrap .form-control::-webkit-search-cancel-button {
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.search-clear-btn {
+  position: absolute;
+  right: 0.6rem;
+  top: 50%;
+  transform: translateY(-50%);
+  border: 0;
+  background: transparent;
+  color: var(--bs-secondary-color);
+  width: 1.55rem;
+  height: 1.55rem;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  font-size: 1.1rem;
+  cursor: pointer;
+}
+
+.search-clear-btn:hover,
+.search-clear-btn:focus-visible {
+  color: var(--bs-body-color);
+  background: color-mix(in srgb, var(--bs-body-color) 8%, transparent);
+}
+
+.quick-jump-preview {
+  font-size: 0.95rem;
+}
+
+.quick-jump-pulldown {
+  position: absolute;
+  top: calc(100% + 0.35rem);
+  left: 0;
+  right: 0;
+  z-index: 15;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.5rem;
+  padding: 0.65rem 0.85rem;
+  border: 1px solid color-mix(in srgb, var(--bs-primary) 18%, var(--bs-border-color));
+  border-radius: 0.75rem;
+  background: color-mix(in srgb, var(--bs-primary-bg-subtle) 60%, var(--bs-body-bg));
+  box-shadow: 0 0.55rem 1.3rem rgba(0, 0, 0, 0.12);
+  transition: opacity 180ms ease, transform 180ms ease, visibility 180ms ease;
+  transform-origin: top center;
+}
+
+.quick-jump-pulldown.is-visible {
+  opacity: 1;
+  transform: translateY(0);
+  visibility: visible;
+  pointer-events: auto;
+}
+
+.quick-jump-pulldown.is-hidden {
+  opacity: 0;
+  transform: translateY(-0.35rem);
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.quick-jump-shell {
+  position: relative;
+  width: 100%;
+  max-width: 56rem;
+  margin-inline: auto;
+}
+
+.search-kbd-hint {
+  position: absolute;
+  right: 2rem;
+  top: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  pointer-events: none;
+  opacity: 0.45;
+  font-size: 0.75rem;
+
+  kbd {
+    font-size: inherit;
+    background-color: var(--bs-body-bg);
+    color: var(--bs-body-color);
+    border: 1px solid var(--bs-border-color);
+    border-radius: 0.25rem;
+    padding: 0.1em 0.35em;
+    box-shadow: 0 1px 0 var(--bs-border-color);
+  }
+}
+
+.quick-jump-preview .reference {
+  font-weight: 600;
+}
+
+.quick-jump-preview .preview-text {
+  font-style: italic;
+}

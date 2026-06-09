@@ -1,0 +1,150 @@
+.workspace-layout {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  min-height: 0;
+}
+
+.workspace-layout.is-desktop.has-side-panel {
+  flex-direction: row;
+  align-items: stretch;
+}
+
+.workspace-pane {
+  min-width: 0;
+  min-height: 0;
+}
+
+.workspace-pane.workspace-main,
+.workspace-pane.workspace-side {
+  display: flex;
+  flex-direction: column;
+}
+
+.workspace-pane.workspace-main > .card {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.workspace-pane.workspace-side > .workspace-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.workspace-layout.has-side-panel .panel-scroll-with-tabs > .panel-tabs {
+  flex: 0 0 auto;
+}
+
+.workspace-layout.has-side-panel .panel-tabs-content {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.workspace-layout.has-side-panel .panel-content-scroll.is-active {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+}
+
+.workspace-layout.is-desktop.has-side-panel .workspace-pane.workspace-side {
+  position: sticky;
+  top: 1rem;
+  align-self: flex-start;
+  height: calc(100vh - 1rem);
+  max-height: calc(100vh - 1rem);
+}
+
+.workspace-layout.is-desktop.has-side-panel .workspace-pane.workspace-side > .workspace-scroll.panel-scroll-with-tabs {
+  height: 100%;
+  overflow: hidden;
+}
+
+.workspace-scroll {
+  min-height: 0;
+  overflow: auto;
+}
+
+.workspace-pane.workspace-main > .card > .workspace-scroll {
+  overflow: visible;
+}
+
+.workspace-divider {
+  position: relative;
+  flex: 0 0 0.7rem;
+  align-self: stretch;
+  cursor: col-resize;
+  user-select: none;
+  touch-action: none;
+  background: transparent;
+  border: 0;
+  outline: none;
+}
+
+.workspace-divider::before {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  transform: translateX(-50%);
+  background: color-mix(in srgb, var(--bs-border-color) 85%, transparent);
+}
+
+.workspace-divider:hover::before,
+.workspace-divider:focus-visible::before {
+  background: color-mix(in srgb, var(--bs-primary) 45%, var(--bs-border-color));
+}
+
+@media (max-width: 991.98px) {
+  .workspace-scroll {
+    max-height: none;
+  }
+
+  .workspace-layout.is-mobile.has-side-panel .workspace-pane.workspace-side {
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: min(88vw, 23.5rem);
+    max-width: 23.5rem;
+    height: 100dvh;
+    max-height: 100dvh;
+    z-index: 1050;
+    background: var(--bs-body-bg);
+    border-left: 1px solid color-mix(in srgb, var(--bs-border-color) 80%, transparent);
+    box-shadow: -10px 0 30px color-mix(in srgb, #000 18%, transparent);
+    transform: translateX(100%);
+    transition: transform 0.2s ease;
+    flex-direction: row;
+  }
+
+  .workspace-layout.is-mobile.has-side-panel .workspace-pane.workspace-side.is-open {
+    transform: translateX(0);
+  }
+
+  .workspace-layout.is-mobile.has-side-panel .workspace-pane.workspace-side:not(.is-open) {
+    pointer-events: none;
+  }
+
+  .workspace-layout.is-mobile.has-side-panel .workspace-pane.workspace-side > .workspace-scroll.panel-scroll-with-tabs {
+    flex: 1 1 auto;
+    min-width: 0;
+    height: 100%;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .workspace-divider {
+    display: none;
+  }
+}
+
+@media (max-width: 512px) {
+  .workspace-pane.workspace-main > .card > .workspace-scroll {
+    padding: 0 !important;
+  }
+}

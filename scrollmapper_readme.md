@@ -50,7 +50,7 @@ See the simple [DOCUMENTATION](https://github.com/scrollmapper/bible_databases/b
 - **FreBDM1744 (fr)**: FreBDM1744: Bible David Martin (1744)
 - **FreCrampon (fr)**: FreCrampon: La Bible Augustin Crampon 1923
 - **FreGeneve1669 (fr)**: FreGeneve1669: Le Nouveau Testament de la Bible de Genève de 1669
-- **FreJND (fr)**: FreJND: Bible J.N. Darby in French with Strong's numbers
+- **FreJND (fr)**: FreJND: Bible J.N. Darby in French
 - **FreLXX (fr)**: FreLXX: Traduction de la LXX par P. GIGUET et autres traducteurs, 1872.
 - **FreLXXGiguet (fr)**: FreLXXGiguet: Traduction de la LXX par Pierre GIGUET et autres traducteurs, 1872.
 - **FreOltramare1874 (fr)**: FreOltramare1874: Le Nouveau Testament Version Oltramare 1874
@@ -80,8 +80,8 @@ See the simple [DOCUMENTATION](https://github.com/scrollmapper/bible_databases/b
 - **JapDenmo (ja)**: JapDenmo: Japanese Denmo 電網聖書
 - **JapKougo (ja)**: JapKougo: Japanese Kougo-yaku 口語訳「聖書」(1954/1955年版)
 - **Jubilee2000 (en)**: Jubilee2000: English Jubilee 2000 Bible
-- **KJV (en)**: KJV: King James Version (1769) with Strongs Numbers and Morphology and CatchWords
-- **KJVA (en)**: KJVA: King James Version (1769) with Strongs Numbers and Morphology and CatchWords, including Apocrypha (without glosses)
+- **KJV (en)**: KJV: King James Version (1769)
+- **KJVA (en)**: KJVA: King James Version (1769), including Apocrypha
 - **KJVPCE (en)**: KJVPCE: King James Version: Pure Cambridge Edition
 - **KLV (tlh)**: KLV: Klingon Language Version of the World English Bible
 - **KorHKJV (ko)**: KorHKJV: Hangul King James Version
@@ -111,7 +111,7 @@ See the simple [DOCUMENTATION](https://github.com/scrollmapper/bible_databases/b
 - **PorBLivre (pt)**: PorBLivre: Bíblia Livre
 - **PorBLivreTR (pt)**: PorBLivreTR: Bíblia Livre - Textus Receptus
 - **PorNVA (pt)**: PorNVA: Bíblia Nova Versão de Acesso Livre
-- **RLT (en)**: RLT: Revised Literal Translation (2018) of the King James Version with Strongs Numbers and Morphology
+- **RLT (en)**: RLT: Revised Literal Translation (2018)
 - **RNKJV (en)**: RNKJV: Restored Name King James Version
 - **RWebster (en)**: RWebster: Revised Webster Version (1833)
 - **Rotherham (en)**: Rotherham: The Emphasised Bible by J. B. Rotherham

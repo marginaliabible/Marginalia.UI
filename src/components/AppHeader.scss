@@ -1,0 +1,8 @@
+.app-header-icon {
+  display: block;
+  flex-shrink: 0;
+}
+
+:root[data-theme='dark'] .app-header-icon {
+  color: var(--bs-heading-color);
+}

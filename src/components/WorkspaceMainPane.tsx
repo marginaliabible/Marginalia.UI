@@ -1,0 +1,420 @@
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import VerseDisplay from './VerseDisplay';
+import { useAppDispatch, useAppSelector } from '../store/hooks';
+import {
+  openTranslationsTab,
+} from '../store/slices/bibleSlice';
+import {
+  setSelectedBook,
+  setSelectedChapter,
+  setVerseSelection,
+  clearVerseSelection,
+} from '../store/slices/uiSlice';
+import { bibleService } from '../services/bibleService';
+import { searchIndexService } from '../services/searchIndexService';
+import { verseDomId, scrollToVerse } from '../App';
+import type { BibleChapter, BibleTranslationMeta } from '../models/bible';
+import type { WorkspacePanelKey } from '../App';
+
+interface WorkspaceMainPaneProps {
+  isDesktopLayout: boolean;
+  isPanelDetached: boolean;
+  activeWorkspacePanel: WorkspacePanelKey | null;
+  mainPanePercent: number;
+  isMobileLayout: boolean;
+  setIsMobilePanelOpen: (open: boolean) => void;
+  translationMetadataById: Map<string, BibleTranslationMeta>;
+  onCopySelectedVerses: () => Promise<void> | void;
+  mainPaneRef: React.RefObject<HTMLDivElement | null>;
+}
+
+type VerseSelectionMode = 'single' | 'toggle' | 'range' | 'mobile-range';
+
+const getVerseRange = (start: number, end: number): number[] => {
+  const min = Math.min(start, end);
+  const max = Math.max(start, end);
+  return Array.from({ length: max - min + 1 }, (_, index) => min + index);
+};
+
+const WorkspaceMainPane: React.FC<WorkspaceMainPaneProps> = ({
+  isDesktopLayout,
+  isPanelDetached,
+  activeWorkspacePanel,
+  mainPanePercent,
+  isMobileLayout,
+  setIsMobilePanelOpen,
+  translationMetadataById,
+  onCopySelectedVerses,
+  mainPaneRef,
+}) => {
+  const dispatch = useAppDispatch();
+  const { currentBible } = useAppSelector((state) => state.bible);
+  const {
+    selectedTranslationId,
+    translationRecords,
+    selectedBook,
+    selectedChapter,
+    selectedVerseTranslationId,
+    selectedVerses,
+    selectionAnchorVerse,
+  } = useAppSelector((state) => state.ui);
+
+  const [chaptersByTranslation, setChaptersByTranslation] = useState<Record<string, BibleChapter | null>>({});
+  const keyboardCursorRef = useRef<{
+    translationId: string;
+    book: string;
+    chapter: number;
+    anchorVerse: number;
+    cursorVerse: number;
+  } | null>(null);
+
+  const starredTranslationIds = useMemo(() => {
+    return translationRecords.filter((r) => r.starred).map((r) => r.id);
+  }, [translationRecords]);
+
+  const selectedBookEntry = useMemo(() => {
+    if (!currentBible || !selectedBook) return null;
+    return currentBible.books.find((book) => book.name === selectedBook) ?? null;
+  }, [currentBible, selectedBook]);
+
+  const translationLabels = useMemo(() => {
+    const labels: Record<string, string> = {};
+    for (const translationId of starredTranslationIds) {
+      const translation = translationMetadataById.get(translationId);
+      labels[translationId] = translation?.label ?? translationId;
+    }
+    return labels;
+  }, [starredTranslationIds, translationMetadataById]);
+
+  // Sync cache sizes
+  useEffect(() => {
+    const fullTranslationWorkingSetSize = new Set([
+      ...starredTranslationIds,
+      selectedTranslationId,
+    ]).size;
+
+    bibleService.setFullTranslationCacheLimit(fullTranslationWorkingSetSize);
+    searchIndexService.setIndexCacheLimit(Math.max(1, starredTranslationIds.length));
+  }, [selectedTranslationId, starredTranslationIds]);
+
+  // Load visible chapters for all starred translations
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadVisibleChapters = async () => {
+      if (!selectedBook || starredTranslationIds.length === 0) {
+        if (!cancelled) setChaptersByTranslation({});
+        return;
+      }
+
+      const entries = await Promise.all(
+        starredTranslationIds.map(async (translationId) => {
+          const chapter = await bibleService.loadChapter(translationId, selectedBook, selectedChapter);
+          return [translationId, chapter] as const;
+        })
+      );
+
+      if (!cancelled) {
+        setChaptersByTranslation(Object.fromEntries(entries));
+      }
+    };
+
+    void loadVisibleChapters();
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedBook, selectedChapter, starredTranslationIds]);
+
+  const handleBookSelectionChange = (bookName: string) => {
+    const nextBook = currentBible?.books.find((book) => book.name === bookName);
+    if (!nextBook) return;
+
+    const nextChapter = nextBook.chapters[0]?.chapter ?? 1;
+    dispatch(setSelectedBook(bookName));
+    dispatch(setSelectedChapter(nextChapter));
+    dispatch(clearVerseSelection());
+    void scrollToVerse({ book: bookName, chapter: nextChapter, verse: 1 });
+  };
+
+  const handleChapterSelectionChange = (chapter: number) => {
+    if (!selectedBook) return;
+
+    const isValidChapter = selectedBookEntry?.chapters.some((entry) => entry.chapter === chapter) ?? false;
+    const nextChapter = isValidChapter ? chapter : selectedBookEntry?.chapters[0]?.chapter ?? 1;
+
+    dispatch(setSelectedChapter(nextChapter));
+    dispatch(clearVerseSelection());
+    void scrollToVerse({ book: selectedBook, chapter: nextChapter, verse: 1 });
+  };
+
+  const openVersePanel = (verse: number) => {
+    if (isMobileLayout && !isPanelDetached) {
+      setIsMobilePanelOpen(true);
+    }
+
+    if (selectedBook) {
+      dispatch(openTranslationsTab({ book: selectedBook, chapter: selectedChapter, verse }));
+    }
+  };
+
+  const handleVerseNumberClick = (verse: number) => {
+    openVersePanel(verse);
+  };
+
+  const focusMainPane = () => {
+    mainPaneRef.current?.focus({ preventScroll: true });
+  };
+
+  const setKeyboardCursor = (
+    translationId: string,
+    anchorVerse: number,
+    cursorVerse: number
+  ) => {
+    if (!selectedBook) {
+      return;
+    }
+
+    keyboardCursorRef.current = {
+      translationId,
+      book: selectedBook,
+      chapter: selectedChapter,
+      anchorVerse,
+      cursorVerse,
+    };
+  };
+
+  const handleVerseCellSelect = (
+    verse: number,
+    translationId: string,
+    mode: VerseSelectionMode
+  ) => {
+    focusMainPane();
+
+    const hasSelection = selectedVerses.length > 0 && Boolean(selectedVerseTranslationId);
+    const translationLocked = hasSelection && selectedVerseTranslationId !== translationId;
+
+    if (translationLocked && mode !== 'single') {
+      return;
+    }
+
+    if (mode === 'single') {
+      dispatch(setVerseSelection({ translationId, verses: [verse], anchorVerse: verse }));
+      setKeyboardCursor(translationId, verse, verse);
+      openVersePanel(verse);
+      return;
+    }
+
+    if (mode === 'toggle') {
+      const currentSet = new Set(selectedVerses);
+      if (selectedVerseTranslationId !== translationId) {
+        dispatch(setVerseSelection({ translationId, verses: [verse], anchorVerse: verse }));
+        setKeyboardCursor(translationId, verse, verse);
+        return;
+      }
+
+      if (currentSet.has(verse)) {
+        currentSet.delete(verse);
+      } else {
+        currentSet.add(verse);
+      }
+
+      const nextVerses = Array.from(currentSet).sort((a, b) => a - b);
+      if (nextVerses.length === 0) {
+        dispatch(clearVerseSelection());
+        keyboardCursorRef.current = null;
+      } else {
+        dispatch(setVerseSelection({ translationId, verses: nextVerses, anchorVerse: verse }));
+        setKeyboardCursor(translationId, verse, verse);
+      }
+      return;
+    }
+
+    if (mode === 'range' || mode === 'mobile-range') {
+      if (selectedVerseTranslationId && selectedVerseTranslationId !== translationId) {
+        return;
+      }
+
+      const anchorVerse = selectionAnchorVerse ?? selectedVerses[0] ?? verse;
+      const range = getVerseRange(anchorVerse, verse);
+      dispatch(setVerseSelection({ translationId, verses: range, anchorVerse }));
+      setKeyboardCursor(translationId, anchorVerse, verse);
+
+      if (mode === 'mobile-range') {
+        openVersePanel(verse);
+      }
+    }
+  };
+
+  useEffect(() => {
+    keyboardCursorRef.current = null;
+  }, [selectedBook, selectedChapter]);
+
+  const handleArrowSelectionKey = useCallback((event: KeyboardEvent) => {
+    const isArrowUp = event.key === 'ArrowUp';
+    const isArrowDown = event.key === 'ArrowDown';
+    if (!isArrowUp && !isArrowDown) {
+      return;
+    }
+
+    if (!selectedVerseTranslationId || selectedVerses.length === 0) {
+      return;
+    }
+
+    const chapter = chaptersByTranslation[selectedVerseTranslationId];
+    const availableVerses = (chapter?.verses ?? []).map((entry) => entry.verse).sort((a, b) => a - b);
+    if (availableVerses.length === 0) {
+      return;
+    }
+
+    const availableVerseSet = new Set(availableVerses);
+    const currentSelection = Array.from(new Set(selectedVerses))
+      .filter((verse) => availableVerseSet.has(verse))
+      .sort((a, b) => a - b);
+    if (currentSelection.length === 0) {
+      return;
+    }
+
+    const direction = isArrowUp ? -1 : 1;
+
+    if (event.ctrlKey && !event.shiftKey && !event.altKey && !event.metaKey) {
+      if (currentSelection.length !== 1 || !selectedBook) {
+        return;
+      }
+
+      const currentVerse = currentSelection[0];
+      const currentIndex = availableVerses.indexOf(currentVerse);
+      if (currentIndex < 0) {
+        return;
+      }
+
+      const nextIndex = currentIndex + direction;
+      if (nextIndex < 0 || nextIndex >= availableVerses.length) {
+        event.preventDefault();
+        return;
+      }
+
+      const nextVerse = availableVerses[nextIndex];
+      dispatch(setVerseSelection({
+        translationId: selectedVerseTranslationId,
+        verses: [nextVerse],
+        anchorVerse: nextVerse,
+      }));
+      setKeyboardCursor(selectedVerseTranslationId, nextVerse, nextVerse);
+      openVersePanel(nextVerse);
+      event.preventDefault();
+      return;
+    }
+
+    if (!event.shiftKey || event.altKey || event.metaKey) {
+      return;
+    }
+
+    if (!selectedBook) {
+      return;
+    }
+
+    const anchorVerse = selectionAnchorVerse ?? currentSelection[0];
+    const cursorState = keyboardCursorRef.current;
+    let cursorVerse = anchorVerse;
+
+    if (
+      cursorState
+      && cursorState.translationId === selectedVerseTranslationId
+      && cursorState.book === selectedBook
+      && cursorState.chapter === selectedChapter
+    ) {
+      cursorVerse = cursorState.cursorVerse;
+    } else if (currentSelection.length === 1) {
+      cursorVerse = currentSelection[0];
+    } else {
+      const minVerse = currentSelection[0];
+      const maxVerse = currentSelection[currentSelection.length - 1];
+      cursorVerse = Math.abs(anchorVerse - minVerse) > Math.abs(maxVerse - anchorVerse) ? minVerse : maxVerse;
+    }
+
+    const cursorIndex = availableVerses.indexOf(cursorVerse);
+    if (cursorIndex < 0) {
+      return;
+    }
+
+    const nextIndex = cursorIndex + direction;
+    if (nextIndex < 0 || nextIndex >= availableVerses.length) {
+      event.preventDefault();
+      return;
+    }
+
+    const nextCursorVerse = availableVerses[nextIndex];
+    const nextRange = getVerseRange(anchorVerse, nextCursorVerse);
+    dispatch(setVerseSelection({
+      translationId: selectedVerseTranslationId,
+      verses: nextRange,
+      anchorVerse,
+    }));
+    setKeyboardCursor(selectedVerseTranslationId, anchorVerse, nextCursorVerse);
+    event.preventDefault();
+  }, [
+    chaptersByTranslation,
+    dispatch,
+    openVersePanel,
+    selectedBook,
+    selectedChapter,
+    selectedVerseTranslationId,
+    selectedVerses,
+    selectionAnchorVerse,
+    starredTranslationIds,
+  ]);
+
+  useEffect(() => {
+    window.addEventListener('keydown', handleArrowSelectionKey, true);
+    return () => window.removeEventListener('keydown', handleArrowSelectionKey, true);
+  }, [handleArrowSelectionKey]);
+
+  if (!currentBible) {
+    return null;
+  }
+
+  return (
+    <section
+      className="workspace-pane workspace-main"
+      ref={mainPaneRef}
+      tabIndex={-1}
+      onPointerDownCapture={focusMainPane}
+      style={
+        isDesktopLayout && activeWorkspacePanel && !isPanelDetached
+          ? { flexBasis: `${mainPanePercent}%` }
+          : undefined
+      }
+    >
+      <div className="card border-0 shadow-sm">
+        <div className="card-body workspace-scroll pb-4">
+          {selectedBook ? (
+            <VerseDisplay
+              chaptersByTranslation={chaptersByTranslation}
+              translationOrder={starredTranslationIds}
+              translationLabels={translationLabels}
+              selectedTranslationId={selectedTranslationId}
+              books={currentBible.books}
+              availableChapters={selectedBookEntry?.chapters ?? []}
+              selectedBook={selectedBook}
+              selectedChapter={selectedChapter}
+              isMobileLayout={isMobileLayout}
+              selectedVerseTranslationId={selectedVerseTranslationId}
+              selectedVerses={selectedVerses}
+              selectionAnchorVerse={selectionAnchorVerse}
+              onBookChange={handleBookSelectionChange}
+              onChapterChange={handleChapterSelectionChange}
+              onVerseNumberClick={handleVerseNumberClick}
+              onVerseCellSelect={handleVerseCellSelect}
+              onCopySelectedVerses={onCopySelectedVerses}
+              verseDomId={verseDomId}
+            />
+          ) : (
+            <p className="text-body-secondary mb-0">Select a chapter to begin.</p>
+          )}
+        </div>
+      </div>
+    </section>
+  );
+};
+
+export default WorkspaceMainPane;

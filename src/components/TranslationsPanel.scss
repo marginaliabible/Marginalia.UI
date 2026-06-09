@@ -1,0 +1,91 @@
+.translations-panel-shell {
+  container-type: inline-size;
+  container-name: translations-panel;
+}
+
+.translations-panel-layout {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  min-width: 0;
+}
+
+.translations-panel-verse-column,
+.translations-panel-add-column {
+  min-width: 0;
+}
+
+.translations-panel-verse-column {
+  container-type: inline-size;
+  container-name: translations-verse-column;
+}
+
+.translations-panel-add-column {
+  container-type: inline-size;
+  container-name: translations-add-column;
+}
+
+/* Shared grid base — also used by .results-grid in SearchResults */
+.translations-verse-grid,
+.results-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0.75rem;
+  align-items: start;
+  min-height: 0;
+}
+
+.translations-verse-grid-item,
+.results-grid-item {
+  min-width: 0;
+}
+
+.translations-verse-grid-empty,
+.results-grid-sentinel {
+  grid-column: 1 / -1;
+}
+
+.translations-verse-grid {
+  gap: 0.5rem;
+}
+
+@container translations-verse-column (min-width: 840px) {
+  .translations-verse-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@container translations-verse-column (min-width: 1260px) {
+  .translations-verse-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@container translations-verse-column (min-width: 1480px) {
+  .translations-verse-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+/* In docked mode, panel width is a fraction of viewport; allow 4-up at practical widths. */
+@container translations-verse-column (min-width: 960px) {
+  .workspace-layout.has-side-panel .translations-verse-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+@container translations-panel (min-width: 1200px) {
+  .translations-panel-layout {
+    flex-direction: row;
+    align-items: flex-start;
+  }
+
+  .translations-panel-verse-column {
+    flex: 1 1 auto;
+  }
+
+  .translations-panel-add-column {
+    flex: 0 0 26rem;
+    max-width: 26rem;
+  }
+}

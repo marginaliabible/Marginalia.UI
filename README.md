@@ -1,6 +1,6 @@
 # GitBible
 
-GitBible is a browser-only Angular application for exploring and searching Scripture. The default King James Version is bundled locally and additional translations are fetched directly from the [scrollmapper/bible_databases](https://github.com/scrollmapper/bible_databases/tree/master/formats/json) repository on demand. Translations are cached in IndexedDB for offline reuse, and your last location, search term, and theme preference are stored in `localStorage`.
+GitBible is a browser-only React application for exploring and searching Scripture. The default King James Version is bundled locally and additional translations are fetched directly from the [scrollmapper/bible_databases](https://github.com/scrollmapper/bible_databases/tree/master/formats/json) repository on demand. Translations are cached in IndexedDB for offline reuse, and your last location, search term, and theme preference are stored in `localStorage`.
 
 ## Features
 
@@ -9,6 +9,18 @@ GitBible is a browser-only Angular application for exploring and searching Scrip
 - Translation selector with remote downloads cached locally for subsequent sessions
 - Mobile-first layout with responsive book/chapter selectors
 - Light and dark themes with a single-toggle switch
+- State management with Redux Toolkit
+- Built with Vite for fast development and optimized production builds
+
+## Tech Stack
+
+- **React 18** - Modern React with hooks
+- **TypeScript** - Type-safe development
+- **Redux Toolkit** - Simplified Redux state management
+- **Vite** - Next-generation frontend tooling
+- **SCSS** - Enhanced styling with Bootstrap 5
+- **IndexedDB** - Offline-first data persistence via idb
+- **Jest & React Testing Library** - Unit testing
 
 ## Getting Started
 
@@ -24,7 +36,7 @@ GitBible is a browser-only Angular application for exploring and searching Scrip
 	npm start
 	```
 
-	The app runs at [http://localhost:4200](http://localhost:4200) and reloads on file changes.
+	The app runs at [http://localhost:3000](http://localhost:3000) with hot module replacement.
 
 ## Usage Tips
 
@@ -33,15 +45,61 @@ GitBible is a browser-only Angular application for exploring and searching Scrip
 - Translation downloads are stored in IndexedDB for 30 days. You can force a fresh copy by clearing browser storage or using devtools to delete the `gitbible-db` database.
 - Theme preference, last translation, and the most recent verse location persist across browser sessions.
 
+## Performance Monitoring
+
+GitBible includes built-in cache diagnostics for development and tuning:
+
+**View Cache Statistics:**
+Open your browser DevTools console and run:
+```javascript
+__GITBIBLE_CACHE_STATS__()
+```
+
+This returns an object with:
+- `chapterHits` / `chapterMisses` - Chapter cache access patterns
+- `verseHits` / `verseMisses` - Verse cache access patterns
+- `translationHits` / `translationMisses` - Full translation cache access patterns
+- `chapterEvictions` / `verseEvictions` - LRU eviction counts (indicates cache churn)
+- `chapterCacheSize` / `verseCacheSize` / `translationCacheSize` - Current in-memory usage
+
+Use this to monitor cache efficiency while navigating, searching, and jumping between verses. High eviction counts suggest cache sizes may be too small; low hit ratios suggest the cache isn't being effectively reused.
+
 ## Build and Test
 
+- Development: `npm start` or `npm run dev`
 - Production build: `npm run build`
-- Unit tests (Karma): `npm test`
+- Preview build: `npm run preview`
+- Unit tests: `npm test`
+- Watch tests: `npm run test:watch`
+
+## Project Structure
+
+```
+src/
+├── App.tsx              # Main application component
+├── App.scss             # Component-specific styles
+├── main.tsx             # Application entry point
+├── styles.scss          # Global styles and Bootstrap imports
+├── models/              # TypeScript interfaces and types
+│   └── bible.ts
+├── services/            # Business logic services
+│   └── bibleService.ts
+├── store/               # Redux store configuration
+│   ├── store.ts         # Store setup
+│   ├── hooks.ts         # Typed Redux hooks
+│   └── slices/          # Redux slices
+│       ├── bibleSlice.ts
+│       └── uiSlice.ts
+└── utils/               # Utility functions
+    ├── reference-parser.ts
+    └── book-aliases.ts
+```
 
 ## Adding New Data Sources
 
-- Place additional bundled translations in `public/data/` to ship them with the app.
+- Place additional bundled translations in `public/data/bibles/` to ship them with the app.
 - Remote translations must be accessible via raw JSON URLs. Add them to the GitBible dropdown by uploading to GitHub (or any CORS-enabled host) following the same structure as the Scrollmapper data set.
+- Update `public/data/bibles/_settings.json` to register new translations.
 
 ## License Notes
 

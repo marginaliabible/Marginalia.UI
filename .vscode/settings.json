@@ -1,5 +1,8 @@
 {
     "cSpell.words": [
         "Scrollmapper"
-    ]
+    ],
+    "chat.tools.terminal.autoApprove": {
+        "npm install": true
+    }
 }
