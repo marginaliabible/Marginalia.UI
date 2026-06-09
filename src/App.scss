@@ -586,6 +586,10 @@
   flex-direction: column;
 }
 
+.workspace-pane.workspace-main:focus-visible {
+  outline: 0;
+}
+
 .workspace-pane.workspace-main > .card {
   flex: 1 1 auto;
   min-height: 0;

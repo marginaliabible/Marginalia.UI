@@ -486,6 +486,8 @@ function App() {
       dispatch(clearVerseSelection());
     }
 
+    mainPaneRef.current?.focus();
+
     await scrollToVerse(target);
   };
 
