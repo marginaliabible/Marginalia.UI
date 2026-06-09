@@ -177,19 +177,70 @@ function App() {
       : verseTexts.map((entry) => `${entry.verseNumber}\u00A0 ${entry.text}`).join('\n');
     const copyText = `${header}\n${body}`;
 
+    const escapeHtml = (value: string): string => {
+      return value
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    };
+
+    const referenceHtml = `<span>${escapeHtml(header)}</span><br/>`;
+    const bodyHtml = verseTexts.length === 1
+      ? `${escapeHtml(verseTexts[0].text)}`
+      : verseTexts
+        .map((entry) => (
+          `<span style="color:#808080;">${entry.verseNumber}</span> ${escapeHtml(entry.text)}`
+        ))
+        .join('<br/>');
+    const copyHtml = `<div style="font-family:Calibri, Arial, sans-serif; font-size:11pt;">${referenceHtml}${bodyHtml}</div>`;
+
+    const copyViaClipboardEvent = (): boolean => {
+      const listener = (event: ClipboardEvent) => {
+        event.preventDefault();
+        event.clipboardData?.setData('text/plain', copyText);
+        event.clipboardData?.setData('text/html', copyHtml);
+      };
+
+      document.addEventListener('copy', listener, { once: true });
+      const didCopy = document.execCommand('copy');
+      document.removeEventListener('copy', listener);
+      return didCopy;
+    };
+
     try {
-      await navigator.clipboard.writeText(copyText);
+      if (typeof ClipboardItem !== 'undefined' && typeof navigator.clipboard.write === 'function') {
+        await navigator.clipboard.write([
+          new ClipboardItem({
+            'text/plain': new Blob([copyText], { type: 'text/plain' }),
+            'text/html': new Blob([copyHtml], { type: 'text/html' }),
+          }),
+        ]);
+        return;
+      }
     } catch {
-      const fallback = document.createElement('textarea');
-      fallback.value = copyText;
-      fallback.setAttribute('readonly', 'true');
-      fallback.style.position = 'fixed';
-      fallback.style.opacity = '0';
-      document.body.appendChild(fallback);
-      fallback.select();
-      document.execCommand('copy');
-      document.body.removeChild(fallback);
+      // Continue to legacy fallback paths below.
     }
+
+    if (copyViaClipboardEvent()) {
+      return;
+    }
+
+    if (typeof navigator.clipboard.writeText === 'function') {
+      await navigator.clipboard.writeText(copyText);
+      return;
+    }
+
+    const fallback = document.createElement('textarea');
+    fallback.value = copyText;
+    fallback.setAttribute('readonly', 'true');
+    fallback.style.position = 'fixed';
+    fallback.style.opacity = '0';
+    document.body.appendChild(fallback);
+    fallback.select();
+    document.execCommand('copy');
+    document.body.removeChild(fallback);
   }, [currentBible, selectedBook, selectedChapter, selectedVerses]);
 
   // Ctrl/Cmd+K to focus search input; Ctrl+C to copy selected verses from the focused main pane.
