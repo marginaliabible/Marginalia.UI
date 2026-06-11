@@ -1,7 +1,7 @@
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { BibleBook, BibleChapter } from '../models/bible';
 
-type VerseSelectionMode = 'single' | 'toggle' | 'range' | 'mobile-range';
+type VerseSelectionMode = 'single' | 'toggle' | 'range' | 'mobile-range' | 'mobile-anchor';
 
 interface VerseDisplayProps {
   chaptersByTranslation: Record<string, BibleChapter | null>;
@@ -51,6 +51,8 @@ const VerseDisplay: React.FC<VerseDisplayProps> = ({
   const shellRef = useRef<HTMLDivElement | null>(null);
   const longPressTimeoutRef = useRef<number | null>(null);
   const longPressTriggeredRef = useRef(false);
+  const touchMovedRef = useRef(false);
+  const touchStartPointRef = useRef<{ x: number; y: number } | null>(null);
   const suppressClickUntilRef = useRef(0);
   const [translationWindowStart, setTranslationWindowStart] = useState(0);
   const [layoutWidth, setLayoutWidth] = useState(0);
@@ -275,12 +277,6 @@ const VerseDisplay: React.FC<VerseDisplayProps> = ({
     }
   }, [selectedBook, selectedChapter]);
 
-  useEffect(() => {
-    if (selectedVerses.length <= 1 && mobileMultiSelectMode) {
-      setMobileMultiSelectMode(null);
-    }
-  }, [mobileMultiSelectMode, selectedVerses.length]);
-
   const clearPendingLongPress = () => {
     if (longPressTimeoutRef.current) {
       window.clearTimeout(longPressTimeoutRef.current);
@@ -316,12 +312,17 @@ const VerseDisplay: React.FC<VerseDisplayProps> = ({
     }
 
     longPressTriggeredRef.current = false;
+    touchMovedRef.current = false;
     clearPendingLongPress();
     longPressTimeoutRef.current = window.setTimeout(() => {
+      if (touchMovedRef.current) {
+        return;
+      }
+
       longPressTriggeredRef.current = true;
       suppressClickUntilRef.current = Date.now() + 700;
       setMobileMultiSelectMode({ translationId, anchorVerse: verse });
-      onVerseCellSelect?.(verse, translationId, 'single');
+      onVerseCellSelect?.(verse, translationId, 'mobile-anchor');
 
       if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
         navigator.vibrate(20);
@@ -329,8 +330,23 @@ const VerseDisplay: React.FC<VerseDisplayProps> = ({
     }, 450);
   };
 
-  const handleVerseTouchMove = () => {
-    clearPendingLongPress();
+  const handleVerseTouchMove = (event: React.TouchEvent<HTMLSpanElement>) => {
+    if (!isMobileLayout) {
+      return;
+    }
+
+    const firstTouch = event.touches[0];
+    if (!firstTouch || !touchStartPointRef.current) {
+      return;
+    }
+
+    const deltaX = firstTouch.clientX - touchStartPointRef.current.x;
+    const deltaY = firstTouch.clientY - touchStartPointRef.current.y;
+    const moveThreshold = 10;
+    if ((deltaX * deltaX) + (deltaY * deltaY) >= moveThreshold * moveThreshold) {
+      touchMovedRef.current = true;
+      clearPendingLongPress();
+    }
   };
 
   const handleVerseTouchEnd = (
@@ -343,6 +359,12 @@ const VerseDisplay: React.FC<VerseDisplayProps> = ({
     }
 
     clearPendingLongPress();
+    touchStartPointRef.current = null;
+
+    if (touchMovedRef.current) {
+      touchMovedRef.current = false;
+      return;
+    }
 
     if (longPressTriggeredRef.current) {
       event.preventDefault();
@@ -354,11 +376,13 @@ const VerseDisplay: React.FC<VerseDisplayProps> = ({
       if (mobileMultiSelectMode.translationId === translationId) {
         onVerseCellSelect?.(verse, translationId, 'mobile-range');
         setMobileMultiSelectMode(null);
+        suppressClickUntilRef.current = Date.now() + 400;
       }
       return;
     }
 
     onVerseCellSelect?.(verse, translationId, 'single');
+    suppressClickUntilRef.current = Date.now() + 400;
     event.preventDefault();
   };
 
@@ -493,7 +517,10 @@ const VerseDisplay: React.FC<VerseDisplayProps> = ({
             {visibleTranslationIds.map((translationId) => {
               const verseText =
                 chaptersByTranslation[translationId]?.verses.find((verse) => verse.verse === verseNumber)?.text ?? '';
-              const isSelected = selectedVerseTranslationId === translationId && selectedVerseSet.has(verseNumber);
+              const isMobileAnchor =
+                mobileMultiSelectMode?.translationId === translationId
+                && mobileMultiSelectMode.anchorVerse === verseNumber;
+              const isSelected = !isMobileAnchor && selectedVerseTranslationId === translationId && selectedVerseSet.has(verseNumber);
               const isTranslationEligible =
                 selectedVerses.length === 0
                 || !selectedVerseTranslationId
@@ -501,9 +528,6 @@ const VerseDisplay: React.FC<VerseDisplayProps> = ({
               const isHoverTarget = hoveredCell?.translationId === translationId && hoveredCell?.verse === verseNumber;
               const isCtrlEligible = isHoverTarget && isCtrlLikeDown && isTranslationEligible;
               const isRangePreview = selectedVerseTranslationId === translationId && shiftPreviewSet.has(verseNumber);
-              const isMobileAnchor =
-                mobileMultiSelectMode?.translationId === translationId
-                && mobileMultiSelectMode.anchorVerse === verseNumber;
 
               return (
                 <span
@@ -530,7 +554,13 @@ const VerseDisplay: React.FC<VerseDisplayProps> = ({
                     }
                     return null;
                   })}
-                  onTouchStart={() => handleVerseTouchStart(translationId, verseNumber)}
+                  onTouchStart={(event) => {
+                    const touch = event.touches[0];
+                    touchStartPointRef.current = touch
+                      ? { x: touch.clientX, y: touch.clientY }
+                      : null;
+                    handleVerseTouchStart(translationId, verseNumber);
+                  }}
                   onTouchMove={handleVerseTouchMove}
                   onTouchEnd={(event) => handleVerseTouchEnd(event, translationId, verseNumber)}
                 >

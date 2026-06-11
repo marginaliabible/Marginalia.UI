@@ -28,7 +28,7 @@ interface WorkspaceMainPaneProps {
   mainPaneRef: React.RefObject<HTMLDivElement | null>;
 }
 
-type VerseSelectionMode = 'single' | 'toggle' | 'range' | 'mobile-range';
+type VerseSelectionMode = 'single' | 'toggle' | 'range' | 'mobile-range' | 'mobile-anchor';
 
 const getVerseRange = (start: number, end: number): number[] => {
   const min = Math.min(start, end);
@@ -190,6 +190,7 @@ const WorkspaceMainPane: React.FC<WorkspaceMainPaneProps> = ({
   ) => {
     focusMainPane();
 
+    console.log('Verse cell select:', { verse, translationId, mode });
     const hasSelection = selectedVerses.length > 0 && Boolean(selectedVerseTranslationId);
     const translationLocked = hasSelection && selectedVerseTranslationId !== translationId;
 
@@ -197,10 +198,12 @@ const WorkspaceMainPane: React.FC<WorkspaceMainPaneProps> = ({
       return;
     }
 
-    if (mode === 'single') {
+    if (mode === 'single' || mode === 'mobile-anchor') {
       dispatch(setVerseSelection({ translationId, verses: [verse], anchorVerse: verse }));
       setKeyboardCursor(translationId, verse, verse);
-      openVersePanel(verse);
+      if (mode === 'single') {
+        openVersePanel(verse);
+      }
       return;
     }
 
@@ -239,9 +242,6 @@ const WorkspaceMainPane: React.FC<WorkspaceMainPaneProps> = ({
       dispatch(setVerseSelection({ translationId, verses: range, anchorVerse }));
       setKeyboardCursor(translationId, anchorVerse, verse);
 
-      if (mode === 'mobile-range') {
-        openVersePanel(verse);
-      }
     }
   };
 
