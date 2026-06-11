@@ -486,7 +486,7 @@ function App() {
       dispatch(clearVerseSelection());
     }
 
-    mainPaneRef.current?.focus();
+    mainPaneRef.current?.focus({ preventScroll: true });
 
     await scrollToVerse(target);
   };
