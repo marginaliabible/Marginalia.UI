@@ -9,10 +9,10 @@ const AppHeader: React.FC<AppHeaderProps> = ({ onOpenSettings }) => {
   return (
     <header className="card border-0 shadow-sm mb-4">
       <div className="card-body d-flex flex-column flex-lg-row gap-3 align-items-lg-start justify-content-lg-between">
-        <div className="d-flex align-items-start gap-3">
+        <div className="d-flex align-items-start gap-2">
           <AppHeaderIcon
-            width={52}
-            height={52}
+            width={72}
+            height={72}
             className="app-header-icon flex-shrink-0"
           />
           <div>
@@ -30,7 +30,7 @@ const AppHeader: React.FC<AppHeaderProps> = ({ onOpenSettings }) => {
               </button>
             </div>
             <p className="text-body-secondary mb-0">
-              Browse Scripture offline, search quickly, and jump to any verse.
+              Bibles were meant to be open.
             </p>
           </div>
         </div>
