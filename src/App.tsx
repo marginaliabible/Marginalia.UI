@@ -6,6 +6,7 @@ import WorkspaceSidePanel from './components/WorkspaceSidePanel';
 import SidePanelContent from './components/SidePanelContent';
 import LoadingStatus from './components/LoadingStatus';
 import SettingsModal from './components/SettingsModal';
+import GitHubAuth from './components/GitHubAuth';
 import { useCallback, useEffect, useMemo, useRef, useState, ChangeEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { useAppDispatch, useAppSelector } from './store/hooks';
@@ -540,6 +541,8 @@ function App() {
           isDesktopLayout={isDesktopLayout}
           setIsMobilePanelOpen={setIsMobilePanelOpen}
         />
+
+        <GitHubAuth />
 
         <div
           ref={workspaceRef}
