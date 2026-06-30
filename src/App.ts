@@ -8,6 +8,12 @@ export interface TranslationSelectOption {
 
 export type WorkspacePanelKey = 'search';
 
+export interface HashRouteTarget {
+  book: string;
+  chapter: number;
+  verse?: number;
+}
+
 export const DESKTOP_BREAKPOINT = '(min-width: 992px)';
 
 export const normalizeLanguageSelection = (values: string[]): string[] => {
@@ -50,6 +56,49 @@ export const detectPreferredLanguages = (): string[] => {
 
 export const verseDomId = (book: string, chapter: number, verse: number): string => {
   return `${book.replace(/\s+/g, '_')}-${chapter}-${verse}`;
+};
+
+export const buildHashRoute = (target: HashRouteTarget, includeVerse = false): string => {
+  const safeBook = target.book.trim();
+  const safeChapter = Math.max(1, Math.trunc(target.chapter));
+  const segments = [encodeURIComponent(safeBook), String(safeChapter)];
+
+  if (includeVerse && Number.isInteger(target.verse) && Number(target.verse) > 0) {
+    segments.push(String(target.verse));
+  }
+
+  return `#/${segments.join('/')}`;
+};
+
+export const parseHashRoute = (hashValue: string): HashRouteTarget | null => {
+  if (!hashValue || hashValue === '#') {
+    return null;
+  }
+
+  const withoutHash = hashValue.startsWith('#') ? hashValue.slice(1) : hashValue;
+  const trimmed = withoutHash.startsWith('/') ? withoutHash.slice(1) : withoutHash;
+  const [bookSegment, chapterSegment, verseSegment] = trimmed.split('/');
+
+  if (!bookSegment || !chapterSegment) {
+    return null;
+  }
+
+  const book = decodeURIComponent(bookSegment).trim();
+  const chapter = Number.parseInt(chapterSegment, 10);
+  if (!book || !Number.isInteger(chapter) || chapter <= 0) {
+    return null;
+  }
+
+  if (!verseSegment) {
+    return { book, chapter };
+  }
+
+  const verse = Number.parseInt(verseSegment, 10);
+  if (!Number.isInteger(verse) || verse <= 0) {
+    return { book, chapter };
+  }
+
+  return { book, chapter, verse };
 };
 
 export const getLanguageDisplayName = (code: string): string => {

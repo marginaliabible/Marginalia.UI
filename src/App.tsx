@@ -42,6 +42,7 @@ import {
   detectPreferredLanguages,
   getLanguageDisplayName,
   applyTheme,
+  buildHashRoute,
   detectPreferredTheme,
   scrollToVerse,
 } from './App';
@@ -49,6 +50,7 @@ import { useDesktopLayout } from './hooks/useDesktopLayout';
 import { useWorkspaceSplit } from './hooks/useWorkspaceSplit';
 import { usePopupPanel } from './hooks/usePopupPanel';
 import { useMobilePanelEffects } from './hooks/useMobilePanelEffects';
+import { useHashRouteSync } from './hooks/useHashRouteSync';
 import './App.scss';
 
 const STATE_CACHE_KEY = 'gitbible:state';
@@ -378,6 +380,14 @@ function App() {
     applyTheme(theme);
   }, [theme]);
 
+  useHashRouteSync({
+    currentBible,
+    ready,
+    selectedBook,
+    selectedChapter,
+    selectedTranslationId,
+  });
+
   const translationMetadataById = useMemo(
     () =>
       new Map(safeAvailableTranslations.map((translation) => [translation.id, translation] as const)),
@@ -527,6 +537,48 @@ function App() {
     dispatch(closeTab(tabId));
   };
 
+  const shareTarget = useMemo(() => {
+    if (!selectedBook) {
+      return null;
+    }
+
+    const book = currentBible?.books.find((entry) => entry.name === selectedBook);
+    const chapter = book?.chapters.find((entry) => entry.chapter === selectedChapter);
+    const fallbackVerse = chapter?.verses[0]?.verse ?? 1;
+    const verse = selectedVerses[0] ?? fallbackVerse;
+    return { book: selectedBook, chapter: selectedChapter, verse };
+  }, [currentBible, selectedBook, selectedChapter, selectedVerses]);
+
+  const shareButtonLabel = shareTarget
+    ? `Share ${shareTarget.book} ${shareTarget.chapter}:${shareTarget.verse}`
+    : 'Share verse';
+
+  const handleShareCurrentVerse = useCallback(async () => {
+    if (typeof window === 'undefined' || !shareTarget) {
+      return;
+    }
+
+    const routeHash = buildHashRoute(shareTarget, true);
+
+    const shareUrl = new URL(window.location.href);
+    shareUrl.hash = routeHash;
+
+    if (typeof navigator.clipboard.writeText === 'function') {
+      await navigator.clipboard.writeText(shareUrl.toString());
+      return;
+    }
+
+    const fallback = document.createElement('textarea');
+    fallback.value = shareUrl.toString();
+    fallback.setAttribute('readonly', 'true');
+    fallback.style.position = 'fixed';
+    fallback.style.opacity = '0';
+    document.body.appendChild(fallback);
+    fallback.select();
+    document.execCommand('copy');
+    document.body.removeChild(fallback);
+  }, [shareTarget]);
+
   return (
     <>
       <div className={`container app-shell ${useWideLayout ? 'app-shell-wide' : ''}`}>
@@ -559,6 +611,8 @@ function App() {
             setIsMobilePanelOpen={setIsMobilePanelOpen}
             translationMetadataById={translationMetadataById}
             onCopySelectedVerses={handleCopySelectedVerses}
+            onShareCurrentVerse={handleShareCurrentVerse}
+            shareButtonLabel={shareButtonLabel}
             mainPaneRef={mainPaneRef}
           />
 

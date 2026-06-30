@@ -23,6 +23,8 @@ interface VerseDisplayProps {
   onVerseNumberClick?: (verse: number) => void;
   onVerseCellSelect?: (verse: number, translationId: string, mode: VerseSelectionMode) => void;
   onCopySelectedVerses: () => Promise<void> | void;
+  onShareCurrentVerse: () => Promise<void> | void;
+  shareButtonLabel: string;
   verseDomId: (book: string, chapter: number, verse: number) => string;
 }
 
@@ -46,6 +48,8 @@ const VerseDisplay: React.FC<VerseDisplayProps> = ({
   onVerseNumberClick,
   onVerseCellSelect,
   onCopySelectedVerses,
+  onShareCurrentVerse,
+  shareButtonLabel,
   verseDomId,
 }) => {
   const shellRef = useRef<HTMLDivElement | null>(null);
@@ -440,6 +444,15 @@ const VerseDisplay: React.FC<VerseDisplayProps> = ({
                 onClick={() => void onCopySelectedVerses()}
               >
                 <i className="fa-regular fa-copy" aria-hidden="true"></i>
+              </button>
+              <button
+                type="button"
+                className="verse-grid-copy-button"
+                aria-label={shareButtonLabel}
+                title={shareButtonLabel}
+                onClick={() => void onShareCurrentVerse()}
+              >
+                <i className="fa-solid fa-share-from-square" aria-hidden="true"></i>
               </button>
             </div>
           </div>

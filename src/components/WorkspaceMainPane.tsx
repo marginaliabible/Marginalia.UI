@@ -25,6 +25,8 @@ interface WorkspaceMainPaneProps {
   setIsMobilePanelOpen: (open: boolean) => void;
   translationMetadataById: Map<string, BibleTranslationMeta>;
   onCopySelectedVerses: () => Promise<void> | void;
+  onShareCurrentVerse: () => Promise<void> | void;
+  shareButtonLabel: string;
   mainPaneRef: React.RefObject<HTMLDivElement | null>;
 }
 
@@ -45,6 +47,8 @@ const WorkspaceMainPane: React.FC<WorkspaceMainPaneProps> = ({
   setIsMobilePanelOpen,
   translationMetadataById,
   onCopySelectedVerses,
+  onShareCurrentVerse,
+  shareButtonLabel,
   mainPaneRef,
 }) => {
   const dispatch = useAppDispatch();
@@ -406,6 +410,8 @@ const WorkspaceMainPane: React.FC<WorkspaceMainPaneProps> = ({
               onVerseNumberClick={handleVerseNumberClick}
               onVerseCellSelect={handleVerseCellSelect}
               onCopySelectedVerses={onCopySelectedVerses}
+              onShareCurrentVerse={onShareCurrentVerse}
+              shareButtonLabel={shareButtonLabel}
               verseDomId={verseDomId}
             />
           ) : (
