@@ -1,5 +1,7 @@
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { BibleBook, BibleChapter } from '../models/bible';
+import MiniSearchBar, { type MiniSearchBarHandle } from './MiniSearchBar';
+import type { QuickJumpTarget } from '../models/bible';
 
 type VerseSelectionMode = 'single' | 'toggle' | 'range' | 'mobile-range' | 'mobile-anchor';
 
@@ -25,6 +27,15 @@ interface VerseDisplayProps {
   onCopySelectedVerses: () => Promise<void> | void;
   onShareCurrentVerse: () => Promise<void> | void;
   shareButtonLabel: string;
+  starredTranslationIds: string[];
+  goToReference: (target: QuickJumpTarget, translationId?: string) => Promise<void>;
+  isPanelDetached: boolean;
+  focusDetachedPanel: () => void;
+  miniSearchFocusToken: number;
+  onSearchComplete: () => void;
+  isMiniSearchVisible: boolean;
+  setIsMiniSearchVisible: (open: boolean) => void;
+  setIsMobilePanelOpen: (open: boolean) => void;
   verseDomId: (book: string, chapter: number, verse: number) => string;
 }
 
@@ -50,6 +61,15 @@ const VerseDisplay: React.FC<VerseDisplayProps> = ({
   onCopySelectedVerses,
   onShareCurrentVerse,
   shareButtonLabel,
+  starredTranslationIds,
+  goToReference,
+  isPanelDetached,
+  focusDetachedPanel,
+  miniSearchFocusToken,
+  onSearchComplete,
+  isMiniSearchVisible,
+  setIsMiniSearchVisible,
+  setIsMobilePanelOpen,
   verseDomId,
 }) => {
   const shellRef = useRef<HTMLDivElement | null>(null);
@@ -68,6 +88,7 @@ const VerseDisplay: React.FC<VerseDisplayProps> = ({
     translationId: string;
     anchorVerse: number;
   } | null>(null);
+  const miniSearchRef = useRef<MiniSearchBarHandle | null>(null);
 
   const resolveCssLength = (value: string): number => {
     const trimmed = value.trim();
@@ -281,6 +302,33 @@ const VerseDisplay: React.FC<VerseDisplayProps> = ({
     }
   }, [selectedBook, selectedChapter]);
 
+  useEffect(() => {
+    if (miniSearchFocusToken <= 0) {
+      return;
+    }
+
+    setIsMiniSearchVisible(true);
+    const rafId = window.requestAnimationFrame(() => {
+      miniSearchRef.current?.focusInput();
+    });
+
+    return () => {
+      window.cancelAnimationFrame(rafId);
+    };
+  }, [miniSearchFocusToken]);
+
+  const handleSearchButtonClick = async () => {
+    if (!isMiniSearchVisible) {
+      setIsMiniSearchVisible(true);
+      window.requestAnimationFrame(() => {
+        miniSearchRef.current?.focusInput();
+      });
+      return;
+    }
+
+    await miniSearchRef.current?.triggerPrimaryAction();
+  };
+
   const clearPendingLongPress = () => {
     if (longPressTimeoutRef.current) {
       window.clearTimeout(longPressTimeoutRef.current);
@@ -402,40 +450,70 @@ const VerseDisplay: React.FC<VerseDisplayProps> = ({
     >
       <div className="verse-grid-header">
         <div className="verse-grid-chapter-heading">
-          <div className="verse-grid-heading-control verse-grid-heading-control-book">
-            <label className="verse-grid-heading-label" htmlFor="verse-grid-book-select">
-              Book
-            </label>
-            <select
-              id="verse-grid-book-select"
-              className="form-select form-select-sm verse-grid-heading-select w-auto"
-              value={selectedBook ?? ''}
-              onChange={(event) => onBookChange(event.target.value)}
-            >
-              {books.map((book) => (
-                <option key={book.name} value={book.name}>
-                  {book.name}
-                </option>
-              ))}
-            </select>
+          <div className="verse-grid-search-stage">
+            <div className={`verse-grid-search-stage-default ${isMiniSearchVisible ? 'is-hidden' : 'is-visible'}`}>
+              <div className="verse-grid-heading-control verse-grid-heading-control-book">
+                <label className="verse-grid-heading-label" htmlFor="verse-grid-book-select">
+                  Book
+                </label>
+                <select
+                  id="verse-grid-book-select"
+                  className="form-select form-select-sm verse-grid-heading-select w-auto"
+                  value={selectedBook ?? ''}
+                  onChange={(event) => onBookChange(event.target.value)}
+                >
+                  {books.map((book) => (
+                    <option key={book.name} value={book.name}>
+                      {book.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="verse-grid-heading-control verse-grid-heading-control-chapter">
+                <label className="verse-grid-heading-label" htmlFor="verse-grid-chapter-select">
+                  Chapter
+                </label>
+                <div className="verse-grid-heading-control-inline">
+                  <select
+                    id="verse-grid-chapter-select"
+                    className="form-select form-select-sm verse-grid-heading-select w-auto"
+                    value={selectedChapter}
+                    onChange={(event) => onChapterChange(Number.parseInt(event.target.value, 10))}
+                  >
+                    {availableChapters.map((chapter) => (
+                      <option key={chapter.chapter} value={chapter.chapter}>
+                        {chapter.chapter}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            <MiniSearchBar
+              ref={miniSearchRef}
+              starredTranslationIds={starredTranslationIds}
+              goToReference={goToReference}
+              isPanelDetached={isPanelDetached}
+              focusDetachedPanel={focusDetachedPanel}
+              isDesktopLayout={!isMobileLayout}
+              setIsMobilePanelOpen={setIsMobilePanelOpen}
+              isVisible={isMiniSearchVisible}
+              onRequestHide={() => setIsMiniSearchVisible(false)}
+              onSearchComplete={onSearchComplete}
+            />
           </div>
-          <div className="verse-grid-heading-control verse-grid-heading-control-chapter">
-            <label className="verse-grid-heading-label" htmlFor="verse-grid-chapter-select">
-              Chapter
-            </label>
-            <div className="verse-grid-heading-control-inline">
-              <select
-                id="verse-grid-chapter-select"
-                className="form-select form-select-sm verse-grid-heading-select w-auto"
-                value={selectedChapter}
-                onChange={(event) => onChapterChange(Number.parseInt(event.target.value, 10))}
+
+          <div className="verse-grid-heading-actions">
+              <button
+                type="button"
+                className="verse-grid-copy-button"
+                aria-label="Search"
+                title="Search"
+                onClick={() => void handleSearchButtonClick()}
               >
-                {availableChapters.map((chapter) => (
-                  <option key={chapter.chapter} value={chapter.chapter}>
-                    {chapter.chapter}
-                  </option>
-                ))}
-              </select>
+                <i className="fa-solid fa-magnifying-glass" aria-hidden="true"></i>
+              </button>
               <button
                 type="button"
                 className="verse-grid-copy-button"
@@ -454,7 +532,6 @@ const VerseDisplay: React.FC<VerseDisplayProps> = ({
               >
                 <i className="fa-solid fa-share-from-square" aria-hidden="true"></i>
               </button>
-            </div>
           </div>
           {showPanelToggle && (
             <div className="verse-grid-panel-toggle-wrap">

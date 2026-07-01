@@ -62,6 +62,8 @@ function App() {
   const mainPaneRef = useRef<HTMLDivElement | null>(null);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const [isMobilePanelOpen, setIsMobilePanelOpen] = useState(false);
+  const [miniSearchFocusToken, setMiniSearchFocusToken] = useState(0);
+  const [isMiniSearchVisible, setIsMiniSearchVisible] = useState(false);
 
   // Redux state
   const {
@@ -251,8 +253,22 @@ function App() {
     const handleShortcut = (e: KeyboardEvent) => {
       if (e.key.toLowerCase() === 'k' && (e.ctrlKey || e.metaKey)) {
         e.preventDefault();
-        searchInputRef.current?.focus();
-        searchInputRef.current?.select();
+        const searchInput = searchInputRef.current;
+        const rect = searchInput?.getBoundingClientRect();
+        const isTopSearchVisible = Boolean(
+          rect
+          && rect.width > 0
+          && rect.height > 0
+          && rect.bottom > 0
+          && rect.top < window.innerHeight
+        );
+
+        if (isTopSearchVisible) {
+          searchInput?.focus();
+          searchInput?.select();
+        } else {
+          setMiniSearchFocusToken((token) => token + 1);
+        }
         return;
       }
 
@@ -592,6 +608,7 @@ function App() {
           focusDetachedPanel={focusDetachedPanel}
           isDesktopLayout={isDesktopLayout}
           setIsMobilePanelOpen={setIsMobilePanelOpen}
+          onSearchComplete={() => setIsMiniSearchVisible(false)}
         />
 
         <GitHubAuth />
@@ -613,6 +630,11 @@ function App() {
             onCopySelectedVerses={handleCopySelectedVerses}
             onShareCurrentVerse={handleShareCurrentVerse}
             shareButtonLabel={shareButtonLabel}
+            goToReference={goToReference}
+            focusDetachedPanel={focusDetachedPanel}
+            miniSearchFocusToken={miniSearchFocusToken}
+            isMiniSearchVisible={isMiniSearchVisible}
+            setIsMiniSearchVisible={setIsMiniSearchVisible}
             mainPaneRef={mainPaneRef}
           />
 

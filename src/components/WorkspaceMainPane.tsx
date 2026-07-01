@@ -13,7 +13,7 @@ import {
 import { bibleService } from '../services/bibleService';
 import { searchIndexService } from '../services/searchIndexService';
 import { verseDomId, scrollToVerse } from '../App';
-import type { BibleChapter, BibleTranslationMeta } from '../models/bible';
+import type { BibleChapter, BibleTranslationMeta, QuickJumpTarget } from '../models/bible';
 import type { WorkspacePanelKey } from '../App';
 
 interface WorkspaceMainPaneProps {
@@ -27,6 +27,11 @@ interface WorkspaceMainPaneProps {
   onCopySelectedVerses: () => Promise<void> | void;
   onShareCurrentVerse: () => Promise<void> | void;
   shareButtonLabel: string;
+  goToReference: (target: QuickJumpTarget, translationId?: string) => Promise<void>;
+  focusDetachedPanel: () => void;
+  miniSearchFocusToken: number;
+  isMiniSearchVisible: boolean;
+  setIsMiniSearchVisible: (open: boolean) => void;
   mainPaneRef: React.RefObject<HTMLDivElement | null>;
 }
 
@@ -49,6 +54,11 @@ const WorkspaceMainPane: React.FC<WorkspaceMainPaneProps> = ({
   onCopySelectedVerses,
   onShareCurrentVerse,
   shareButtonLabel,
+  goToReference,
+  focusDetachedPanel,
+  miniSearchFocusToken,
+  isMiniSearchVisible,
+  setIsMiniSearchVisible,
   mainPaneRef,
 }) => {
   const dispatch = useAppDispatch();
@@ -412,6 +422,15 @@ const WorkspaceMainPane: React.FC<WorkspaceMainPaneProps> = ({
               onCopySelectedVerses={onCopySelectedVerses}
               onShareCurrentVerse={onShareCurrentVerse}
               shareButtonLabel={shareButtonLabel}
+              starredTranslationIds={starredTranslationIds}
+              goToReference={goToReference}
+              isPanelDetached={isPanelDetached}
+              focusDetachedPanel={focusDetachedPanel}
+              miniSearchFocusToken={miniSearchFocusToken}
+              isMiniSearchVisible={isMiniSearchVisible}
+              setIsMiniSearchVisible={setIsMiniSearchVisible}
+              onSearchComplete={() => setIsMiniSearchVisible(false)}
+              setIsMobilePanelOpen={setIsMobilePanelOpen}
               verseDomId={verseDomId}
             />
           ) : (

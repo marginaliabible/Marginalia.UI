@@ -16,7 +16,7 @@ interface SearchActionDropdownProps {
     text?: string;
   } | null;
   historyEntries: SearchHistoryEntry[];
-  selectedIndex: number;
+  selectedIndex: number | null;
   onSelectAction: (action: 'replace' | 'new') => void;
   onSelectHistory: (entry: SearchHistoryEntry) => void;
   onClose: () => void;
