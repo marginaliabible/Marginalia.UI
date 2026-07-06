@@ -101,20 +101,20 @@ const MiniSearchBar = forwardRef<MiniSearchBarHandle, MiniSearchBarProps>(({
             ×
           </button>
         )}
-      </div>
 
-      {isVisible && isSearchFocused && (
-        <SearchActionDropdown
-          isOpen={isSearchActionDropdownOpen}
-          activeTabTitle={activeTabTitle}
-          quickJumpPreview={quickJumpPreview}
-          historyEntries={historyEntries}
-          selectedIndex={searchActionIndex}
-          onSelectAction={(action) => runSearchByAction(normalizedSearchTerm, action)}
-          onSelectHistory={handleSelectHistory}
-          onClose={closeDropdown}
-        />
-      )}
+        {isVisible && isSearchFocused && (
+          <SearchActionDropdown
+            isOpen={isSearchActionDropdownOpen}
+            activeTabTitle={activeTabTitle}
+            quickJumpPreview={quickJumpPreview}
+            historyEntries={historyEntries}
+            selectedIndex={searchActionIndex}
+            onSelectAction={(action) => runSearchByAction(normalizedSearchTerm, action)}
+            onSelectHistory={handleSelectHistory}
+            onClose={closeDropdown}
+          />
+        )}
+      </div>
     </div>
   );
 });

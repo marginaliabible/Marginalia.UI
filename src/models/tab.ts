@@ -8,7 +8,7 @@ export interface VerseContext {
 
 export interface PanelTab {
   id: string;
-  type: 'search' | 'translations';
+  type: 'search' | 'translations' | 'resources';
   title: string;
   iconClass: string;
   searchResults?: SearchResultSet;

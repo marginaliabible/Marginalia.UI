@@ -2,6 +2,7 @@ import React from 'react';
 import PanelTabs from './PanelTabs';
 import SearchResults from './SearchResults';
 import TranslationsPanel from './TranslationsPanel';
+import ResourcesPanel from './ResourcesPanel';
 import { useAppSelector } from '../store/hooks';
 import type { QuickJumpTarget, BibleTranslationMeta, TranslationRecord } from '../models/bible';
 import type { PanelTab } from '../models/tab';
@@ -88,6 +89,8 @@ const SidePanelContent: React.FC<SidePanelContentProps> = ({
                 onToggleStar={onToggleStar}
                 onReorder={onReorder}
               />
+            ) : tab.type === 'resources' ? (
+              <ResourcesPanel tab={tab} />
             ) : null}
             <div className="pb-4" aria-hidden="true"></div>
           </div>

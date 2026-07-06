@@ -176,8 +176,7 @@ const SearchResults: React.FC<SearchResultsProps> = ({ tab, goToReference, onBef
               {hasMore && (
                 <div
                   ref={sentinelRef}
-                  className="results-grid-sentinel text-center text-body-secondary py-2"
-                  style={{ fontSize: '0.75rem' }}
+                  className="results-grid-sentinel text-center text-body-secondary py-2 small"
                 >
                   Loading more...
                 </div>

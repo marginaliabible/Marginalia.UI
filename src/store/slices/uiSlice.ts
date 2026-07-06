@@ -17,6 +17,8 @@ interface UiState {
   selectionAnchorVerse: number | null;
   searchTerm: string;
   selectedLanguages: string[];
+  sourceUrls: string[];
+  resourceHiddenTags: string[];
   theme: ThemePreference;
   ready: boolean;
 }
@@ -32,6 +34,8 @@ const initialState: UiState = {
   selectionAnchorVerse: null,
   searchTerm: '',
   selectedLanguages: [],
+  sourceUrls: [],
+  resourceHiddenTags: [],
   theme: 'light',
   ready: false
 };
@@ -95,6 +99,81 @@ const uiSlice = createSlice({
     },
     setSelectedLanguages: (state, action: PayloadAction<string[]>) => {
       state.selectedLanguages = action.payload;
+    },
+    setSourceUrls: (state, action: PayloadAction<string[]>) => {
+      state.sourceUrls = Array.from(new Set(
+        action.payload
+          .map((entry) => entry.trim())
+          .filter((entry) => entry.length > 0)
+      ));
+    },
+    setResourceHiddenTags: (state, action: PayloadAction<string[]>) => {
+      state.resourceHiddenTags = Array.from(new Set(
+        action.payload
+          .map((entry) => entry.trim())
+          .filter((entry) => entry.length > 0)
+      ));
+    },
+    toggleResourceHiddenTag: (state, action: PayloadAction<string>) => {
+      const tag = action.payload.trim();
+      if (!tag) {
+        return;
+      }
+
+      if (state.resourceHiddenTags.includes(tag)) {
+        state.resourceHiddenTags = state.resourceHiddenTags.filter((entry) => entry !== tag);
+        return;
+      }
+
+      state.resourceHiddenTags.push(tag);
+    },
+    addSourceUrl: (state, action: PayloadAction<string>) => {
+      const next = action.payload.trim();
+      if (!next || state.sourceUrls.includes(next)) {
+        return;
+      }
+
+      state.sourceUrls.push(next);
+    },
+    removeSourceUrl: (state, action: PayloadAction<string>) => {
+      const target = action.payload.trim();
+      state.sourceUrls = state.sourceUrls.filter((entry) => entry !== target);
+    },
+    removeTranslationsByIds: (state, action: PayloadAction<string[]>) => {
+      const blocked = new Set(
+        action.payload
+          .map((entry) => entry.trim())
+          .filter((entry) => entry.length > 0 && entry !== 'KJV')
+      );
+
+      if (blocked.size === 0) {
+        return;
+      }
+
+      state.translationRecords = state.translationRecords.filter((record) => !blocked.has(record.id));
+      state.selectedTranslationIds = state.selectedTranslationIds.filter((id) => !blocked.has(id));
+
+      if (state.translationRecords.length === 0) {
+        state.translationRecords = [{ id: 'KJV', starred: true }];
+      }
+
+      if (!state.translationRecords.some((record) => record.starred)) {
+        state.translationRecords[0].starred = true;
+      }
+
+      if (state.selectedTranslationIds.length === 0) {
+        state.selectedTranslationIds = state.translationRecords.map((record) => record.id);
+      }
+
+      if (!state.selectedTranslationIds.includes(state.selectedTranslationId)) {
+        state.selectedTranslationId = state.selectedTranslationIds[0] ?? state.translationRecords[0]?.id ?? 'KJV';
+      }
+
+      if (state.selectedVerseTranslationId && blocked.has(state.selectedVerseTranslationId)) {
+        state.selectedVerseTranslationId = null;
+        state.selectedVerses = [];
+        state.selectionAnchorVerse = null;
+      }
     },
     setTheme: (state, action: PayloadAction<ThemePreference>) => {
       state.theme = action.payload;
@@ -212,6 +291,12 @@ export const {
   clearVerseSelection,
   setSearchTerm,
   setSelectedLanguages,
+  setSourceUrls,
+  setResourceHiddenTags,
+  toggleResourceHiddenTag,
+  addSourceUrl,
+  removeSourceUrl,
+  removeTranslationsByIds,
   setTheme,
   setReady,
   restoreState,

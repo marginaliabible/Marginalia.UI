@@ -1,0 +1,43 @@
+.resources-panel-body {
+  min-height: 0;
+}
+
+.resources-panel-sticky {
+  flex: 0 0 auto;
+}
+
+.resources-panel-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.resource-tag-dot {
+  width: 0.9rem;
+  height: 0.9rem;
+  display: inline-block;
+  border-radius: 0.15rem;
+  background-color: var(--resource-tag-color);
+  vertical-align: middle;
+}
+
+.resource-tag-button {
+  border-width: 1px;
+  transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease, opacity 120ms ease;
+}
+
+.resource-tag-button.is-active {
+  background-color: var(--resource-tag-color);
+  border-color: var(--resource-tag-color);
+  color: var(--resource-tag-text-color);
+}
+
+.resource-tag-button.is-inactive {
+  background-color: transparent;
+  border-color: var(--resource-tag-color);
+  color: var(--resource-tag-color);
+}
+
+.resource-tag-button:hover,
+.resource-tag-button:focus-visible {
+  opacity: 0.95;
+}

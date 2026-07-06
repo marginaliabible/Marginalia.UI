@@ -6,7 +6,7 @@ import WorkspaceSidePanel from './components/WorkspaceSidePanel';
 import SidePanelContent from './components/SidePanelContent';
 import LoadingStatus from './components/LoadingStatus';
 import SettingsModal from './components/SettingsModal';
-import GitHubAuth from './components/GitHubAuth';
+import GitHubAuthPromptModal from './components/GitHubAuthPromptModal';
 import { useCallback, useEffect, useMemo, useRef, useState, ChangeEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { useAppDispatch, useAppSelector } from './store/hooks';
@@ -16,6 +16,7 @@ import {
   setActiveTab,
   closeTab,
   setCurrentBibleFromId,
+  removeLoadedTranslations,
 } from './store/slices/bibleSlice';
 import {
   setSelectedTranslationId,
@@ -25,6 +26,9 @@ import {
   setVerseSelection,
   clearVerseSelection,
   setSelectedLanguages,
+  addSourceUrl,
+  removeSourceUrl,
+  removeTranslationsByIds,
   setTheme,
   setReady,
   restoreState,
@@ -33,7 +37,15 @@ import {
   toggleStarTranslation,
   reorderTranslations,
 } from './store/slices/uiSlice';
-import { bibleService } from './services/bibleService';
+import {
+  bibleService,
+  normalizeSourceUrlInput,
+  type SourceProbeResult,
+  type SourceArtifactInventory,
+  type SourceLibraryRecord,
+  type SourceArtifactSummary,
+} from './services/bibleService';
+import { hasValidGitHubAuthSession } from './services/githubPrivateSourceService';
 import type { QuickJumpTarget } from './models/bible';
 import {
   type WorkspacePanelKey,
@@ -51,11 +63,40 @@ import { useWorkspaceSplit } from './hooks/useWorkspaceSplit';
 import { usePopupPanel } from './hooks/usePopupPanel';
 import { useMobilePanelEffects } from './hooks/useMobilePanelEffects';
 import { useHashRouteSync } from './hooks/useHashRouteSync';
+import { beginGitHubAuthorization, initializeGitHubAuthFlow } from './services/githubAuthFlowService';
 import './App.scss';
 
 const STATE_CACHE_KEY = 'gitbible:state';
 
 function App() {
+    const formatSourceProbeFailure = (probe: Extract<SourceProbeResult, { ok: false }>): string => {
+      if (probe.message && probe.message.trim().length > 0) {
+        return probe.message;
+      }
+
+      if (probe.code === 'not-authorized') {
+        return 'Not authorized. Connect GitHub (for private sources), then retry.';
+      }
+
+      if (probe.code === 'not-found') {
+        return 'Source not found. Verify the URL path and file name, then retry.';
+      }
+
+      if (probe.code === 'rate-limited') {
+        return 'Rate limited by the source. Wait a moment and retry.';
+      }
+
+      if (probe.code === 'source-unavailable') {
+        return 'Source unavailable. Check host status or try again later.';
+      }
+
+      if (probe.code === 'invalid-payload') {
+        return 'Invalid payload format. Use a settings JSON or a translation JSON with expected shape.';
+      }
+
+      return 'Source could not be reached due to network or CORS restrictions. Check CORS policy and connectivity.';
+    };
+
   const dispatch = useAppDispatch();
   const modalRef = useRef<any>(null);
   const workspaceRef = useRef<HTMLDivElement | null>(null);
@@ -64,6 +105,18 @@ function App() {
   const [isMobilePanelOpen, setIsMobilePanelOpen] = useState(false);
   const [miniSearchFocusToken, setMiniSearchFocusToken] = useState(0);
   const [isMiniSearchVisible, setIsMiniSearchVisible] = useState(false);
+  const [sourceArtifactSummary, setSourceArtifactSummary] = useState<SourceArtifactSummary>({
+    translation: 0,
+    translationLibrary: 0,
+    resourceLibrary: 0,
+  });
+  const [sourceLibraries, setSourceLibraries] = useState<SourceLibraryRecord[]>([]);
+  const [sourceArtifactInventory, setSourceArtifactInventory] = useState<SourceArtifactInventory | null>(null);
+  const [isSourceDiagnosticsLoading, setIsSourceDiagnosticsLoading] = useState(false);
+  const [isGitHubAuthPromptOpen, setIsGitHubAuthPromptOpen] = useState(false);
+  const [gitHubAuthPromptContext, setGitHubAuthPromptContext] = useState<string | null>(null);
+  const [gitHubAuthPromptError, setGitHubAuthPromptError] = useState<string | null>(null);
+  const [isLaunchingGitHubAuth, setIsLaunchingGitHubAuth] = useState(false);
 
   // Redux state
   const {
@@ -84,6 +137,8 @@ function App() {
     selectedChapter,
     selectedVerses,
     selectedLanguages,
+    sourceUrls,
+    resourceHiddenTags,
     theme,
     ready,
   } = useAppSelector((state) => state.ui);
@@ -116,6 +171,10 @@ function App() {
     activeWorkspacePanel,
     setIsMobilePanelOpen,
   });
+
+  useEffect(() => {
+    return initializeGitHubAuthFlow();
+  }, []);
 
   const handleCopySelectedVerses = useCallback(async () => {
     if (!currentBible || !selectedBook) {
@@ -330,6 +389,8 @@ function App() {
         selectedChapter: initialChapter,
         theme: savedState?.theme ?? detectPreferredTheme(),
         selectedLanguages: finalLanguages,
+        sourceUrls: Array.isArray(savedState?.sourceUrls) ? savedState.sourceUrls : [],
+        resourceHiddenTags: Array.isArray(savedState?.resourceHiddenTags) ? savedState.resourceHiddenTags : [],
       }));
 
       await dispatch(loadTranslation(nextTranslationId));
@@ -354,6 +415,8 @@ function App() {
       lastSearch: undefined,
       theme,
       languages: safeSelectedLanguages,
+      sourceUrls,
+      resourceHiddenTags,
     });
   }, [
     selectedTranslationId,
@@ -363,6 +426,8 @@ function App() {
     selectedChapter,
     theme,
     safeSelectedLanguages,
+    sourceUrls,
+    resourceHiddenTags,
     ready,
   ]);
 
@@ -439,6 +504,10 @@ function App() {
     const normalizedCodes = new Set(normalizeLanguages(safeSelectedLanguages));
     const matches = safeAvailableTranslations.filter((t) => {
       const langs = Array.isArray(t.language) ? t.language : (t.language ? [t.language] : []);
+      if (langs.length === 0) {
+        // Keep source-provided translations discoverable even when language metadata is missing.
+        return true;
+      }
       return langs.some((l) => normalizedCodes.has(l));
     });
     return matches.length === 0 ? safeAvailableTranslations : matches;
@@ -526,7 +595,133 @@ function App() {
     dispatch(setSelectedLanguages(normalizeLanguageSelection(selected)));
   };
 
+  const isLikelyGitHubSourceUrl = (value: string): boolean => {
+    try {
+      const parsed = new URL(value);
+      const host = parsed.hostname.toLowerCase();
+      return host === 'github.com' || host === 'raw.githubusercontent.com' || host === 'api.github.com';
+    } catch {
+      return false;
+    }
+  };
+
+  const openGitHubAuthPrompt = useCallback((contextMessage?: string) => {
+    setGitHubAuthPromptContext(contextMessage ?? null);
+    setGitHubAuthPromptError(null);
+    setIsLaunchingGitHubAuth(false);
+    setIsGitHubAuthPromptOpen(true);
+  }, []);
+
+  const closeGitHubAuthPrompt = useCallback(() => {
+    setIsGitHubAuthPromptOpen(false);
+    setGitHubAuthPromptError(null);
+    setIsLaunchingGitHubAuth(false);
+  }, []);
+
+  const handleContinueGitHubAuth = useCallback(() => {
+    setIsLaunchingGitHubAuth(true);
+    setGitHubAuthPromptError(null);
+    const callbackBase = (import.meta.env.VITE_GITHUB_OAUTH_CALLBACK_URL || '').trim();
+    const result = beginGitHubAuthorization(callbackBase);
+
+    if (!result.ok) {
+      setIsLaunchingGitHubAuth(false);
+      setGitHubAuthPromptError(result.message ?? 'Unable to start GitHub sign-in.');
+      return;
+    }
+
+    setIsGitHubAuthPromptOpen(false);
+    setIsLaunchingGitHubAuth(false);
+  }, []);
+
+  const handleRequestGitHubAuth = useCallback((): void => {
+    openGitHubAuthPrompt('Authentication is required before this source can be accessed.');
+  }, [openGitHubAuthPrompt]);
+
+  const refreshSourceArtifactSummary = useCallback(async (urls?: string[]) => {
+    const status = await bibleService.getSourceArtifactStatus(urls ?? sourceUrls);
+    setSourceArtifactSummary(status.summary);
+    setSourceLibraries(status.libraries);
+  }, [sourceUrls]);
+
+  const refreshSelectedSources = useCallback(async () => {
+    await dispatch(refreshTranslations(true));
+    await dispatch(loadTranslation(selectedTranslationId));
+    dispatch(setCurrentBibleFromId(selectedTranslationId));
+    setSourceArtifactInventory(null);
+    await refreshSourceArtifactSummary();
+  }, [dispatch, refreshSourceArtifactSummary, selectedTranslationId]);
+
+  const loadSourceArtifactInventory = useCallback(async (urls?: string[]) => {
+    if (isSourceDiagnosticsLoading || sourceArtifactInventory) {
+      return;
+    }
+
+    setIsSourceDiagnosticsLoading(true);
+    try {
+      const inventory = await bibleService.getSourceArtifactInventory(urls ?? sourceUrls);
+      setSourceArtifactInventory(inventory);
+    } finally {
+      setIsSourceDiagnosticsLoading(false);
+    }
+  }, [isSourceDiagnosticsLoading, sourceArtifactInventory, sourceUrls]);
+
+  const handleAddSourceUrl = async (url: string): Promise<{ ok: boolean; message: string; suggestGitHubAuth?: boolean }> => {
+    const normalizedUrl = normalizeSourceUrlInput(url);
+
+    if (sourceUrls.includes(normalizedUrl)) {
+      return { ok: false, message: 'That source URL is already saved.' };
+    }
+
+    const probe = await bibleService.probeSourceUrl(normalizedUrl);
+    if (!probe.ok) {
+      const isGitHubUrl = isLikelyGitHubSourceUrl(url) || isLikelyGitHubSourceUrl(normalizedUrl);
+      if ((probe.code === 'not-authorized' || probe.code === 'not-found') && isGitHubUrl && !hasValidGitHubAuthSession()) {
+        return {
+          ok: false,
+          message: 'Source not found or not accessible. Is this a private GitHub repo?',
+          suggestGitHubAuth: true,
+        };
+      }
+
+      return { ok: false, message: formatSourceProbeFailure(probe) };
+    }
+
+    const nextSourceUrls = Array.from(new Set([...sourceUrls, normalizedUrl])).filter((entry) => entry.length > 0);
+
+    dispatch(addSourceUrl(normalizedUrl));
+    await dispatch(refreshTranslations(true));
+    setSourceArtifactInventory(null);
+    await refreshSourceArtifactSummary(nextSourceUrls);
+    return { ok: true, message: probe.message };
+  };
+
+  const handleRemoveSourceUrl = async (url: string) => {
+    const normalizedUrl = url.trim();
+    const nextSourceUrls = sourceUrls.filter((entry) => entry.trim() !== normalizedUrl);
+    const affectedIds = safeAvailableTranslations
+      .filter((translation) => {
+        return translation.configuredSourceUrl === normalizedUrl || translation.source === normalizedUrl;
+      })
+      .map((translation) => translation.id)
+      .filter((id) => id !== 'KJV');
+
+    dispatch(removeSourceUrl(normalizedUrl));
+
+    if (affectedIds.length > 0) {
+      await bibleService.purgeTranslations(affectedIds);
+      dispatch(removeTranslationsByIds(affectedIds));
+      dispatch(removeLoadedTranslations(affectedIds));
+    }
+
+    await dispatch(refreshTranslations(true));
+    setSourceArtifactInventory(null);
+    await refreshSourceArtifactSummary(nextSourceUrls);
+  };
+
   const openSettingsModal = async () => {
+    await refreshSourceArtifactSummary();
+
     const el = document.getElementById('settingsModal');
     if (!el) return;
 
@@ -611,8 +806,6 @@ function App() {
           onSearchComplete={() => setIsMiniSearchVisible(false)}
         />
 
-        <GitHubAuth />
-
         <div
           ref={workspaceRef}
           className={`workspace-layout ${hasSidePanel ? 'has-side-panel' : ''} ${
@@ -636,6 +829,7 @@ function App() {
             isMiniSearchVisible={isMiniSearchVisible}
             setIsMiniSearchVisible={setIsMiniSearchVisible}
             mainPaneRef={mainPaneRef}
+            resourceHiddenTags={resourceHiddenTags}
           />
 
           {isDesktopLayout && !isPanelDetached && activeWorkspacePanel && (
@@ -686,7 +880,26 @@ function App() {
           handleLanguagesChange={handleLanguagesChange}
           languageOptions={languageOptions}
           getLanguageDisplayName={getLanguageDisplayName}
+          sourceUrls={sourceUrls}
+          sourceArtifactSummary={sourceArtifactSummary}
+          sourceLibraries={sourceLibraries}
+          sourceArtifactInventory={sourceArtifactInventory}
+          onLoadSourceDiagnostics={loadSourceArtifactInventory}
+          onRefreshSources={refreshSelectedSources}
+          onRequestGitHubAuth={handleRequestGitHubAuth}
+          isSourceDiagnosticsLoading={isSourceDiagnosticsLoading}
+          onAddSourceUrl={handleAddSourceUrl}
+          onRemoveSourceUrl={handleRemoveSourceUrl}
           closeSettingsModal={closeSettingsModal}
+        />
+
+        <GitHubAuthPromptModal
+          isOpen={isGitHubAuthPromptOpen}
+          contextMessage={gitHubAuthPromptContext ?? undefined}
+          errorMessage={gitHubAuthPromptError}
+          isLaunching={isLaunchingGitHubAuth}
+          onClose={closeGitHubAuthPrompt}
+          onContinue={handleContinueGitHubAuth}
         />
       </div>
 

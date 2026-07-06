@@ -18,13 +18,28 @@ export interface BibleVerse {
   text: string;
 }
 
+export type RepositoryType = 'hosted' | 'local' | 'github-public' | 'github-private';
+export type ArtifactType = 'translation' | 'translation-library' | 'resource-library';
+
 export interface BibleTranslationMeta {
   id: string;
   label: string;
   source: string;
   isLocal: boolean;
+  configuredSourceUrl?: string;
+  repositoryType?: RepositoryType;
+  artifactType?: ArtifactType;
   language?: string | string[];
   lastFetched?: number;
+  owner?: string;
+  repo?: string;
+  ref?: string;
+  path?: string;
+  publicUrl?: string;
+  repoAlias?: string;
+  requiredPermissions?: string[];
+  authHint?: string;
+  orgName?: string;
 }
 
 export interface QuickJumpTarget {
@@ -48,6 +63,8 @@ export interface GitBibleState {
   lastVerse?: number;
   lastSearch?: string;
   languages?: string[];
+  sourceUrls?: string[];
+  resourceHiddenTags?: string[];
   theme?: ThemePreference;
 }
 

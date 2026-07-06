@@ -1,10 +1,17 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 const GITHUB_CLIENT_ID = "Ov23liiVOv0EIp9hJAAZ";
-const TOKEN_STORAGE_KEY = "gitbible:github-token";
+const TOKEN_STORAGE_KEY = "gitbible:github-auth";
 const STATE_STORAGE_KEY = "gitbible:github-oauth-state";
 const TARGET_REPO_OWNER = "grinn";
 const TARGET_REPO_NAME = "GitBible";
+const TOKEN_TTL_MS = 1000 * 60 * 60;
+
+interface StoredGitHubAuthSession {
+  token: string;
+  expiresAt: number;
+  grantedAt: number;
+}
 
 interface RepoProbe {
   status: number;
@@ -44,10 +51,51 @@ function normalizeError(err: unknown): string {
   return String(err || "Unknown authentication error");
 }
 
+function readStoredGitHubAuthSession(): StoredGitHubAuthSession | null {
+  const raw = sessionStorage.getItem(TOKEN_STORAGE_KEY);
+  if (!raw) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(raw) as Partial<StoredGitHubAuthSession>;
+    if (typeof parsed.token !== "string" || typeof parsed.expiresAt !== "number") {
+      sessionStorage.removeItem(TOKEN_STORAGE_KEY);
+      return null;
+    }
+
+    if (Date.now() >= parsed.expiresAt) {
+      sessionStorage.removeItem(TOKEN_STORAGE_KEY);
+      return null;
+    }
+
+    return {
+      token: parsed.token,
+      expiresAt: parsed.expiresAt,
+      grantedAt: typeof parsed.grantedAt === "number" ? parsed.grantedAt : parsed.expiresAt - TOKEN_TTL_MS,
+    };
+  } catch {
+    sessionStorage.removeItem(TOKEN_STORAGE_KEY);
+    return null;
+  }
+}
+
+function storeGitHubAuthSession(token: string): StoredGitHubAuthSession {
+  const session: StoredGitHubAuthSession = {
+    token,
+    grantedAt: Date.now(),
+    expiresAt: Date.now() + TOKEN_TTL_MS,
+  };
+
+  sessionStorage.setItem(TOKEN_STORAGE_KEY, JSON.stringify(session));
+  return session;
+}
+
 export default function GitHubAuth() {
   const callbackBase = (import.meta.env.VITE_GITHUB_OAUTH_CALLBACK_URL || "").trim();
 
   const [token, setToken] = useState<string | null>(null);
+  const [tokenExpiresAt, setTokenExpiresAt] = useState<number | null>(null);
   const [statusMessage, setStatusMessage] = useState<string>("");
   const [isConnecting, setIsConnecting] = useState(false);
   const [isProbing, setIsProbing] = useState(false);
@@ -60,10 +108,17 @@ export default function GitHubAuth() {
     []
   );
 
+  const isTokenExpired = tokenExpiresAt !== null && Date.now() >= tokenExpiresAt;
+  const authStatus = token
+    ? (isTokenExpired ? "Authorization expired" : "Authorized")
+    : (statusMessage.startsWith("GitHub sign-in failed") ? "Authorization expired" : "Not authorized");
+
   useEffect(() => {
-    const storedToken = sessionStorage.getItem(TOKEN_STORAGE_KEY);
-    if (storedToken) {
-      setToken(storedToken);
+    const existingSession = readStoredGitHubAuthSession();
+    if (existingSession) {
+      setToken(existingSession.token);
+      setTokenExpiresAt(existingSession.expiresAt);
+      setStatusMessage("Authorized.");
     }
 
     const hash = window.location.hash.startsWith("#")
@@ -82,6 +137,8 @@ export default function GitHubAuth() {
 
     if (hashError) {
       setStatusMessage(`GitHub sign-in failed: ${hashError}`);
+      setToken(null);
+      setTokenExpiresAt(null);
       clearHashFragment();
       return;
     }
@@ -92,14 +149,17 @@ export default function GitHubAuth() {
 
     if (!expectedState || returnedState !== expectedState) {
       setStatusMessage("GitHub sign-in failed: state validation mismatch.");
+      setToken(null);
+      setTokenExpiresAt(null);
       clearHashFragment();
       return;
     }
 
-    sessionStorage.setItem(TOKEN_STORAGE_KEY, hashToken);
+    const refreshedSession = storeGitHubAuthSession(hashToken);
     sessionStorage.removeItem(STATE_STORAGE_KEY);
-    setToken(hashToken);
-    setStatusMessage("Connected to GitHub.");
+    setToken(refreshedSession.token);
+    setTokenExpiresAt(refreshedSession.expiresAt);
+    setStatusMessage("Authorized.");
     clearHashFragment();
   }, []);
 
@@ -133,9 +193,14 @@ export default function GitHubAuth() {
     sessionStorage.removeItem(TOKEN_STORAGE_KEY);
     sessionStorage.removeItem(STATE_STORAGE_KEY);
     setToken(null);
+    setTokenExpiresAt(null);
     setProbeResult(null);
-    setStatusMessage("Disconnected from GitHub.");
+    setStatusMessage("Not authorized.");
   }, []);
+
+  const handleReauthorize = useCallback(() => {
+    handleConnect();
+  }, [handleConnect]);
 
   const handleProbePrivateRepo = useCallback(async () => {
     if (!token) {
@@ -204,7 +269,7 @@ export default function GitHubAuth() {
               onClick={handleConnect}
               disabled={isConnecting || !isConfigured}
             >
-              Connect GitHub
+              Authorize GitHub
             </button>
           )}
 
@@ -228,10 +293,27 @@ export default function GitHubAuth() {
             </>
           )}
 
-          <span className={`badge ${token ? "text-bg-success" : "text-bg-secondary"}`}>
-            {token ? "Connected" : "Not Connected"}
+          {token && isTokenExpired && (
+            <button
+              type="button"
+              className="btn btn-outline-primary"
+              onClick={handleReauthorize}
+              disabled={isConnecting || !isConfigured}
+            >
+              Reauthorize
+            </button>
+          )}
+
+          <span className={`badge ${token && !isTokenExpired ? "text-bg-success" : token ? "text-bg-warning" : "text-bg-secondary"}`}>
+            {authStatus}
           </span>
         </div>
+
+        {tokenExpiresAt && (
+          <div className="small text-body-secondary">
+            Authorization expires {new Date(tokenExpiresAt).toLocaleString()}.
+          </div>
+        )}
 
         {statusMessage && (
           <div className="small text-body-secondary">{statusMessage}</div>

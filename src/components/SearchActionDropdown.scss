@@ -1,6 +1,7 @@
-.search-action-dropdown {
+.quick-jump-pulldown.search-action-dropdown {
   display: flex;
   flex-direction: column;
+  flex-wrap: nowrap;
   align-items: stretch;
   gap: 0.35rem;
   max-height: min(26rem, calc(100vh - 13rem));

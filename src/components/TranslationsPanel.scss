@@ -3,6 +3,15 @@
   container-name: translations-panel;
 }
 
+.translations-panel-body {
+  min-height: 0;
+}
+
+.translation-verse-card,
+.translation-drag-handle {
+  cursor: grab;
+}
+
 .translations-panel-layout {
   display: flex;
   flex-direction: column;

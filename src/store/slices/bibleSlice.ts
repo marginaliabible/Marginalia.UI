@@ -12,6 +12,7 @@ interface BibleState {
   error: string | null;
   tabs: PanelTab[];
   activeTabId: string | null;
+  lastVersePanelType: 'translations' | 'resources';
   isPanelDetached: boolean;
   detachedPanelName: string | null;
 }
@@ -32,6 +33,7 @@ const initialState: BibleState = {
   error: null,
   tabs: [],
   activeTabId: null,
+  lastVersePanelType: 'resources',
   isPanelDetached: false,
   detachedPanelName: null
 };
@@ -128,10 +130,44 @@ const findActiveTabIndex = (state: BibleState): number => {
   return state.tabs.findIndex((tab) => tab.id === state.activeTabId);
 };
 
+const upsertVerseTab = (
+  state: BibleState,
+  type: 'translations' | 'resources',
+  verseContext: { book: string; chapter: number; verse: number },
+  now: number
+): PanelTab => {
+  const existing = state.tabs.find((tab) => tab.type === type);
+  const title = type === 'translations' ? 'Translations' : 'Resources';
+  const iconClass = type === 'translations' ? 'fa-solid fa-language' : 'fa-solid fa-book-open-reader';
+
+  if (existing) {
+    existing.verseContext = verseContext;
+    existing.title = title;
+    existing.iconClass = iconClass;
+    existing.updatedAt = now;
+    return existing;
+  }
+
+  const created: PanelTab = {
+    id: `tab-${type}-${now}`,
+    type,
+    title,
+    iconClass,
+    verseContext,
+    createdAt: now,
+    updatedAt: now,
+  };
+
+  state.tabs.push(created);
+  return created;
+};
+
 export const refreshTranslations = createAsyncThunk(
   'bible/refreshTranslations',
-  async (forceRefresh: boolean = false) => {
-    return await bibleService.refreshAvailableTranslations(forceRefresh);
+  async (forceRefresh: boolean = false, thunkApi) => {
+    const state = thunkApi.getState() as { ui?: { sourceUrls?: string[] } };
+    const sourceUrls = Array.isArray(state.ui?.sourceUrls) ? state.ui.sourceUrls : [];
+    return await bibleService.refreshAvailableTranslations(forceRefresh, sourceUrls);
   }
 );
 
@@ -177,6 +213,23 @@ const bibleSlice = createSlice({
     },
     setCurrentBibleFromId: (state, action: PayloadAction<string>) => {
       state.currentBible = state.loadedTranslations[action.payload] ?? null;
+    },
+    removeLoadedTranslations: (state, action: PayloadAction<string[]>) => {
+      const blocked = new Set(
+        action.payload
+          .map((entry) => entry.trim())
+          .filter((entry) => entry.length > 0)
+      );
+
+      if (blocked.size === 0) {
+        return;
+      }
+
+      for (const id of Object.keys(state.loadedTranslations)) {
+        if (blocked.has(id)) {
+          delete state.loadedTranslations[id];
+        }
+      }
     },
     setError: (state, action: PayloadAction<string | null>) => {
       state.error = action.payload;
@@ -241,9 +294,15 @@ const bibleSlice = createSlice({
       state.activeTabId = action.payload.tabId;
     },
     setActiveTab: (state, action: PayloadAction<string>) => {
-      if (!state.tabs.some((tab) => tab.id === action.payload)) {
+      const target = state.tabs.find((tab) => tab.id === action.payload);
+      if (!target) {
         return;
       }
+
+      if (target.type === 'translations' || target.type === 'resources') {
+        state.lastVersePanelType = target.type;
+      }
+
       state.activeTabId = action.payload;
     },
     closeTab: (state, action: PayloadAction<string>) => {
@@ -264,6 +323,11 @@ const bibleSlice = createSlice({
 
       const fallbackIndex = Math.max(0, closeIndex - 1);
       state.activeTabId = state.tabs[fallbackIndex].id;
+
+      const fallbackTab = state.tabs[fallbackIndex];
+      if (fallbackTab.type === 'translations' || fallbackTab.type === 'resources') {
+        state.lastVersePanelType = fallbackTab.type;
+      }
     },
     setPanelDetached: (state, action: PayloadAction<{ detached: boolean; panelName?: string | null }>) => {
       state.isPanelDetached = action.payload.detached;
@@ -275,32 +339,25 @@ const bibleSlice = createSlice({
       state.tabs = [];
       state.activeTabId = null;
     },
-    openTranslationsTab: (state, action: PayloadAction<{ book: string; chapter: number; verse: number }>) => {
-      const { book, chapter, verse } = action.payload;
+    openVerseTabs: (state, action: PayloadAction<{ book: string; chapter: number; verse: number; hasResources: boolean }>) => {
+      const { book, chapter, verse, hasResources } = action.payload;
       const now = Date.now();
-      
-      // Find existing translations tab
-      const existingTab = state.tabs.find((tab) => tab.type === 'translations');
-      
-      if (existingTab) {
-        // Update existing tab with new verse context
-        existingTab.verseContext = { book, chapter, verse };
-        existingTab.title = 'Translations';
-        existingTab.updatedAt = now;
-        state.activeTabId = existingTab.id;
+      const verseContext = { book, chapter, verse };
+
+      const translationsTab = upsertVerseTab(state, 'translations', verseContext, now);
+      let resourcesTab: PanelTab | null = null;
+
+      if (hasResources) {
+        resourcesTab = upsertVerseTab(state, 'resources', verseContext, now);
       } else {
-        // Create new translations tab
-        const newTab: PanelTab = {
-          id: `tab-translations-${now}`,
-          type: 'translations',
-          title: 'Translations',
-          iconClass: 'fa-solid fa-language',
-          verseContext: { book, chapter, verse },
-          createdAt: now,
-          updatedAt: now
-        };
-        state.tabs.push(newTab);
-        state.activeTabId = newTab.id;
+        state.tabs = state.tabs.filter((tab) => tab.type !== 'resources');
+      }
+
+      const preferredType = hasResources ? state.lastVersePanelType : 'translations';
+      if (preferredType === 'resources' && resourcesTab) {
+        state.activeTabId = resourcesTab.id;
+      } else {
+        state.activeTabId = translationsTab.id;
       }
     }
   },
@@ -353,6 +410,7 @@ export const {
   setAvailableTranslations,
   setCurrentBible,
   setCurrentBibleFromId,
+  removeLoadedTranslations,
   setError,
   runSearch,
   runSearchInNewTab,
@@ -361,7 +419,7 @@ export const {
   closeTab,
   setPanelDetached,
   clearSearch,
-  openTranslationsTab
+  openVerseTabs
 } = bibleSlice.actions;
 
 export default bibleSlice.reducer;

@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import VerseDisplay from './VerseDisplay';
 import { useAppDispatch, useAppSelector } from '../store/hooks';
 import {
-  openTranslationsTab,
+  openVerseTabs,
 } from '../store/slices/bibleSlice';
 import {
   setSelectedBook,
@@ -33,6 +33,7 @@ interface WorkspaceMainPaneProps {
   isMiniSearchVisible: boolean;
   setIsMiniSearchVisible: (open: boolean) => void;
   mainPaneRef: React.RefObject<HTMLDivElement | null>;
+  resourceHiddenTags: string[];
 }
 
 type VerseSelectionMode = 'single' | 'toggle' | 'range' | 'mobile-range' | 'mobile-anchor';
@@ -60,6 +61,7 @@ const WorkspaceMainPane: React.FC<WorkspaceMainPaneProps> = ({
   isMiniSearchVisible,
   setIsMiniSearchVisible,
   mainPaneRef,
+  resourceHiddenTags,
 }) => {
   const dispatch = useAppDispatch();
   const { currentBible } = useAppSelector((state) => state.bible);
@@ -71,9 +73,11 @@ const WorkspaceMainPane: React.FC<WorkspaceMainPaneProps> = ({
     selectedVerseTranslationId,
     selectedVerses,
     selectionAnchorVerse,
+    sourceUrls,
   } = useAppSelector((state) => state.ui);
 
   const [chaptersByTranslation, setChaptersByTranslation] = useState<Record<string, BibleChapter | null>>({});
+  const [resourceVerseTagsByVerse, setResourceVerseTagsByVerse] = useState<Map<number, string[]>>(new Map());
   const keyboardCursorRef = useRef<{
     translationId: string;
     book: string;
@@ -139,6 +143,37 @@ const WorkspaceMainPane: React.FC<WorkspaceMainPaneProps> = ({
     };
   }, [selectedBook, selectedChapter, starredTranslationIds]);
 
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadResourceMarkers = async () => {
+      const verseNumbers = selectedBookEntry?.chapters.find((entry) => entry.chapter === selectedChapter)?.verses.map((entry) => entry.verse) ?? [];
+
+      if (!selectedBook || verseNumbers.length === 0) {
+        if (!cancelled) {
+          setResourceVerseTagsByVerse(new Map());
+        }
+        return;
+      }
+
+      const settled = await Promise.all(
+        verseNumbers.map(async (verseNumber) => {
+          const payload = await bibleService.getResourcesForVerse(selectedBook, selectedChapter, verseNumber, sourceUrls);
+          return [verseNumber, payload.tags] as const;
+        })
+      );
+
+      if (!cancelled) {
+        setResourceVerseTagsByVerse(new Map(settled.filter(([, tags]) => tags.length > 0)));
+      }
+    };
+
+    void loadResourceMarkers();
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedBook, selectedChapter, selectedBookEntry, sourceUrls]);
+
   const handleBookSelectionChange = (bookName: string) => {
     const nextBook = currentBible?.books.find((book) => book.name === bookName);
     if (!nextBook) return;
@@ -167,7 +202,10 @@ const WorkspaceMainPane: React.FC<WorkspaceMainPaneProps> = ({
     }
 
     if (selectedBook) {
-      dispatch(openTranslationsTab({ book: selectedBook, chapter: selectedChapter, verse }));
+      void (async () => {
+        const hasResources = await bibleService.hasResourcesForVerse(selectedBook, selectedChapter, verse, sourceUrls);
+        dispatch(openVerseTabs({ book: selectedBook, chapter: selectedChapter, verse, hasResources }));
+      })();
     }
   };
 
@@ -431,6 +469,8 @@ const WorkspaceMainPane: React.FC<WorkspaceMainPaneProps> = ({
               setIsMiniSearchVisible={setIsMiniSearchVisible}
               onSearchComplete={() => setIsMiniSearchVisible(false)}
               setIsMobilePanelOpen={setIsMobilePanelOpen}
+              resourceVerseTagsByVerse={resourceVerseTagsByVerse}
+              resourceHiddenTags={resourceHiddenTags}
               verseDomId={verseDomId}
             />
           ) : (

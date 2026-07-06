@@ -2,6 +2,7 @@ import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 're
 import type { BibleBook, BibleChapter } from '../models/bible';
 import MiniSearchBar, { type MiniSearchBarHandle } from './MiniSearchBar';
 import type { QuickJumpTarget } from '../models/bible';
+import { getOrAssignResourceTagColors } from '../utils/resourceTagColors';
 
 type VerseSelectionMode = 'single' | 'toggle' | 'range' | 'mobile-range' | 'mobile-anchor';
 
@@ -36,8 +37,11 @@ interface VerseDisplayProps {
   isMiniSearchVisible: boolean;
   setIsMiniSearchVisible: (open: boolean) => void;
   setIsMobilePanelOpen: (open: boolean) => void;
+  resourceVerseTagsByVerse: Map<number, string[]>;
+  resourceHiddenTags: string[];
   verseDomId: (book: string, chapter: number, verse: number) => string;
 }
+const MAX_INNER_TAGS = 5;
 
 const VerseDisplay: React.FC<VerseDisplayProps> = ({
   chaptersByTranslation,
@@ -70,6 +74,8 @@ const VerseDisplay: React.FC<VerseDisplayProps> = ({
   isMiniSearchVisible,
   setIsMiniSearchVisible,
   setIsMobilePanelOpen,
+  resourceVerseTagsByVerse,
+  resourceHiddenTags,
   verseDomId,
 }) => {
   const shellRef = useRef<HTMLDivElement | null>(null);
@@ -244,6 +250,13 @@ const VerseDisplay: React.FC<VerseDisplayProps> = ({
       (chaptersByTranslation[translationId]?.verses ?? []).map((verse) => verse.verse)
     )
   )).sort((a, b) => a - b);
+
+  const hiddenTagSet = useMemo(() => new Set(resourceHiddenTags), [resourceHiddenTags]);
+
+  const resourceTagColors = useMemo(() => {
+    const tags = Array.from(new Set(Array.from(resourceVerseTagsByVerse.values()).flat()));
+    return getOrAssignResourceTagColors(tags);
+  }, [resourceVerseTagsByVerse]);
 
   const selectedVerseSet = useMemo(() => new Set(selectedVerses), [selectedVerses]);
 
@@ -592,18 +605,16 @@ const VerseDisplay: React.FC<VerseDisplayProps> = ({
             className="verse-grid-row"
             role="listitem"
           >
-            <a
-              href="#"
-              className="verse-number"
-              onClick={(event) => {
-                event.preventDefault();
-                onVerseNumberClick?.(verseNumber);
-              }}
-              aria-label={`Verse ${verseNumber}`}
-              title={`Verse ${verseNumber}`}
-            >
-              {verseNumber}
-            </a>
+            <span className="verse-number-wrap">
+              <VerseResourceDonut
+                verseNumber={verseNumber}
+                tags={(resourceVerseTagsByVerse.get(verseNumber) ?? []).filter((tag) => !hiddenTagSet.has(tag))}
+                colors={(resourceVerseTagsByVerse.get(verseNumber) ?? [])
+                  .filter((tag) => !hiddenTagSet.has(tag))
+                  .map((tag) => resourceTagColors.get(tag) ?? '#6c757d')}
+                onVerseNumberClick={() => onVerseNumberClick?.(verseNumber)}
+              />
+            </span>
             {visibleTranslationIds.map((translationId) => {
               const verseText =
                 chaptersByTranslation[translationId]?.verses.find((verse) => verse.verse === verseNumber)?.text ?? '';
@@ -631,6 +642,7 @@ const VerseDisplay: React.FC<VerseDisplayProps> = ({
                   ].filter(Boolean).join(' ')}
                   data-translation-id={translationId}
                   data-verse={verseNumber}
+                  title={verseText ? undefined : 'This verse is not available in this translation'}
                   onMouseDown={(event) => {
                     if (event.shiftKey) {
                       event.preventDefault();
@@ -664,5 +676,66 @@ const VerseDisplay: React.FC<VerseDisplayProps> = ({
     </div>
   );
 };
+
+const VerseResourceDonut: React.FC<{
+  verseNumber: number;
+  tags: string[];
+  colors: string[];
+  onVerseNumberClick: () => void;
+}> = ({ verseNumber, tags, colors, onVerseNumberClick }) => {
+  const visibleTags = tags.slice(0, MAX_INNER_TAGS);
+  const extraCount = Math.max(0, tags.length - MAX_INNER_TAGS);
+  const title = tags.length > 0
+    ? `Resources tagged: ${tags.join(', ')}${extraCount > 0 ? ` (+${extraCount} more)` : ''}`
+    : `Verse ${verseNumber}`;
+
+  const donutStyle = tags.length > 0
+    ? {
+        ["--resource-donut-gradient" as "--resource-donut-gradient"]: buildEqualSliceGradient(
+          visibleTags.map((tag) => colors[tags.indexOf(tag)] ?? '#6c757d')
+        ),
+      } as React.CSSProperties
+    : undefined;
+
+  return (
+    <span className="verse-resource-donut-wrap" title={title} aria-label={title}>
+      <span
+        className={`verse-resource-donut${tags.length === 0 ? ' is-empty' : ''}`}
+        style={donutStyle}
+        aria-hidden="true"
+      ></span>
+      <a
+        href="#"
+        className="verse-resource-verse-number"
+        onClick={(event) => {
+          event.preventDefault();
+          onVerseNumberClick();
+        }}
+        aria-label={`Verse ${verseNumber}`}
+        title={title}
+      >
+        {verseNumber}
+      </a>
+      {extraCount > 0 && (
+        <span className="verse-resource-more" aria-hidden="true" title={`${extraCount} additional tags`}>
+          +
+        </span>
+      )}
+    </span>
+  );
+};
+
+function buildEqualSliceGradient(colors: string[]): string {
+  const segmentCount = Math.max(1, colors.length);
+  const segmentSize = 100 / segmentCount;
+
+  return `conic-gradient(${colors
+    .map((color, index) => {
+      const start = index * segmentSize;
+      const end = (index + 1) * segmentSize;
+      return `${color} ${start}%, ${color} ${end}%`;
+    })
+    .join(', ')})`;
+}
 
 export default VerseDisplay;

@@ -102,7 +102,7 @@ const TranslationsPanel: React.FC<TranslationsPanelProps> = ({
 
   return (
     <div className="card border-0 shadow-sm h-100 d-flex flex-column">
-      <div className="card-body d-flex flex-column gap-3 translations-panel-shell" style={{ flex: '1 1 auto', minHeight: 0 }}>
+      <div className="card-body d-flex flex-column gap-3 flex-grow-1 translations-panel-shell translations-panel-body">
         {/* Verse reference header */}
         <div className="d-flex align-items-center justify-content-between">
           <span className="text-body-secondary small fw-semibold">
@@ -138,14 +138,10 @@ const TranslationsPanel: React.FC<TranslationsPanelProps> = ({
                         className={`card border p-2 translation-verse-card ${
                           draggedIndex === index ? 'opacity-50' : ''
                         }`}
-                        style={{
-                          cursor: 'grab',
-                          opacity: draggedIndex === index ? 0.5 : 1
-                        }}
                       >
                         <div className="d-flex align-items-center justify-content-between mb-2">
                           <div className="d-flex align-items-center gap-2 flex-grow-1">
-                            <span className="text-muted" style={{ cursor: 'grab' }} title="Drag to reorder">
+                            <span className="text-muted translation-drag-handle" title="Drag to reorder">
                               ⋮
                             </span>
                             <button
@@ -182,24 +178,26 @@ const TranslationsPanel: React.FC<TranslationsPanelProps> = ({
                           <div className="d-flex align-items-center gap-1">
                             <button
                               type="button"
-                              className="btn btn-sm p-0 border-0 bg-transparent text-body-secondary"
+                              className="btn btn-sm p-0 border-0 bg-transparent text-body-secondary fs-5 lh-1 text-decoration-none"
                               onClick={() => onRemoveTranslation(record.id)}
                               aria-label={isLastStarred ? 'Cannot remove the last starred translation' : 'Remove translation'}
                               title={isLastStarred ? 'Cannot remove the last starred translation' : 'Remove translation'}
                               disabled={isLastStarred}
-                              style={{
-                                fontSize: '1.15rem',
-                                lineHeight: 1,
-                                textDecoration: 'none'
-                              }}
                             >
                               ×
                             </button>
                           </div>
                         </div>
 
-                        <div className="text-body text-small" style={{ lineHeight: 1.6 }}>
-                          {verseText || <span className="text-muted">-</span>}
+                        <div className="text-body text-small lh-base">
+                          {verseText || (
+                            <span
+                              className="text-muted"
+                              title="This verse is not available in this translation"
+                            >
+                              Not available in this translation
+                            </span>
+                          )}
                         </div>
                       </div>
                     </div>
