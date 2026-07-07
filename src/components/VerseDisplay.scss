@@ -13,6 +13,13 @@
   --verse-grid-translation-min-width: 15.6rem;
   --verse-grid-column-gap: 0.85rem;
   --verse-grid-inline-padding-end: 0.85rem;
+  --verse-grid-search-stage-width: 15rem;
+  --verse-grid-heading-section-gap: 0.55rem;
+  --verse-grid-heading-actions-count: 3;
+  --verse-grid-heading-actions-button-size: 2.2rem;
+  --verse-grid-heading-actions-gap: 0.45rem;
+  --verse-grid-heading-actions-width: calc((var(--verse-grid-heading-actions-count) * var(--verse-grid-heading-actions-button-size)) + ((var(--verse-grid-heading-actions-count) - 1) * var(--verse-grid-heading-actions-gap)));
+  --mini-search-dropdown-extra-width: calc(var(--verse-grid-heading-section-gap) + var(--verse-grid-heading-actions-width));
 }
 
 .verse-grid-header {
@@ -48,7 +55,7 @@
 
 .verse-grid-heading-control-chapter {
   flex: 0 0 auto;
-  min-width: 8.1rem;
+  min-width: 0;
 }
 
 .verse-grid-heading-control-inline {
@@ -58,28 +65,28 @@
 }
 
 .verse-grid-heading-control-inline .verse-grid-heading-select {
-  min-width: 5.25rem;
+  min-width: 4.75rem;
 }
 
 .verse-grid-search-stage {
   position: relative;
-  flex: 1 1 auto;
+  flex: 0 1 auto;
   min-width: 0;
-  min-height: 4.35rem;
+  min-height: 0;
+  width: min(100%, var(--verse-grid-search-stage-width));
 }
 
 .verse-grid-search-stage-default {
   display: flex;
   align-items: flex-end;
   gap: 0.55rem;
+  width: 100%;
   transition: opacity 160ms ease;
 }
 
 .verse-grid-search-stage-default.is-hidden {
   opacity: 0;
   pointer-events: none;
-  position: absolute;
-  inset: 0;
 }
 
 .mini-search-shell {
@@ -87,6 +94,7 @@
   inset: 0;
   display: flex;
   align-items: flex-end;
+  width: 100%;
   transition: opacity 160ms ease;
 }
 
@@ -97,12 +105,17 @@
 
 .mini-search-shell.is-visible {
   opacity: 1;
+  pointer-events: auto;
 }
 
 .mini-search-input-wrap {
   position: relative;
   width: 100%;
-  max-width: 25rem;
+  max-width: none;
+}
+
+.mini-search-input-wrap .quick-jump-pulldown {
+  right: calc(-1 * var(--mini-search-dropdown-extra-width));
 }
 
 .mini-search-input {
@@ -430,6 +443,20 @@
   border-color: color-mix(in srgb, var(--bs-primary) 62%, var(--bs-border-color));
 }
 
+@media (max-width: 410px) {
+
+  .verse-grid-search-stage {
+    flex: 1 0 100%;
+    width: 100%;
+  }
+
+  .mini-search-input-wrap .quick-jump-pulldown {
+    left: -0.3rem;
+    right: -0.3rem;
+  }
+
+}
+
 @media (max-width: 991.98px) {
   .verse-grid-shell {
     --verse-grid-translation-min-width: 13.2rem;
@@ -449,6 +476,6 @@
   }
 
   .verse-grid-heading-control-chapter {
-    min-width: 7.4rem;
+    min-width: 0;
   }
 }
