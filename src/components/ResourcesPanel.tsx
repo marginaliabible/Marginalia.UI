@@ -1,8 +1,9 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import type { PanelTab, VerseContext } from '../models/tab';
 import { useAppDispatch, useAppSelector } from '../store/hooks';
-import { setResourceHiddenTags } from '../store/slices/uiSlice';
+import { openPdfViewer, setResourceHiddenTags } from '../store/slices/uiSlice';
 import { bibleService, type VerseResourcesPayload } from '../services/bibleService';
+import { buildPdfProxyUrl } from '../utils/pdfProxy';
 
 interface ResourcesPanelProps {
   tab: PanelTab;
@@ -19,7 +20,7 @@ const ResourcesPanel: React.FC<ResourcesPanelProps> = ({ tab }) => {
   const verseContext = tab.verseContext as VerseContext | undefined;
   const dispatch = useAppDispatch();
   const { sourceUrls, resourceHiddenTags } = useAppSelector((state) => state.ui);
-  const { currentBible } = useAppSelector((state) => state.bible);
+  const { currentBible, isPanelDetached } = useAppSelector((state) => state.bible);
 
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -151,6 +152,25 @@ const ResourcesPanel: React.FC<ResourcesPanelProps> = ({ tab }) => {
     dispatch(setResourceHiddenTags(Array.from(next)));
   };
 
+  const handleOpenDocumentPage = (
+    event: React.MouseEvent<HTMLButtonElement>,
+    url: string,
+    page: number,
+    title: string
+  ) => {
+    event.preventDefault();
+
+    const proxyUrl = buildPdfProxyUrl(url);
+    void proxyUrl;
+    // const viewerUrl = proxyUrl || url;
+    const viewerUrl = url;
+    dispatch(openPdfViewer({ sourceUrl: viewerUrl, page, title }));
+
+    if (isPanelDetached && typeof window !== 'undefined' && window.opener && !window.opener.closed) {
+      window.opener.focus();
+    }
+  };
+
   if (!verseContext) {
     return (
       <div className="card border-0 shadow-sm h-100">
@@ -241,9 +261,13 @@ const ResourcesPanel: React.FC<ResourcesPanelProps> = ({ tab }) => {
                         {document.pageLinks.map((link, index) => (
                           <span key={`${document.documentId}:${link.page}`}>
                             {index > 0 ? ', ' : ''}
-                            <a href={link.url} target="_blank" rel="noreferrer">
+                            <button
+                              type="button"
+                              className="resource-page-link btn btn-link btn-sm p-0 align-baseline"
+                              onClick={(event) => handleOpenDocumentPage(event, link.url, link.page, document.title)}
+                            >
                               {link.page}
-                            </a>
+                            </button>
                           </span>
                         ))}
                       </div>

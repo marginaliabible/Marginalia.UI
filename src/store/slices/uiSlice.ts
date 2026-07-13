@@ -19,6 +19,12 @@ interface UiState {
   selectedLanguages: string[];
   sourceUrls: string[];
   resourceHiddenTags: string[];
+  pdfViewer: {
+    isOpen: boolean;
+    sourceUrl: string | null;
+    title: string | null;
+    page: number;
+  };
   theme: ThemePreference;
   ready: boolean;
 }
@@ -36,6 +42,12 @@ const initialState: UiState = {
   selectedLanguages: [],
   sourceUrls: [],
   resourceHiddenTags: [],
+  pdfViewer: {
+    isOpen: false,
+    sourceUrl: null,
+    title: null,
+    page: 1,
+  },
   theme: 'light',
   ready: false
 };
@@ -113,6 +125,36 @@ const uiSlice = createSlice({
           .map((entry) => entry.trim())
           .filter((entry) => entry.length > 0)
       ));
+    },
+    openPdfViewer: (
+      state,
+      action: PayloadAction<{
+        sourceUrl: string;
+        title?: string;
+        page?: number;
+      }>
+    ) => {
+      const nextPage = typeof action.payload.page === 'number' && Number.isFinite(action.payload.page)
+        ? Math.max(1, Math.floor(action.payload.page))
+        : 1;
+
+      state.pdfViewer = {
+        isOpen: true,
+        sourceUrl: action.payload.sourceUrl,
+        title: action.payload.title?.trim() || null,
+        page: nextPage,
+      };
+    },
+    closePdfViewer: (state) => {
+      state.pdfViewer.isOpen = false;
+    },
+    setPdfViewerPage: (state, action: PayloadAction<number>) => {
+      if (!state.pdfViewer.isOpen) {
+        return;
+      }
+
+      const normalizedPage = Math.max(1, Math.floor(action.payload));
+      state.pdfViewer.page = normalizedPage;
     },
     toggleResourceHiddenTag: (state, action: PayloadAction<string>) => {
       const tag = action.payload.trim();
@@ -293,6 +335,9 @@ export const {
   setSelectedLanguages,
   setSourceUrls,
   setResourceHiddenTags,
+  openPdfViewer,
+  closePdfViewer,
+  setPdfViewerPage,
   toggleResourceHiddenTag,
   addSourceUrl,
   removeSourceUrl,

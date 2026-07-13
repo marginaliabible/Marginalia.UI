@@ -1,0 +1,48 @@
+.pdf-viewer-shell {
+  min-height: 0;
+}
+
+.pdf-viewer-toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  background: var(--bs-body-bg);
+}
+
+.pdf-viewer-title {
+  min-width: 0;
+  max-width: 40ch;
+}
+
+.pdf-viewer-stage {
+  min-height: 0;
+  overflow: auto;
+  border: 1px solid color-mix(in srgb, var(--bs-border-color) 80%, transparent);
+  border-radius: 0.6rem;
+  background: color-mix(in srgb, var(--bs-body-bg) 92%, #000 8%);
+  padding: 0.9rem;
+}
+
+.pdf-viewer-canvas-wrap {
+  width: 100%;
+  min-height: 100%;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+}
+
+.pdf-viewer-canvas {
+  max-width: 100%;
+  box-shadow: 0 12px 30px color-mix(in srgb, #000 20%, transparent);
+  background: #fff;
+}
+
+.pdf-viewer-rendering-badge {
+  position: sticky;
+  left: 0.5rem;
+  bottom: 0.35rem;
+  display: inline-block;
+  padding: 0.15rem 0.45rem;
+  border-radius: 0.3rem;
+  background: color-mix(in srgb, var(--bs-body-bg) 86%, var(--bs-secondary-bg));
+}

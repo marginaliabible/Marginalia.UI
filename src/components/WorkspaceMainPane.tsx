@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import VerseDisplay from './VerseDisplay';
+import PdfViewerPane from './PdfViewerPane';
 import { useAppDispatch, useAppSelector } from '../store/hooks';
 import {
   openVerseTabs,
@@ -74,6 +75,7 @@ const WorkspaceMainPane: React.FC<WorkspaceMainPaneProps> = ({
     selectedVerses,
     selectionAnchorVerse,
     sourceUrls,
+    pdfViewer,
   } = useAppSelector((state) => state.ui);
 
   const [chaptersByTranslation, setChaptersByTranslation] = useState<Record<string, BibleChapter | null>>({});
@@ -421,7 +423,7 @@ const WorkspaceMainPane: React.FC<WorkspaceMainPaneProps> = ({
     return () => window.removeEventListener('keydown', handleArrowSelectionKey, true);
   }, [handleArrowSelectionKey]);
 
-  if (!currentBible) {
+  if (!currentBible && !pdfViewer.isOpen) {
     return null;
   }
 
@@ -439,13 +441,15 @@ const WorkspaceMainPane: React.FC<WorkspaceMainPaneProps> = ({
     >
       <div className="card border-0 shadow-sm">
         <div className="card-body workspace-scroll pb-4">
-          {selectedBook ? (
+          {pdfViewer.isOpen ? (
+            <PdfViewerPane />
+          ) : selectedBook ? (
             <VerseDisplay
               chaptersByTranslation={chaptersByTranslation}
               translationOrder={starredTranslationIds}
               translationLabels={translationLabels}
               selectedTranslationId={selectedTranslationId}
-              books={currentBible.books}
+              books={currentBible?.books ?? []}
               availableChapters={selectedBookEntry?.chapters ?? []}
               selectedBook={selectedBook}
               selectedChapter={selectedChapter}

@@ -41,3 +41,12 @@
 .resource-tag-button:focus-visible {
   opacity: 0.95;
 }
+
+.resource-page-link {
+  text-decoration: underline;
+}
+
+.resource-page-link:hover,
+.resource-page-link:focus-visible {
+  text-decoration: none;
+}

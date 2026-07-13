@@ -38,6 +38,22 @@ GitBible is a browser-only React application for exploring and searching Scriptu
 
 	The app runs at [http://localhost:3000](http://localhost:3000) with hot module replacement.
 
+## AWS Integration
+
+GitBible uses one AWS Lambda URL for both GitHub OAuth callback handling and PDF proxying.
+
+Set this in your local environment file:
+
+```dotenv
+VITE_GITBIBLE_AWS_URL=https://your-lambda-function-url.lambda-url.us-east-1.on.aws/
+```
+
+Notes:
+
+- This single URL is used when starting GitHub authorization.
+- The PDF viewer also builds its proxy URL from the same base.
+- If you change the Lambda URL, update this value and restart Vite.
+
 ## Usage Tips
 
 - The quick search bar recognizes many standard book abbreviations. If a reference is recognized, a preview card appears before you press **Go**.

@@ -621,7 +621,7 @@ function App() {
   const handleContinueGitHubAuth = useCallback(() => {
     setIsLaunchingGitHubAuth(true);
     setGitHubAuthPromptError(null);
-    const callbackBase = (import.meta.env.VITE_GITHUB_OAUTH_CALLBACK_URL || '').trim();
+    const callbackBase = (import.meta.env.VITE_GITBIBLE_AWS_URL || '').trim();
     const result = beginGitHubAuthorization(callbackBase);
 
     if (!result.ok) {
