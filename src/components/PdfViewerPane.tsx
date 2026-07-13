@@ -10,7 +10,7 @@ GlobalWorkerOptions.workerSrc = workerUrl;
 const MIN_SCALE = 0.6;
 const MAX_SCALE = 2.4;
 const SCALE_STEP = 0.2;
-const RANGE_CHUNK_SIZE = 512 * 1024;
+const RANGE_CHUNK_SIZE = 1024 * 1024;
 
 const PdfViewerPane: React.FC = () => {
   const dispatch = useAppDispatch();

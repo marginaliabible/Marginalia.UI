@@ -27,6 +27,10 @@ interface BibleDB extends DBSchema {
     key: string;
     value: StoredBible;
   };
+  settingsSnapshots: {
+    key: string;
+    value: StoredSettingsSnapshot;
+  };
   resourceShards: {
     key: string;
     value: StoredResourceShard;
@@ -43,6 +47,14 @@ interface StoredBible {
   source: string;
   fetchedAt: number;
   sourceVersion?: string | null;
+}
+
+interface StoredSettingsSnapshot {
+  key: string;
+  sourceUrls: string[];
+  artifacts: BibleTranslationMeta[];
+  translationLibraryUrls: string[];
+  fetchedAt: number;
 }
 
 interface StoredResourceShard {
@@ -291,6 +303,8 @@ class BibleService {
   private resourceLibraryCacheKey: string | null = null;
   private resourceLibrarySourceKey: string | null = null;
   private hasLoadedResourceLibraries = false;
+  private resourceLibrariesLoadSourceKey: string | null = null;
+  private resourceLibrariesLoadPromise: Promise<ResolvedResourceLibrary[]> | null = null;
   private resourceLibraries: ResolvedResourceLibrary[] = [];
   private verseResourceCache = new Map<string, VerseResourcesPayload>();
   private fullTranslationCacheLimit = DEFAULT_FULL_TRANSLATIONS_IN_MEMORY;
@@ -331,7 +345,7 @@ class BibleService {
     }
 
     try {
-      const fetched = await this.fetchSettings(sourceUrls);
+      const fetched = await this.fetchSettings(sourceUrls, { forceRefresh });
       this.sourceArtifacts = fetched.artifacts;
       this.sourceTranslationLibraryUrls = fetched.translationLibraryUrls;
 
@@ -631,8 +645,28 @@ class BibleService {
     this.translationMetaById = map;
   }
 
-  private async fetchSettings(sourceUrls: string[] = []): Promise<FetchSettingsResult> {
-    const settingsUrls = this.buildSettingsUrlCandidates(sourceUrls);
+  private async fetchSettings(
+    sourceUrls: string[] = [],
+    options?: { forceRefresh?: boolean }
+  ): Promise<FetchSettingsResult> {
+    const normalizedSourceUrls = Array.from(new Set(
+      sourceUrls
+        .map((entry) => entry.trim())
+        .filter((entry) => entry.length > 0)
+    )).sort();
+
+    const snapshotKey = buildSettingsSnapshotDbKey(normalizedSourceUrls);
+    if (!options?.forceRefresh) {
+      const cached = await this.readSettingsSnapshotFromDatabase(snapshotKey);
+      if (cached) {
+        return {
+          artifacts: cached.artifacts,
+          translationLibraryUrls: cached.translationLibraryUrls,
+        };
+      }
+    }
+
+    const settingsUrls = this.buildSettingsUrlCandidates(normalizedSourceUrls);
     const settled = await Promise.allSettled(settingsUrls.map((url) => this.fetchSettingsAtUrl(url)));
     const allEntries: SettingsEntryWithSource[] = [];
     const translationLibraryUrls = new Set<string>();
@@ -655,10 +689,30 @@ class BibleService {
       );
     }
 
-    return {
+    const next: FetchSettingsResult = {
       artifacts: this.normalizeTranslationEntries(allEntries),
       translationLibraryUrls: Array.from(translationLibraryUrls),
     };
+
+    if (allEntries.length === 0) {
+      const cached = await this.readSettingsSnapshotFromDatabase(snapshotKey);
+      if (cached) {
+        return {
+          artifacts: cached.artifacts,
+          translationLibraryUrls: cached.translationLibraryUrls,
+        };
+      }
+    }
+
+    await this.writeSettingsSnapshotToDatabase({
+      key: snapshotKey,
+      sourceUrls: normalizedSourceUrls,
+      artifacts: next.artifacts,
+      translationLibraryUrls: next.translationLibraryUrls,
+      fetchedAt: Date.now(),
+    });
+
+    return next;
   }
 
   private async loadResourceLibraries(sourceUrls: string[] = []): Promise<ResolvedResourceLibrary[]> {
@@ -673,36 +727,56 @@ class BibleService {
       return this.resourceLibraries;
     }
 
-    const fetched = await this.fetchSettings(sourceUrls);
-    this.sourceArtifacts = fetched.artifacts;
-    this.sourceTranslationLibraryUrls = fetched.translationLibraryUrls;
-
-    const resourceEntries = fetched.artifacts
-      .filter((entry) => entry.artifactType === 'resource-library')
-      .sort((a, b) => a.source.localeCompare(b.source));
-
-    const nextKey = resourceEntries.map((entry) => `${entry.id}:${entry.source}`).join('|');
-    if (this.resourceLibraryCacheKey === nextKey && this.resourceLibraries.length > 0) {
-      return this.resourceLibraries;
+    if (this.resourceLibrariesLoadPromise && this.resourceLibrariesLoadSourceKey === sourceKey) {
+      return this.resourceLibrariesLoadPromise;
     }
 
-    const settled = await Promise.allSettled(resourceEntries.map((entry) => this.resolveResourceLibrary(entry)));
-    const resolved: ResolvedResourceLibrary[] = [];
+    const loadPromise = (async (): Promise<ResolvedResourceLibrary[]> => {
+      const fetched = await this.fetchSettings(normalizedSourceUrls);
+      this.sourceArtifacts = fetched.artifacts;
+      this.sourceTranslationLibraryUrls = fetched.translationLibraryUrls;
 
-    for (const result of settled) {
-      if (result.status === 'fulfilled') {
-        resolved.push(result.value);
-      } else {
-        console.warn('Failed to load resource library:', result.reason);
+      const resourceEntries = fetched.artifacts
+        .filter((entry) => entry.artifactType === 'resource-library')
+        .sort((a, b) => a.source.localeCompare(b.source));
+
+      const nextKey = resourceEntries.map((entry) => `${entry.id}:${entry.source}`).join('|');
+      if (this.resourceLibraryCacheKey === nextKey && this.resourceLibraries.length > 0) {
+        this.resourceLibrarySourceKey = sourceKey;
+        this.hasLoadedResourceLibraries = true;
+        return this.resourceLibraries;
+      }
+
+      const settled = await Promise.allSettled(resourceEntries.map((entry) => this.resolveResourceLibrary(entry)));
+      const resolved: ResolvedResourceLibrary[] = [];
+
+      for (const result of settled) {
+        if (result.status === 'fulfilled') {
+          resolved.push(result.value);
+        } else {
+          console.warn('Failed to load resource library:', result.reason);
+        }
+      }
+
+      this.resourceLibrarySourceKey = sourceKey;
+      this.resourceLibraryCacheKey = nextKey;
+      this.hasLoadedResourceLibraries = true;
+      this.resourceLibraries = resolved;
+      this.verseResourceCache.clear();
+      return resolved;
+    })();
+
+    this.resourceLibrariesLoadSourceKey = sourceKey;
+    this.resourceLibrariesLoadPromise = loadPromise;
+
+    try {
+      return await loadPromise;
+    } finally {
+      if (this.resourceLibrariesLoadPromise === loadPromise) {
+        this.resourceLibrariesLoadPromise = null;
+        this.resourceLibrariesLoadSourceKey = null;
       }
     }
-
-    this.resourceLibrarySourceKey = sourceKey;
-    this.resourceLibraryCacheKey = nextKey;
-    this.hasLoadedResourceLibraries = true;
-    this.resourceLibraries = resolved;
-    this.verseResourceCache.clear();
-    return resolved;
   }
 
   private async resolveResourceLibrary(meta: BibleTranslationMeta): Promise<ResolvedResourceLibrary> {
@@ -791,6 +865,17 @@ class BibleService {
     const db = await this.getDatabase();
     const stored = await db.get('resourceLibraries', key);
     return stored ?? null;
+  }
+
+  private async readSettingsSnapshotFromDatabase(key: string): Promise<StoredSettingsSnapshot | null> {
+    const db = await this.getDatabase();
+    const stored = await db.get('settingsSnapshots', key);
+    return stored ?? null;
+  }
+
+  private async writeSettingsSnapshotToDatabase(stored: StoredSettingsSnapshot): Promise<void> {
+    const db = await this.getDatabase();
+    await db.put('settingsSnapshots', stored, stored.key);
   }
 
   private async writeResourceLibraryToDatabase(stored: StoredResourceLibrary): Promise<void> {
@@ -1473,10 +1558,14 @@ class BibleService {
 
   private async getDatabase(): Promise<IDBPDatabase<BibleDB>> {
     if (!this.dbPromise) {
-      this.dbPromise = openDB<BibleDB>('gitbible-db', 3, {
+      this.dbPromise = openDB<BibleDB>('gitbible-db', 4, {
         upgrade(db) {
           if (!db.objectStoreNames.contains('translations')) {
             db.createObjectStore('translations');
+          }
+
+          if (!db.objectStoreNames.contains('settingsSnapshots')) {
+            db.createObjectStore('settingsSnapshots');
           }
 
           if (!db.objectStoreNames.contains('resourceShards')) {
@@ -2518,6 +2607,10 @@ function buildResourceShardDbKey(library: ResolvedResourceLibrary, shardFile: st
 
 function buildResourceLibraryDbKey(libraryId: string, configUrl: string): string {
   return hashText(`${libraryId}|${configUrl}`);
+}
+
+function buildSettingsSnapshotDbKey(sourceUrls: string[]): string {
+  return hashText(`settings|${sourceUrls.join('|')}`);
 }
 
 export const bibleService = new BibleService();
