@@ -1,6 +1,9 @@
 import React, { useEffect, useRef } from 'react';
 import type { QuickJumpTarget } from '../models/bible';
 import type { PanelTab } from '../models/tab';
+import { useAppDispatch, useAppSelector } from '../store/hooks';
+import { openPdfViewer } from '../store/slices/uiSlice';
+import { searchResourceDocumentTitles, type ResourceDocumentTitleSearchResultSet } from '../services/resourceLibrarySearchService';
 import { normalizeEnglishTerm } from '../services/searchNormalizer';
 
 const escapeRegex = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -69,24 +72,22 @@ interface SearchResultsProps {
 }
 
 const PAGE_SIZE = 50;
+type SearchViewMode = 'scripture' | 'documents';
 
 const SearchResults: React.FC<SearchResultsProps> = ({ tab, goToReference, onBeforeNavigate }) => {
+  const dispatch = useAppDispatch();
+  const { sourceUrls } = useAppSelector((state) => state.ui);
   const searchResults = tab.searchResults;
   const [displayedCount, setDisplayedCount] = React.useState(PAGE_SIZE);
+  const [searchView, setSearchView] = React.useState<SearchViewMode>('scripture');
+  const [documentResults, setDocumentResults] = React.useState<ResourceDocumentTitleSearchResultSet | null>(null);
+  const [isDocumentSearchLoading, setIsDocumentSearchLoading] = React.useState(false);
+  const [documentSearchError, setDocumentSearchError] = React.useState<string | null>(null);
   const sentinelRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    setDisplayedCount(PAGE_SIZE);
-  }, [tab.updatedAt]);
-
-  if (!searchResults) {
-    return null;
-  }
-
-  const displayedMatches = searchResults.matches.slice(0, displayedCount);
-  const hasMore = displayedCount < searchResults.matches.length;
+  const searchQuery = searchResults?.query ?? '';
   const { queryRegex, highlightTerms } = React.useMemo(() => {
-    const trimmedQuery = searchResults.query.trim();
+    const trimmedQuery = searchQuery.trim();
     if (!trimmedQuery) {
       return { queryRegex: null, highlightTerms: new Set<string>() };
     }
@@ -97,7 +98,74 @@ const SearchResults: React.FC<SearchResultsProps> = ({ tab, goToReference, onBef
       queryRegex: new RegExp(`(${uniqueTerms.map(escapeRegex).join('|')})`, 'gi'),
       highlightTerms: new Set(uniqueTerms),
     };
-  }, [searchResults.query]);
+  }, [searchQuery]);
+
+  useEffect(() => {
+    setDisplayedCount(PAGE_SIZE);
+    setSearchView('scripture');
+    setDocumentResults(null);
+    setDocumentSearchError(null);
+    setIsDocumentSearchLoading(false);
+  }, [tab.updatedAt]);
+
+  useEffect(() => {
+    if (!searchResults || searchView !== 'documents') {
+      return;
+    }
+
+    let cancelled = false;
+
+    const loadDocumentResults = async () => {
+      setIsDocumentSearchLoading(true);
+      setDocumentSearchError(null);
+
+      try {
+        const nextResults = await searchResourceDocumentTitles(searchResults.query, sourceUrls);
+        if (!cancelled) {
+          setDocumentResults(nextResults);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setDocumentResults(null);
+          setDocumentSearchError(error instanceof Error ? error.message : 'Failed to search document titles');
+        }
+      } finally {
+        if (!cancelled) {
+          setIsDocumentSearchLoading(false);
+        }
+      }
+    };
+
+    void loadDocumentResults();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [searchView, searchResults?.query, sourceUrls]);
+
+  useEffect(() => {
+    setDisplayedCount(PAGE_SIZE);
+  }, [searchView]);
+
+  if (!searchResults) {
+    return null;
+  }
+
+  const displayedVerseMatches = searchResults.matches.slice(0, displayedCount);
+  const documentMatchList = documentResults?.matches ?? [];
+  const displayedDocumentMatches = documentMatchList.slice(0, displayedCount);
+  const activeMatchCount = searchView === 'documents' ? documentMatchList.length : searchResults.matches.length;
+  const hasMore = displayedCount < activeMatchCount;
+
+  const handleOpenDocument = (match: NonNullable<typeof displayedDocumentMatches>[number]) => {
+    onBeforeNavigate?.();
+    dispatch(openPdfViewer({
+      sourceUrl: match.url,
+      page: 1,
+      title: match.title,
+      matchRaw: null,
+    }));
+  };
 
   // Auto-load more results when user scrolls near the bottom
   useEffect(() => {
@@ -109,7 +177,7 @@ const SearchResults: React.FC<SearchResultsProps> = ({ tab, goToReference, onBef
       (entries) => {
         entries.forEach((entry) => {
           if (entry.isIntersecting) {
-            setDisplayedCount((count) => Math.min(count + PAGE_SIZE, searchResults.matches.length));
+            setDisplayedCount((count) => Math.min(count + PAGE_SIZE, activeMatchCount));
           }
         });
       },
@@ -122,7 +190,13 @@ const SearchResults: React.FC<SearchResultsProps> = ({ tab, goToReference, onBef
         observer.unobserve(sentinelRef.current);
       }
     };
-  }, [hasMore, searchResults.matches.length]);
+  }, [hasMore, searchView, activeMatchCount]);
+
+  const summaryText = searchView === 'documents'
+    ? (isDocumentSearchLoading
+      ? `Searching document titles for "${searchResults.query}" in your resource libraries...`
+      : `${documentResults?.total ?? 0} document title match${(documentResults?.total ?? 0) === 1 ? '' : 'es'}${documentResults?.limited ? ` (showing first ${documentMatchList.length})` : ''} for "${searchResults.query}" in your resource libraries.`)
+    : `${searchResults.total} match${searchResults.total === 1 ? '' : 'es'}${searchResults.limited ? ` (showing first ${searchResults.matches.length})` : ''} for "${searchResults.query}" in your starred translations.`;
 
   return (
     <div className="card border-0 shadow-sm search-results-card">
@@ -131,65 +205,127 @@ const SearchResults: React.FC<SearchResultsProps> = ({ tab, goToReference, onBef
           <div className="search-results-main">
             <div>
               <h3 className="h6 text-uppercase mb-1">Search Results</h3>
-              <p className="text-body-secondary results-summary mb-0">
-                {searchResults.total} match{searchResults.total === 1 ? '' : 'es'}
-                {searchResults.limited && (
-                  <> (showing first {searchResults.matches.length})</>
-                )}
-                {' '}for "{searchResults.query}"
-              </p>
+              <div className="d-flex flex-column gap-1">
+                <p className="text-body-secondary results-summary mb-0">{summaryText}</p>
+                <button
+                  type="button"
+                  className="btn btn-link p-0 align-self-start small text-decoration-none"
+                  onClick={() => setSearchView((mode) => (mode === 'scripture' ? 'documents' : 'scripture'))}
+                >
+                  {searchView === 'scripture' ? 'Search document titles' : 'Search in scriptures'}
+                </button>
+              </div>
             </div>
-            <div className="results-grid flex-grow-1 overflow-auto" role="list">
-              {displayedMatches.map((match: any) => (
-                <div key={match.id} className="results-grid-item" role="listitem">
+            {searchView === 'documents' ? (
+              <>
+                {documentSearchError && (
+                  <p className="text-danger small mb-0">{documentSearchError}</p>
+                )}
+                {isDocumentSearchLoading ? (
+                  <p className="text-body-secondary small mb-0">Searching document titles...</p>
+                ) : (
+                  <>
+                    <div className="results-grid flex-grow-1 overflow-auto" role="list">
+                      {displayedDocumentMatches.map((match) => (
+                        <div key={match.id} className="results-grid-item" role="listitem">
+                          <button
+                            type="button"
+                            className="card border list-group-item-action text-start search-result-card-button h-100 w-100"
+                            onClick={() => handleOpenDocument(match)}
+                          >
+                            <div className="card-body d-flex flex-column gap-2 h-100 p-3">
+                              <span className="match-reference d-block">
+                                {highlightText(match.title, queryRegex, highlightTerms)}
+                              </span>
+                              <span className="match-text d-block text-body-secondary">
+                                {match.libraryLabel}
+                                {match.tags.length > 0 && (
+                                  <> · {match.tags.join(', ')}</>
+                                )}
+                              </span>
+                            </div>
+                          </button>
+                        </div>
+                      ))}
+                      {!isDocumentSearchLoading && documentMatchList.length === 0 && (
+                        <div className="text-body-secondary small py-2">No document titles matched this search.</div>
+                      )}
+                      {hasMore && (
+                        <div
+                          ref={sentinelRef}
+                          className="results-grid-sentinel text-center text-body-secondary py-2 small"
+                        >
+                          Loading more...
+                        </div>
+                      )}
+                    </div>
+                    {hasMore && (
+                      <button
+                        type="button"
+                        className="btn btn-sm btn-outline-primary w-100"
+                        onClick={() => setDisplayedCount((count) => Math.min(count + PAGE_SIZE, documentMatchList.length))}
+                      >
+                        Load more results ({displayedCount} of {documentMatchList.length})
+                      </button>
+                    )}
+                  </>
+                )}
+              </>
+            ) : (
+              <>
+                <div className="results-grid flex-grow-1 overflow-auto" role="list">
+                  {displayedVerseMatches.map((match: any) => (
+                    <div key={match.id} className="results-grid-item" role="listitem">
+                      <button
+                        type="button"
+                        className="card border list-group-item-action text-start search-result-card-button h-100 w-100"
+                        onClick={() => {
+                          onBeforeNavigate?.();
+                          goToReference({
+                            book: match.book,
+                            chapter: match.chapter,
+                            verse: match.verse
+                          }, match.translationId);
+                        }}
+                      >
+                        <div className="card-body d-flex flex-column gap-2 h-100 p-3">
+                          <span className="match-reference d-block">
+                            {match.book} {match.chapter}:{match.verse}
+                            {match.translationId && (
+                              <span
+                                className="badge text-bg-primary-subtle text-primary-emphasis ms-2"
+                                title={match.translationLabel || match.translationId}
+                              >
+                                {match.translationId}
+                              </span>
+                            )}
+                          </span>
+                          <span className="match-text d-block text-body-secondary">
+                            {highlightText(match.text, queryRegex, highlightTerms)}
+                          </span>
+                        </div>
+                      </button>
+                    </div>
+                  ))}
+                  {hasMore && (
+                    <div
+                      ref={sentinelRef}
+                      className="results-grid-sentinel text-center text-body-secondary py-2 small"
+                    >
+                      Loading more...
+                    </div>
+                  )}
+                </div>
+                {hasMore && (
                   <button
                     type="button"
-                    className="card border list-group-item-action text-start search-result-card-button h-100 w-100"
-                    onClick={() => {
-                      onBeforeNavigate?.();
-                      goToReference({
-                        book: match.book,
-                        chapter: match.chapter,
-                        verse: match.verse
-                      }, match.translationId);
-                    }}
+                    className="btn btn-sm btn-outline-primary w-100"
+                    onClick={() => setDisplayedCount((count) => Math.min(count + PAGE_SIZE, searchResults.matches.length))}
                   >
-                    <div className="card-body d-flex flex-column gap-2 h-100 p-3">
-                      <span className="match-reference d-block">
-                        {match.book} {match.chapter}:{match.verse}
-                        {match.translationId && (
-                          <span
-                            className="badge text-bg-primary-subtle text-primary-emphasis ms-2"
-                            title={match.translationLabel || match.translationId}
-                          >
-                            {match.translationId}
-                          </span>
-                        )}
-                      </span>
-                      <span className="match-text d-block text-body-secondary">
-                        {highlightText(match.text, queryRegex, highlightTerms)}
-                      </span>
-                    </div>
+                    Load more results ({displayedCount} of {searchResults.matches.length})
                   </button>
-                </div>
-              ))}
-              {hasMore && (
-                <div
-                  ref={sentinelRef}
-                  className="results-grid-sentinel text-center text-body-secondary py-2 small"
-                >
-                  Loading more...
-                </div>
-              )}
-            </div>
-            {hasMore && (
-              <button
-                type="button"
-                className="btn btn-sm btn-outline-primary w-100"
-                onClick={() => setDisplayedCount((count) => Math.min(count + PAGE_SIZE, searchResults.matches.length))}
-              >
-                Load more results ({displayedCount} of {searchResults.matches.length})
-              </button>
+                )}
+              </>
             )}
           </div>
           <div className="search-results-spacer" aria-hidden="true"></div>
