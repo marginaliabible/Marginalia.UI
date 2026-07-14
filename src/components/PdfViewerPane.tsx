@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { getDocument, GlobalWorkerOptions } from 'pdfjs-dist';
+import { getDocument, GlobalWorkerOptions, TextLayer, Util } from 'pdfjs-dist';
 import type { PDFDocumentProxy, PDFPageProxy } from 'pdfjs-dist/types/src/display/api';
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import { useAppDispatch, useAppSelector } from '../store/hooks';
@@ -11,13 +11,109 @@ const MIN_SCALE = 0.6;
 const MAX_SCALE = 2.4;
 const SCALE_STEP = 0.2;
 const RANGE_CHUNK_SIZE = 1024 * 1024;
+const POPUP_ANNOTATION_TYPE = 16;
+const WHEEL_PAGE_TURN_COOLDOWN_MS = 280;
+const OCR_SPACE_PATTERN = /[\s\u00A0\u1680\u180E\u2000-\u200D\u2028\u2029\u202F\u205F\u2060\u3000\uFEFF\u0000-\u001F]+/g;
+
+interface RenderedAnnotation {
+  id: string;
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+  contents: string;
+  title: string;
+}
+
+interface HighlightBox {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
+
+interface TextContentItemLike {
+  str?: unknown;
+  transform?: unknown;
+  width?: unknown;
+}
+
+interface AnnotationDataLike {
+  id?: unknown;
+  rect?: unknown;
+  title?: unknown;
+  titleObj?: { str?: unknown } | null;
+  contents?: unknown;
+  contentsObj?: { str?: unknown } | null;
+  richText?: { str?: unknown } | null;
+  popupRef?: unknown;
+  annotationType?: unknown;
+}
+
+const isAbortOrCancelled = (error: unknown): boolean => {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+
+  return error.name === 'AbortException' || error.name === 'RenderingCancelledException';
+};
+
+const clampScale = (value: number): number => Math.min(MAX_SCALE, Math.max(MIN_SCALE, Number(value.toFixed(2))));
+
+const normalizeMatchText = (value: string | null | undefined): string => {
+  if (!value) {
+    return '';
+  }
+
+  return value.replace(OCR_SPACE_PATTERN, ' ').trim();
+};
+
+const getTouchDistance = (event: React.TouchEvent<HTMLElement>): number => {
+  if (event.touches.length < 2) {
+    return 0;
+  }
+
+  const [a, b] = [event.touches[0], event.touches[1]];
+  return Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+};
+
+const sanitizeFileName = (value: string): string => {
+  const next = value.replace(/[<>:"/\\|?*]+/g, '').trim();
+  return next.length > 0 ? next : 'document';
+};
+
+const readAnnotationString = (value: unknown): string => typeof value === 'string' ? value.trim() : '';
+
+const extractAnnotationText = (annotation: AnnotationDataLike | null | undefined): { title: string; contents: string } => {
+  if (!annotation) {
+    return { title: '', contents: '' };
+  }
+
+  const title = readAnnotationString(annotation.titleObj?.str) || readAnnotationString(annotation.title);
+  const contents = readAnnotationString(annotation.contentsObj?.str)
+    || readAnnotationString(annotation.richText?.str)
+    || readAnnotationString(annotation.contents);
+
+  return { title, contents };
+};
 
 const PdfViewerPane: React.FC = () => {
   const dispatch = useAppDispatch();
   const { pdfViewer } = useAppSelector((state) => state.ui);
+  const stageRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const renderTaskRef = useRef<{ cancel: () => void } | null>(null);
+  const textLayerRef = useRef<HTMLDivElement | null>(null);
+  const highlightLayerRef = useRef<HTMLDivElement | null>(null);
   const loadingTaskRef = useRef<{ destroy: () => void } | null>(null);
+  const renderTasksRef = useRef(new Map<string, { cancel: () => void }>());
+  const pinchStartDistanceRef = useRef(0);
+  const pinchStartScaleRef = useRef(1);
+  const lastWheelPageTurnAtRef = useRef(0);
+  const fitScaleRef = useRef(1);
+  const previousNavigationRef = useRef<{ sourceUrl: string | null; page: number }>({
+    sourceUrl: null,
+    page: 1,
+  });
 
   const [documentProxy, setDocumentProxy] = useState<PDFDocumentProxy | null>(null);
   const [pageCount, setPageCount] = useState(0);
@@ -25,10 +121,232 @@ const PdfViewerPane: React.FC = () => {
   const [isRendering, setIsRendering] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [scale, setScale] = useState(1);
+  const [annotations, setAnnotations] = useState<RenderedAnnotation[]>([]);
+  const [activeAnnotationId, setActiveAnnotationId] = useState<string | null>(null);
   const hasLoggedFetchModeRef = useRef(false);
 
   const activeSourceUrl = pdfViewer.sourceUrl;
   const activePage = Math.max(1, pdfViewer.page);
+  const matchRaw = normalizeMatchText(pdfViewer.matchRaw);
+
+  const adjustScale = (direction: 1 | -1) => {
+    setScale((current) => clampScale(current + (direction * SCALE_STEP)));
+  };
+
+  const computeFitScaleForPageWidth = (pageWidth: number): number => {
+    const stage = stageRef.current;
+    if (!stage) {
+      return 1;
+    }
+
+    const computed = window.getComputedStyle(stage);
+    const horizontalPadding = Number.parseFloat(computed.paddingLeft || '0') + Number.parseFloat(computed.paddingRight || '0');
+    const availableWidth = Math.max(1, stage.clientWidth - horizontalPadding);
+    return clampScale(availableWidth / Math.max(1, pageWidth));
+  };
+
+  const isClippedByWidth = (): boolean => {
+    const stage = stageRef.current;
+    if (!stage) {
+      return false;
+    }
+
+    return stage.scrollWidth > stage.clientWidth + 1;
+  };
+
+  const resetZoomIfClipped = (): void => {
+    const fitScale = fitScaleRef.current;
+    if (scale <= fitScale) {
+      return;
+    }
+
+    if (!isClippedByWidth()) {
+      return;
+    }
+
+    setScale(fitScale);
+  };
+
+  const isScrolledToTop = (): boolean => {
+    const stage = stageRef.current;
+    if (!stage) {
+      return true;
+    }
+
+    return stage.scrollTop <= 1;
+  };
+
+  const isScrolledToBottom = (): boolean => {
+    const stage = stageRef.current;
+    if (!stage) {
+      return true;
+    }
+
+    return stage.scrollTop + stage.clientHeight >= stage.scrollHeight - 1;
+  };
+
+  const closeOpenAnnotation = () => {
+    setActiveAnnotationId(null);
+  };
+
+  const goToPage = (pageNumber: number) => {
+    const next = Math.max(1, Math.min(pageCount || 1, pageNumber));
+    if (next !== activePage) {
+      resetZoomIfClipped();
+    }
+    closeOpenAnnotation();
+    dispatch(setPdfViewerPage(next));
+  };
+
+  const renderHighlights = (
+    highlightLayer: HTMLDivElement,
+    textContent: unknown,
+    viewport: ReturnType<PDFPageProxy['getViewport']>,
+    rawMatchText: string
+  ): boolean => {
+    highlightLayer.innerHTML = '';
+
+    if (!rawMatchText) {
+      return false;
+    }
+
+    const itemsRaw = (textContent as { items?: unknown[] } | undefined)?.items;
+    const items = Array.isArray(itemsRaw) ? itemsRaw as TextContentItemLike[] : [];
+    const normalizedSegments: Array<{ start: number; end: number; item: TextContentItemLike }> = [];
+
+    let normalizedPageText = '';
+    let cursor = 0;
+
+    for (const item of items) {
+      const rawStr = typeof item.str === 'string' ? item.str : '';
+      const normalized = rawStr.replace(OCR_SPACE_PATTERN, ' ').trim();
+      if (!normalized) {
+        continue;
+      }
+
+      if (normalizedPageText.length > 0) {
+        normalizedPageText += ' ';
+        cursor += 1;
+      }
+
+      const start = cursor;
+      normalizedPageText += normalized;
+      cursor += normalized.length;
+      normalizedSegments.push({ start, end: cursor, item });
+    }
+
+    const matchStart = normalizedPageText.indexOf(rawMatchText);
+    if (matchStart < 0) {
+      return false;
+    }
+
+    const matchEnd = matchStart + rawMatchText.length;
+    const boxes: HighlightBox[] = [];
+
+    for (const segment of normalizedSegments) {
+      if (segment.end <= matchStart || segment.start >= matchEnd) {
+        continue;
+      }
+
+      const transform = Array.isArray(segment.item.transform) ? segment.item.transform as number[] : null;
+      const widthRaw = typeof segment.item.width === 'number' ? segment.item.width : 0;
+      if (!transform || transform.length < 6 || widthRaw <= 0) {
+        continue;
+      }
+
+      const mapped = Util.transform(viewport.transform, transform);
+      const height = Math.max(1, Math.hypot(mapped[2], mapped[3]));
+      const width = Math.max(1, widthRaw * viewport.scale);
+      boxes.push({
+        left: mapped[4],
+        top: mapped[5] - height,
+        width,
+        height,
+      });
+    }
+
+    for (const box of boxes) {
+      const marker = document.createElement('div');
+      marker.className = 'pdf-raw-highlight';
+      marker.style.left = `${box.left}px`;
+      marker.style.top = `${box.top}px`;
+      marker.style.width = `${box.width}px`;
+      marker.style.height = `${box.height}px`;
+      highlightLayer.appendChild(marker);
+    }
+
+    return boxes.length > 0;
+  };
+
+  const buildAnnotations = (
+    viewport: ReturnType<PDFPageProxy['getViewport']>,
+    rawAnnotations: unknown[]
+  ): RenderedAnnotation[] => {
+    const annotationsData = rawAnnotations as AnnotationDataLike[];
+    const popupAnnotations = new Map<string, AnnotationDataLike>();
+
+    for (const annotation of annotationsData) {
+      if (Number(annotation.annotationType) === POPUP_ANNOTATION_TYPE && annotation.id != null) {
+        popupAnnotations.set(String(annotation.id), annotation);
+      }
+    }
+
+    const output: RenderedAnnotation[] = [];
+    const seen = new Set<string>();
+
+    for (const annotation of annotationsData) {
+      if (Number(annotation.annotationType) === POPUP_ANNOTATION_TYPE) {
+        continue;
+      }
+
+      const rect = Array.isArray(annotation.rect) ? annotation.rect as number[] : null;
+      if (!rect || rect.length < 4) {
+        continue;
+      }
+
+      const popupRef = annotation.popupRef != null ? String(annotation.popupRef) : '';
+      const popupAnnotation = popupRef ? popupAnnotations.get(popupRef) ?? null : null;
+      const popupText = extractAnnotationText(popupAnnotation);
+      const ownText = extractAnnotationText(annotation);
+      const title = popupText.title || ownText.title;
+      const contents = popupText.contents || ownText.contents;
+
+      if (!title && !contents && !popupRef) {
+        continue;
+      }
+
+      const viewportRect = viewport.convertToViewportRectangle(rect);
+      const left = Math.min(viewportRect[0], viewportRect[2]);
+      const top = Math.min(viewportRect[1], viewportRect[3]);
+      const width = Math.max(14, Math.abs(viewportRect[0] - viewportRect[2]));
+      const height = Math.max(14, Math.abs(viewportRect[1] - viewportRect[3]));
+      const id = String(annotation.id ?? `${left}:${top}:${width}:${height}`);
+
+      if (seen.has(id)) {
+        continue;
+      }
+
+      seen.add(id);
+      output.push({ id, left, top, width, height, title, contents });
+    }
+
+    return output;
+  };
+
+  useEffect(() => {
+    if (!pdfViewer.isOpen) {
+      previousNavigationRef.current = { sourceUrl: activeSourceUrl, page: activePage };
+      return;
+    }
+
+    const previous = previousNavigationRef.current;
+    const hasNavigated = previous.sourceUrl !== activeSourceUrl || previous.page !== activePage;
+    if (hasNavigated) {
+      resetZoomIfClipped();
+    }
+
+    previousNavigationRef.current = { sourceUrl: activeSourceUrl, page: activePage };
+  }, [pdfViewer.isOpen, activeSourceUrl, activePage, scale]);
 
   useEffect(() => {
     let cancelled = false;
@@ -39,6 +357,8 @@ const PdfViewerPane: React.FC = () => {
         loadingTaskRef.current = null;
         setDocumentProxy(null);
         setPageCount(0);
+        setAnnotations([]);
+        closeOpenAnnotation();
         setError(null);
         hasLoggedFetchModeRef.current = false;
         return;
@@ -76,6 +396,15 @@ const PdfViewerPane: React.FC = () => {
         loadingTaskRef.current = null;
         setDocumentProxy(nextDocument);
         setPageCount(nextDocument.numPages);
+        setAnnotations([]);
+        closeOpenAnnotation();
+
+        const pageForFit = Math.min(Math.max(1, activePage), nextDocument.numPages);
+        const fitPage = await nextDocument.getPage(pageForFit);
+        const baseViewport = fitPage.getViewport({ scale: 1 });
+        const fitScale = computeFitScaleForPageWidth(baseViewport.width);
+        fitScaleRef.current = fitScale;
+        setScale(fitScale);
 
         if (activePage > nextDocument.numPages) {
           dispatch(setPdfViewerPage(nextDocument.numPages));
@@ -117,24 +446,41 @@ const PdfViewerPane: React.FC = () => {
   useEffect(() => {
     let cancelled = false;
 
-    const renderPage = async () => {
-      if (!documentProxy || !canvasRef.current || !pdfViewer.isOpen) {
+    const renderCurrentPage = async () => {
+      if (!documentProxy || !pdfViewer.isOpen || !canvasRef.current || !textLayerRef.current || !highlightLayerRef.current) {
         return;
       }
 
-      const pageNumber = Math.min(Math.max(1, activePage), documentProxy.numPages);
       setIsRendering(true);
       setError(null);
+      closeOpenAnnotation();
+      setAnnotations([]);
+
+      if (textLayerRef.current) {
+        textLayerRef.current.innerHTML = '';
+      }
+
+      if (highlightLayerRef.current) {
+        highlightLayerRef.current.innerHTML = '';
+      }
+
+      const selection = window.getSelection();
+      if (selection && stageRef.current && stageRef.current.contains(selection.anchorNode)) {
+        selection.removeAllRanges();
+      }
 
       try {
-        const page: PDFPageProxy = await documentProxy.getPage(pageNumber);
-        if (cancelled || !canvasRef.current) {
+        const pageNumber = Math.min(Math.max(1, activePage), documentProxy.numPages);
+        const page = await documentProxy.getPage(pageNumber);
+        if (cancelled || !canvasRef.current || !textLayerRef.current || !highlightLayerRef.current) {
           return;
         }
 
+        const baseViewport = page.getViewport({ scale: 1 });
+        fitScaleRef.current = computeFitScaleForPageWidth(baseViewport.width);
+
         const viewport = page.getViewport({ scale });
         const outputScale = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
-
         const canvas = canvasRef.current;
         const context = canvas.getContext('2d');
         if (!context) {
@@ -145,15 +491,42 @@ const PdfViewerPane: React.FC = () => {
         canvas.height = Math.floor(viewport.height * outputScale);
         canvas.style.width = `${Math.floor(viewport.width)}px`;
         canvas.style.height = `${Math.floor(viewport.height)}px`;
-
         context.setTransform(outputScale, 0, 0, outputScale, 0, 0);
 
-        renderTaskRef.current?.cancel();
-        const task = page.render({ canvasContext: context, viewport });
-        renderTaskRef.current = task;
-        await task.promise;
-      } catch (renderError) {
+        const canvasTaskKey = 'canvas';
+        renderTasksRef.current.get(canvasTaskKey)?.cancel();
+        const canvasTask = page.render({ canvasContext: context, viewport });
+        renderTasksRef.current.set(canvasTaskKey, canvasTask);
+        await canvasTask.promise;
+
+        const textLayer = textLayerRef.current;
+        const highlightLayer = highlightLayerRef.current;
+        const textContent = await page.getTextContent();
+
+        textLayer.innerHTML = '';
+        textLayer.style.width = `${Math.floor(viewport.width)}px`;
+        textLayer.style.height = `${Math.floor(viewport.height)}px`;
+
+        const textTaskKey = 'text';
+        renderTasksRef.current.get(textTaskKey)?.cancel();
+        const textTask = new TextLayer({
+          textContentSource: textContent,
+          container: textLayer,
+          viewport,
+        });
+        renderTasksRef.current.set(textTaskKey, textTask);
+        await textTask.render();
+
+        highlightLayer.style.width = `${Math.floor(viewport.width)}px`;
+        highlightLayer.style.height = `${Math.floor(viewport.height)}px`;
+        renderHighlights(highlightLayer, textContent, viewport, matchRaw);
+
+        const nextAnnotations = buildAnnotations(viewport, await page.getAnnotations({ intent: 'display' }) as unknown[]);
         if (!cancelled) {
+          setAnnotations(nextAnnotations);
+        }
+      } catch (renderError) {
+        if (!cancelled && !isAbortOrCancelled(renderError)) {
           setError(renderError instanceof Error ? renderError.message : 'Unable to render PDF page.');
         }
       } finally {
@@ -163,14 +536,178 @@ const PdfViewerPane: React.FC = () => {
       }
     };
 
-    void renderPage();
+    void renderCurrentPage();
 
     return () => {
       cancelled = true;
-      renderTaskRef.current?.cancel();
-      renderTaskRef.current = null;
+      for (const task of renderTasksRef.current.values()) {
+        task.cancel();
+      }
+      renderTasksRef.current.clear();
     };
-  }, [documentProxy, activePage, scale, pdfViewer.isOpen]);
+  }, [documentProxy, activePage, scale, pdfViewer.isOpen, matchRaw]);
+
+  useEffect(() => {
+    const stage = stageRef.current;
+    if (!stage || !pdfViewer.isOpen) {
+      return;
+    }
+
+    stage.scrollTo({ top: 0, left: 0, behavior: 'auto' });
+  }, [activeSourceUrl, activePage, scale, pdfViewer.isOpen]);
+
+  useEffect(() => {
+    if (!pdfViewer.isOpen) {
+      return;
+    }
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (!event.ctrlKey && !event.metaKey) {
+        return;
+      }
+
+      const isZoomIn = event.key === '=' || event.key === '+' || event.code === 'NumpadAdd';
+      const isZoomOut = event.key === '-' || event.key === '_' || event.code === 'NumpadSubtract';
+
+      if (isZoomIn) {
+        event.preventDefault();
+        adjustScale(1);
+        return;
+      }
+
+      if (isZoomOut) {
+        event.preventDefault();
+        adjustScale(-1);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown, { capture: true });
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown, { capture: true });
+    };
+  }, [pdfViewer.isOpen]);
+
+  useEffect(() => {
+    const stage = stageRef.current;
+    if (!stage || !pdfViewer.isOpen) {
+      return;
+    }
+
+    const handleWheel = (event: WheelEvent) => {
+      if (event.ctrlKey) {
+        event.preventDefault();
+        if (event.deltaY < 0) {
+          adjustScale(1);
+        } else if (event.deltaY > 0) {
+          adjustScale(-1);
+        }
+        return;
+      }
+
+      const hasOverflowScrollbars = stage.scrollWidth > stage.clientWidth + 1 || stage.scrollHeight > stage.clientHeight + 1;
+      if (hasOverflowScrollbars) {
+        return;
+      }
+
+      const now = Date.now();
+      const atTop = stage.scrollTop <= 1;
+      const atBottom = stage.scrollTop + stage.clientHeight >= stage.scrollHeight - 1;
+      const largeEnoughDelta = Math.abs(event.deltaY) >= 20;
+
+      if (!largeEnoughDelta || now - lastWheelPageTurnAtRef.current < WHEEL_PAGE_TURN_COOLDOWN_MS) {
+        return;
+      }
+
+      if (event.deltaY < 0 && atTop && activePage > 1) {
+        event.preventDefault();
+        lastWheelPageTurnAtRef.current = now;
+        goToPage(activePage - 1);
+        return;
+      }
+
+      if (event.deltaY > 0 && atBottom && activePage < pageCount) {
+        event.preventDefault();
+        lastWheelPageTurnAtRef.current = now;
+        goToPage(activePage + 1);
+      }
+    };
+
+    stage.addEventListener('wheel', handleWheel, { passive: false });
+    return () => {
+      stage.removeEventListener('wheel', handleWheel);
+    };
+  }, [activePage, pageCount, pdfViewer.isOpen]);
+
+  useEffect(() => {
+    const stage = stageRef.current;
+    if (!stage || !pdfViewer.isOpen) {
+      return;
+    }
+
+    const handleArrowPaging = (event: KeyboardEvent) => {
+      if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) {
+        return;
+      }
+
+      if (event.key === 'ArrowDown') {
+        if (!isScrolledToBottom() || activePage >= pageCount) {
+          return;
+        }
+
+        event.preventDefault();
+        goToPage(activePage + 1);
+        return;
+      }
+
+      if (event.key === 'ArrowUp') {
+        if (!isScrolledToTop() || activePage <= 1) {
+          return;
+        }
+
+        event.preventDefault();
+        goToPage(activePage - 1);
+      }
+    };
+
+    stage.addEventListener('keydown', handleArrowPaging);
+    return () => {
+      stage.removeEventListener('keydown', handleArrowPaging);
+    };
+  }, [activePage, pageCount, pdfViewer.isOpen]);
+
+  useEffect(() => {
+    if (!activeAnnotationId) {
+      return;
+    }
+
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (!target) {
+        closeOpenAnnotation();
+        return;
+      }
+
+      if (target.closest('.pdf-annotation-popup') || target.closest('.pdf-annotation-marker')) {
+        return;
+      }
+
+      closeOpenAnnotation();
+    };
+
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        closeOpenAnnotation();
+      }
+    };
+
+    window.addEventListener('pointerdown', handlePointerDown, true);
+    window.addEventListener('keydown', handleEscape, true);
+
+    return () => {
+      window.removeEventListener('pointerdown', handlePointerDown, true);
+      window.removeEventListener('keydown', handleEscape, true);
+    };
+  }, [activeAnnotationId]);
 
   const title = useMemo(() => {
     if (pdfViewer.title && pdfViewer.title.trim().length > 0) {
@@ -186,6 +723,40 @@ const PdfViewerPane: React.FC = () => {
 
   const canGoBack = activePage > 1;
   const canGoForward = pageCount > 0 && activePage < pageCount;
+
+  const handleTouchStart = (event: React.TouchEvent<HTMLDivElement>) => {
+    if (event.touches.length < 2) {
+      return;
+    }
+
+    pinchStartDistanceRef.current = getTouchDistance(event);
+    pinchStartScaleRef.current = scale;
+  };
+
+  const handleTouchMove = (event: React.TouchEvent<HTMLDivElement>) => {
+    if (event.touches.length < 2 || pinchStartDistanceRef.current <= 0) {
+      return;
+    }
+
+    const currentDistance = getTouchDistance(event);
+    if (currentDistance <= 0) {
+      return;
+    }
+
+    const distanceRatio = currentDistance / pinchStartDistanceRef.current;
+    if (!Number.isFinite(distanceRatio) || Math.abs(distanceRatio - 1) < 0.02) {
+      return;
+    }
+
+    event.preventDefault();
+    setScale(clampScale(pinchStartScaleRef.current * distanceRatio));
+  };
+
+  const handleTouchEnd = (event: React.TouchEvent<HTMLDivElement>) => {
+    if (event.touches.length < 2) {
+      pinchStartDistanceRef.current = 0;
+    }
+  };
 
   return (
     <div className="pdf-viewer-shell d-flex flex-column h-100">
@@ -206,7 +777,7 @@ const PdfViewerPane: React.FC = () => {
             type="button"
             className="btn btn-sm btn-outline-primary"
             disabled={!canGoBack}
-            onClick={() => dispatch(setPdfViewerPage(activePage - 1))}
+            onClick={() => goToPage(activePage - 1)}
           >
             Prev
           </button>
@@ -219,16 +790,37 @@ const PdfViewerPane: React.FC = () => {
             type="button"
             className="btn btn-sm btn-outline-primary"
             disabled={!canGoForward}
-            onClick={() => dispatch(setPdfViewerPage(activePage + 1))}
+            onClick={() => goToPage(activePage + 1)}
           >
             Next
+          </button>
+
+          <button
+            type="button"
+            className="btn btn-sm btn-outline-secondary"
+            onClick={() => {
+              if (!activeSourceUrl) {
+                return;
+              }
+
+              const anchor = document.createElement('a');
+              anchor.href = activeSourceUrl;
+              anchor.download = `${sanitizeFileName(title)}.pdf`;
+              anchor.rel = 'noopener';
+              anchor.target = '_blank';
+              anchor.click();
+            }}
+            disabled={!activeSourceUrl}
+            title="Download PDF"
+          >
+            <i className="fa-solid fa-download" aria-hidden="true"></i>
           </button>
 
           <div className="btn-group btn-group-sm" role="group" aria-label="Zoom controls">
             <button
               type="button"
               className="btn btn-outline-secondary"
-              onClick={() => setScale((current) => Math.max(MIN_SCALE, Number((current - SCALE_STEP).toFixed(2))))}
+              onClick={() => adjustScale(-1)}
               disabled={scale <= MIN_SCALE}
             >
               <i className="fa-solid fa-magnifying-glass-minus" aria-hidden="true"></i>
@@ -236,23 +828,94 @@ const PdfViewerPane: React.FC = () => {
             <button
               type="button"
               className="btn btn-outline-secondary"
-              onClick={() => setScale((current) => Math.min(MAX_SCALE, Number((current + SCALE_STEP).toFixed(2))))}
+              onClick={() => adjustScale(1)}
               disabled={scale >= MAX_SCALE}
             >
               <i className="fa-solid fa-magnifying-glass-plus" aria-hidden="true"></i>
             </button>
           </div>
+
+          <span className="small text-body-secondary">{Math.round(scale * 100)}%</span>
         </div>
       </div>
 
-      {isLoading && <p className="text-body-secondary small mb-2">Loading document...</p>}
-      {isLoading && <p className="text-body-secondary small mb-2">Range mode requested.</p>}
       {error && <p className="text-danger small mb-2">{error}</p>}
 
-      <div className="pdf-viewer-stage flex-grow-1">
-        <div className="pdf-viewer-canvas-wrap">
-          <canvas ref={canvasRef} className="pdf-viewer-canvas" />
+      <div
+        className={`pdf-viewer-stage flex-grow-1${isRendering ? ' is-rendering' : ''}`}
+        ref={stageRef}
+        tabIndex={0}
+        aria-label="PDF viewer"
+        onPointerDown={() => stageRef.current?.focus({ preventScroll: true })}
+        onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={handleTouchEnd}
+      >
+        <div className="pdf-page-shell">
+          <div className="pdf-page-inner">
+            <canvas ref={canvasRef} className="pdf-viewer-canvas" />
+            <div ref={textLayerRef} className="pdf-page-text-layer"></div>
+            <div ref={highlightLayerRef} className="pdf-page-highlight-layer"></div>
+
+            <div className="pdf-page-annotation-layer">
+              {annotations.map((annotation) => {
+                const isOpen = activeAnnotationId === annotation.id;
+
+                return (
+                  <React.Fragment key={annotation.id}>
+                    <button
+                      type="button"
+                      className="pdf-annotation-marker"
+                      style={{
+                        left: `${annotation.left}px`,
+                        top: `${annotation.top}px`,
+                        width: `${annotation.width}px`,
+                        height: `${annotation.height}px`,
+                      }}
+                      aria-label={annotation.title || annotation.contents || 'Open annotation'}
+                      title={annotation.title || ''}
+                      onClick={() => {
+                        if (isOpen) {
+                          closeOpenAnnotation();
+                          return;
+                        }
+
+                        setActiveAnnotationId(annotation.id);
+                      }}
+                    ></button>
+
+                    {isOpen && (
+                      <div
+                        className="pdf-annotation-popup"
+                        style={{
+                          left: `${annotation.left + annotation.width + 8}px`,
+                          top: `${annotation.top}px`,
+                        }}
+                      >
+                        {annotation.title && <div className="pdf-annotation-popup-title">{annotation.title}</div>}
+                        {annotation.contents && <div className="pdf-annotation-popup-body">{annotation.contents}</div>}
+                        <button
+                          type="button"
+                          className="btn btn-sm btn-outline-secondary mt-2"
+                          onClick={closeOpenAnnotation}
+                        >
+                          Close
+                        </button>
+                      </div>
+                    )}
+                  </React.Fragment>
+                );
+              })}
+            </div>
+          </div>
         </div>
+
+        {isLoading && (
+          <div className="pdf-loading-overlay" role="status" aria-live="polite" aria-label="Loading PDF document">
+            <div className="spinner-border text-secondary" role="presentation"></div>
+            <span>Loading document...</span>
+          </div>
+        )}
 
         {isRendering && (
           <div className="pdf-viewer-rendering-badge small text-body-secondary">Rendering page...</div>

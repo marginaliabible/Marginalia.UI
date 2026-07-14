@@ -206,6 +206,7 @@ export interface SourceArtifactInventory {
 export interface VerseResourceDocumentLink {
   page: number;
   url: string;
+  raw?: string;
 }
 
 export interface VerseResourceDocument {
@@ -260,10 +261,12 @@ interface ExportDocumentEntry {
 interface ResourceOccurrence {
   documentId: string;
   page: number;
+  raw?: string;
 }
 
 interface ResourceVerseEntry {
   ref?: unknown;
+  raw?: unknown;
   occurrences?: unknown;
 }
 
@@ -449,6 +452,20 @@ class BibleService {
           tagSet.add(tag);
         }
 
+        const rawByPage = new Map<number, string>();
+        for (const pageNumber of nextPages) {
+          if (existing) {
+            const existingLink = existing.pageLinks.find((link) => link.page === pageNumber);
+            if (existingLink?.raw && existingLink.raw.trim().length > 0) {
+              rawByPage.set(pageNumber, existingLink.raw);
+            }
+          }
+
+          if (pageNumber === match.page && match.raw && match.raw.trim().length > 0) {
+            rawByPage.set(pageNumber, match.raw);
+          }
+        }
+
         const nextDoc: VerseResourceDocument = {
           libraryId: library.id,
           libraryLabel: library.label,
@@ -459,6 +476,7 @@ class BibleService {
           pageLinks: nextPages.map((page) => ({
             page,
             url: buildDocumentPageUrl(library.documentUrlTemplate, library.baseUrl, match.documentId, page),
+            raw: rawByPage.get(page),
           })),
         };
 
@@ -914,7 +932,8 @@ class BibleService {
         continue;
       }
 
-      const hits = parseOccurrences(entry.occurrences);
+      const raw = readString(entry.raw);
+      const hits = parseOccurrences(entry.occurrences, raw ?? null);
       occurrences.push(...hits);
     }
 
@@ -2550,7 +2569,7 @@ function parseReferenceRef(refValue: unknown): { bookToken: string; chapter: num
   return { bookToken, chapter, verse };
 }
 
-function parseOccurrences(value: unknown): ResourceOccurrence[] {
+function parseOccurrences(value: unknown, rawText: string | null): ResourceOccurrence[] {
   if (!Array.isArray(value)) {
     return [];
   }
@@ -2570,6 +2589,7 @@ function parseOccurrences(value: unknown): ResourceOccurrence[] {
     occurrences.push({
       documentId,
       page: Math.floor(page),
+      raw: rawText ?? undefined,
     });
   }
 

@@ -24,6 +24,7 @@ interface UiState {
     sourceUrl: string | null;
     title: string | null;
     page: number;
+    matchRaw: string | null;
   };
   theme: ThemePreference;
   ready: boolean;
@@ -47,6 +48,7 @@ const initialState: UiState = {
     sourceUrl: null,
     title: null,
     page: 1,
+    matchRaw: null,
   },
   theme: 'light',
   ready: false
@@ -132,6 +134,7 @@ const uiSlice = createSlice({
         sourceUrl: string;
         title?: string;
         page?: number;
+        matchRaw?: string | null;
       }>
     ) => {
       const nextPage = typeof action.payload.page === 'number' && Number.isFinite(action.payload.page)
@@ -143,6 +146,7 @@ const uiSlice = createSlice({
         sourceUrl: action.payload.sourceUrl,
         title: action.payload.title?.trim() || null,
         page: nextPage,
+        matchRaw: action.payload.matchRaw?.trim() || null,
       };
     },
     closePdfViewer: (state) => {

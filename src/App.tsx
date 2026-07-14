@@ -139,6 +139,7 @@ function App() {
     selectedLanguages,
     sourceUrls,
     resourceHiddenTags,
+    pdfViewer,
     theme,
     ready,
   } = useAppSelector((state) => state.ui);
@@ -335,6 +336,10 @@ function App() {
         mainPaneRef.current && document.activeElement && mainPaneRef.current.contains(document.activeElement)
       );
 
+      if (pdfViewer.isOpen) {
+        return;
+      }
+
       if (isMainPaneFocused && e.ctrlKey && !e.altKey && !e.metaKey && e.key.toLowerCase() === 'c') {
         e.preventDefault();
         void handleCopySelectedVerses();
@@ -343,7 +348,7 @@ function App() {
 
     window.addEventListener('keydown', handleShortcut, true);
     return () => window.removeEventListener('keydown', handleShortcut, true);
-  }, [handleCopySelectedVerses]);
+  }, [handleCopySelectedVerses, pdfViewer.isOpen]);
 
   // Initialize app
   useEffect(() => {

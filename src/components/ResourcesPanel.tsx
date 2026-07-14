@@ -156,7 +156,8 @@ const ResourcesPanel: React.FC<ResourcesPanelProps> = ({ tab }) => {
     event: React.MouseEvent<HTMLButtonElement>,
     url: string,
     page: number,
-    title: string
+    title: string,
+    raw?: string
   ) => {
     event.preventDefault();
 
@@ -164,7 +165,7 @@ const ResourcesPanel: React.FC<ResourcesPanelProps> = ({ tab }) => {
     void proxyUrl;
     // const viewerUrl = proxyUrl || url;
     const viewerUrl = url;
-    dispatch(openPdfViewer({ sourceUrl: viewerUrl, page, title }));
+    dispatch(openPdfViewer({ sourceUrl: viewerUrl, page, title, matchRaw: raw ?? null }));
 
     if (isPanelDetached && typeof window !== 'undefined' && window.opener && !window.opener.closed) {
       window.opener.focus();
@@ -264,7 +265,7 @@ const ResourcesPanel: React.FC<ResourcesPanelProps> = ({ tab }) => {
                             <button
                               type="button"
                               className="resource-page-link btn btn-link btn-sm p-0 align-baseline"
-                              onClick={(event) => handleOpenDocumentPage(event, link.url, link.page, document.title)}
+                              onClick={(event) => handleOpenDocumentPage(event, link.url, link.page, document.title, link.raw)}
                             >
                               {link.page}
                             </button>
@@ -284,14 +285,23 @@ const ResourcesPanel: React.FC<ResourcesPanelProps> = ({ tab }) => {
 };
 
 function mergePageLinks(
-  left: { page: number; url: string }[],
-  right: { page: number; url: string }[]
-): { page: number; url: string }[] {
-  const byPage = new Map<number, { page: number; url: string }>();
+  left: { page: number; url: string; raw?: string }[],
+  right: { page: number; url: string; raw?: string }[]
+): { page: number; url: string; raw?: string }[] {
+  const byPage = new Map<number, { page: number; url: string; raw?: string }>();
 
   for (const link of [...left, ...right]) {
-    if (!byPage.has(link.page)) {
+    const existing = byPage.get(link.page);
+    if (!existing) {
       byPage.set(link.page, link);
+      continue;
+    }
+
+    if (!existing.raw && link.raw) {
+      byPage.set(link.page, {
+        ...existing,
+        raw: link.raw,
+      });
     }
   }
 
