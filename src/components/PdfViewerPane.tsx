@@ -13,6 +13,8 @@ const SCALE_STEP = 0.2;
 const RANGE_CHUNK_SIZE = 1024 * 1024;
 const POPUP_ANNOTATION_TYPE = 16;
 const WHEEL_PAGE_TURN_COOLDOWN_MS = 280;
+const CANVAS_RENDER_TIMEOUT_MS = 8000;
+const TEXT_LAYER_RENDER_TIMEOUT_MS = 3500;
 const OCR_SPACE_PATTERN = /[\s\u00A0\u1680\u180E\u2000-\u200D\u2028\u2029\u202F\u205F\u2060\u3000\uFEFF\u0000-\u001F]+/g;
 
 interface RenderedAnnotation {
@@ -59,6 +61,24 @@ const isAbortOrCancelled = (error: unknown): boolean => {
 };
 
 const clampScale = (value: number): number => Math.min(MAX_SCALE, Math.max(MIN_SCALE, Number(value.toFixed(2))));
+
+const withTimeout = async <T,>(promise: Promise<T>, timeoutMs: number, timeoutLabel: string): Promise<T> => {
+  let timeoutId: ReturnType<typeof setTimeout> | null = null;
+
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeoutId = setTimeout(() => {
+      reject(new Error(timeoutLabel));
+    }, timeoutMs);
+  });
+
+  try {
+    return await Promise.race([promise, timeoutPromise]);
+  } finally {
+    if (timeoutId !== null) {
+      clearTimeout(timeoutId);
+    }
+  }
+};
 
 const normalizeMatchText = (value: string | null | undefined): string => {
   if (!value) {
@@ -123,7 +143,8 @@ const PdfViewerPane: React.FC = () => {
   const [scale, setScale] = useState(1);
   const [annotations, setAnnotations] = useState<RenderedAnnotation[]>([]);
   const [activeAnnotationId, setActiveAnnotationId] = useState<string | null>(null);
-  const hasLoggedFetchModeRef = useRef(false);
+  const [useNativePopupFallback, setUseNativePopupFallback] = useState(false);
+  const renderCycleRef = useRef(0);
 
   const activeSourceUrl = pdfViewer.sourceUrl;
   const activePage = Math.max(1, pdfViewer.page);
@@ -133,13 +154,25 @@ const PdfViewerPane: React.FC = () => {
     setScale((current) => clampScale(current + (direction * SCALE_STEP)));
   };
 
+  const getViewerWindow = (): Window => {
+    return stageRef.current?.ownerDocument.defaultView ?? window;
+  };
+
+  const getViewerDocument = (): Document => {
+    return stageRef.current?.ownerDocument ?? document;
+  };
+
+  useEffect(() => {
+    setUseNativePopupFallback(false);
+  }, [activeSourceUrl]);
+
   const computeFitScaleForPageWidth = (pageWidth: number): number => {
     const stage = stageRef.current;
     if (!stage) {
       return 1;
     }
 
-    const computed = window.getComputedStyle(stage);
+    const computed = getViewerWindow().getComputedStyle(stage);
     const horizontalPadding = Number.parseFloat(computed.paddingLeft || '0') + Number.parseFloat(computed.paddingRight || '0');
     const availableWidth = Math.max(1, stage.clientWidth - horizontalPadding);
     return clampScale(availableWidth / Math.max(1, pageWidth));
@@ -360,7 +393,6 @@ const PdfViewerPane: React.FC = () => {
         setAnnotations([]);
         closeOpenAnnotation();
         setError(null);
-        hasLoggedFetchModeRef.current = false;
         return;
       }
 
@@ -368,21 +400,15 @@ const PdfViewerPane: React.FC = () => {
       setError(null);
 
       try {
-        if (!hasLoggedFetchModeRef.current) {
-          console.info('[GitBible][PDF] Fetch mode selected: range (requested)', {
-            sourceUrl: activeSourceUrl,
-            rangeChunkSize: RANGE_CHUNK_SIZE,
-          });
-          hasLoggedFetchModeRef.current = true;
-        }
-
         loadingTaskRef.current?.destroy();
+        const ownerDocument = getViewerDocument();
         const loadingTask = getDocument({
           url: activeSourceUrl,
           disableAutoFetch: true,
           disableStream: true,
           disableRange: false,
           rangeChunkSize: RANGE_CHUNK_SIZE,
+          ownerDocument,
         });
         loadingTaskRef.current = loadingTask;
 
@@ -451,6 +477,8 @@ const PdfViewerPane: React.FC = () => {
         return;
       }
 
+      const renderCycle = renderCycleRef.current + 1;
+      renderCycleRef.current = renderCycle;
       setIsRendering(true);
       setError(null);
       closeOpenAnnotation();
@@ -464,7 +492,7 @@ const PdfViewerPane: React.FC = () => {
         highlightLayerRef.current.innerHTML = '';
       }
 
-      const selection = window.getSelection();
+      const selection = getViewerDocument().getSelection();
       if (selection && stageRef.current && stageRef.current.contains(selection.anchorNode)) {
         selection.removeAllRanges();
       }
@@ -480,7 +508,8 @@ const PdfViewerPane: React.FC = () => {
         fitScaleRef.current = computeFitScaleForPageWidth(baseViewport.width);
 
         const viewport = page.getViewport({ scale });
-        const outputScale = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
+        const viewerWindow = getViewerWindow();
+        const outputScale = viewerWindow.devicePixelRatio || 1;
         const canvas = canvasRef.current;
         const context = canvas.getContext('2d');
         if (!context) {
@@ -497,7 +526,11 @@ const PdfViewerPane: React.FC = () => {
         renderTasksRef.current.get(canvasTaskKey)?.cancel();
         const canvasTask = page.render({ canvasContext: context, viewport });
         renderTasksRef.current.set(canvasTaskKey, canvasTask);
-        await canvasTask.promise;
+        await withTimeout(
+          canvasTask.promise,
+          CANVAS_RENDER_TIMEOUT_MS,
+          'Canvas render timed out.'
+        );
 
         const textLayer = textLayerRef.current;
         const highlightLayer = highlightLayerRef.current;
@@ -506,6 +539,11 @@ const PdfViewerPane: React.FC = () => {
         textLayer.innerHTML = '';
         textLayer.style.width = `${Math.floor(viewport.width)}px`;
         textLayer.style.height = `${Math.floor(viewport.height)}px`;
+        textLayer.style.color = 'transparent';
+        textLayer.style.lineHeight = '1';
+        textLayer.style.setProperty('-webkit-text-fill-color', 'transparent');
+        textLayer.style.position = 'absolute';
+        textLayer.style.inset = '0';
 
         const textTaskKey = 'text';
         renderTasksRef.current.get(textTaskKey)?.cancel();
@@ -515,7 +553,19 @@ const PdfViewerPane: React.FC = () => {
           viewport,
         });
         renderTasksRef.current.set(textTaskKey, textTask);
-        await textTask.render();
+        try {
+          await withTimeout(
+            textTask.render(),
+            TEXT_LAYER_RENDER_TIMEOUT_MS,
+            'Text layer render timed out.'
+          );
+        } catch (textLayerError) {
+          textTask.cancel();
+          if (!cancelled && isAbortOrCancelled(textLayerError)) {
+            return;
+          }
+          textLayer.innerHTML = '';
+        }
 
         highlightLayer.style.width = `${Math.floor(viewport.width)}px`;
         highlightLayer.style.height = `${Math.floor(viewport.height)}px`;
@@ -527,10 +577,17 @@ const PdfViewerPane: React.FC = () => {
         }
       } catch (renderError) {
         if (!cancelled && !isAbortOrCancelled(renderError)) {
+          const timedOut = renderError instanceof Error && renderError.message === 'Canvas render timed out.';
+          if (timedOut && getViewerWindow() !== window) {
+            setUseNativePopupFallback(true);
+            setError(null);
+            return;
+          }
+
           setError(renderError instanceof Error ? renderError.message : 'Unable to render PDF page.');
         }
       } finally {
-        if (!cancelled) {
+        if (!cancelled && renderCycleRef.current === renderCycle) {
           setIsRendering(false);
         }
       }
@@ -561,6 +618,8 @@ const PdfViewerPane: React.FC = () => {
       return;
     }
 
+    const viewerWindow = getViewerWindow();
+
     const handleKeyDown = (event: KeyboardEvent) => {
       if (!event.ctrlKey && !event.metaKey) {
         return;
@@ -581,9 +640,9 @@ const PdfViewerPane: React.FC = () => {
       }
     };
 
-    window.addEventListener('keydown', handleKeyDown, { capture: true });
+    viewerWindow.addEventListener('keydown', handleKeyDown, { capture: true });
     return () => {
-      window.removeEventListener('keydown', handleKeyDown, { capture: true });
+      viewerWindow.removeEventListener('keydown', handleKeyDown, { capture: true });
     };
   }, [pdfViewer.isOpen]);
 
@@ -680,6 +739,8 @@ const PdfViewerPane: React.FC = () => {
       return;
     }
 
+    const viewerWindow = getViewerWindow();
+
     const handlePointerDown = (event: PointerEvent) => {
       const target = event.target as HTMLElement | null;
       if (!target) {
@@ -700,12 +761,12 @@ const PdfViewerPane: React.FC = () => {
       }
     };
 
-    window.addEventListener('pointerdown', handlePointerDown, true);
-    window.addEventListener('keydown', handleEscape, true);
+    viewerWindow.addEventListener('pointerdown', handlePointerDown, true);
+    viewerWindow.addEventListener('keydown', handleEscape, true);
 
     return () => {
-      window.removeEventListener('pointerdown', handlePointerDown, true);
-      window.removeEventListener('keydown', handleEscape, true);
+      viewerWindow.removeEventListener('pointerdown', handlePointerDown, true);
+      viewerWindow.removeEventListener('keydown', handleEscape, true);
     };
   }, [activeAnnotationId]);
 
@@ -841,6 +902,19 @@ const PdfViewerPane: React.FC = () => {
 
       {error && <p className="text-danger small mb-2">{error}</p>}
 
+      {useNativePopupFallback && activeSourceUrl ? (
+        <div className="d-flex flex-column flex-grow-1 min-h-0">
+          <div className="small text-body-secondary mb-2">
+            The PDF had trouble rendering. Falling back to browser's PDF viewer.
+          </div>
+          <iframe
+            key={`${activeSourceUrl}:${activePage}`}
+            title={title}
+            src={`${activeSourceUrl}#page=${activePage}`}
+            className="w-100 flex-grow-1 border rounded"
+          />
+        </div>
+      ) : (
       <div
         className={`pdf-viewer-stage flex-grow-1${isRendering ? ' is-rendering' : ''}`}
         ref={stageRef}
@@ -921,6 +995,7 @@ const PdfViewerPane: React.FC = () => {
           <div className="pdf-viewer-rendering-badge small text-body-secondary">Rendering page...</div>
         )}
       </div>
+      )}
     </div>
   );
 };

@@ -3,12 +3,11 @@ import SearchBar from './components/SearchBar';
 import WorkspaceMainPane from './components/WorkspaceMainPane';
 import WorkspaceDivider from './components/WorkspaceDivider';
 import WorkspaceSidePanel from './components/WorkspaceSidePanel';
-import SidePanelContent from './components/SidePanelContent';
+import DetachedPanelPortal from './components/DetachedPanelPortal';
 import LoadingStatus from './components/LoadingStatus';
 import SettingsModal from './components/SettingsModal';
 import GitHubAuthPromptModal from './components/GitHubAuthPromptModal';
 import { useCallback, useEffect, useMemo, useRef, useState, ChangeEvent } from 'react';
-import { createPortal } from 'react-dom';
 import { useAppDispatch, useAppSelector } from './store/hooks';
 import {
   loadTranslation,
@@ -764,6 +763,25 @@ function App() {
     dispatch(closeTab(tabId));
   };
 
+  const detachedSidePanelContentProps: React.ComponentProps<typeof DetachedPanelPortal>['sidePanelContentProps'] = {
+    isMobileLayout: false,
+    isDesktopLayout: true,
+    isPanelDetached,
+    isMobilePanelOpen: false,
+    setIsMobilePanelOpen: () => {},
+    goToReference,
+    translationRecords: safeTranslationRecords,
+    translationMetadataById,
+    addableTranslations,
+    onAddTranslation: (id) => dispatch(addTranslationRecord(id)),
+    onRemoveTranslation: (id) => dispatch(removeTranslationRecord(id)),
+    onToggleStar: (id) => dispatch(toggleStarTranslation(id)),
+    onReorder: (fromIndex, toIndex) => dispatch(reorderTranslations({ fromIndex, toIndex })),
+    onSelectTab: handleSelectTab,
+    onCloseTab: handleCloseTab,
+    onToggleDetach: handleToggleDetachPanel,
+  };
+
   const shareTarget = useMemo(() => {
     if (!selectedBook) {
       return null;
@@ -919,29 +937,13 @@ function App() {
         />
       </div>
 
-      {isPanelDetached && activeWorkspacePanel && popupContainer && createPortal(
-        <div className="workspace-scroll panel-scroll-with-tabs popout-panel-shell">
-          <SidePanelContent
-            isMobileLayout={false}
-            isDesktopLayout={true}
-            isPanelDetached={isPanelDetached}
-            isMobilePanelOpen={false}
-            setIsMobilePanelOpen={() => {}}
-            goToReference={goToReference}
-            translationRecords={safeTranslationRecords}
-            translationMetadataById={translationMetadataById}
-            addableTranslations={addableTranslations}
-            onAddTranslation={(id) => dispatch(addTranslationRecord(id))}
-            onRemoveTranslation={(id) => dispatch(removeTranslationRecord(id))}
-            onToggleStar={(id) => dispatch(toggleStarTranslation(id))}
-            onReorder={(fromIndex, toIndex) => dispatch(reorderTranslations({ fromIndex, toIndex }))}
-            onSelectTab={handleSelectTab}
-            onCloseTab={handleCloseTab}
-            onToggleDetach={handleToggleDetachPanel}
-          />
-        </div>,
-        popupContainer
-      )}
+      <DetachedPanelPortal
+        isPanelDetached={isPanelDetached}
+        hasActiveWorkspacePanel={Boolean(activeWorkspacePanel)}
+        popupContainer={popupContainer}
+        pdfViewerIsOpen={pdfViewer.isOpen}
+        sidePanelContentProps={detachedSidePanelContentProps}
+      />
     </>
   );
 }

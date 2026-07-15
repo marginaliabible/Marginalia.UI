@@ -15,6 +15,35 @@ interface UsePopupPanelReturn {
   handleToggleDetachPanel: () => void;
 }
 
+const buildPopupFeatures = (): string => {
+  const fallbackWidth = 1100;
+  const fallbackHeight = 780;
+
+  const outerWidth = Number.isFinite(window.outerWidth) ? window.outerWidth : fallbackWidth;
+  const outerHeight = Number.isFinite(window.outerHeight) ? window.outerHeight : fallbackHeight;
+  const screenX = Number.isFinite(window.screenX) ? window.screenX : 80;
+  const screenY = Number.isFinite(window.screenY) ? window.screenY : 60;
+
+  const width = Math.max(920, Math.min(outerWidth - 80, 1400));
+  const height = Math.max(640, Math.min(outerHeight - 80, 980));
+  const left = Math.max(0, screenX + Math.max(20, Math.round((outerWidth - width) / 2)));
+  const top = Math.max(0, screenY + Math.max(20, Math.round((outerHeight - height) / 2)));
+
+  return [
+    'popup=yes',
+    `width=${width}`,
+    `height=${height}`,
+    `left=${left}`,
+    `top=${top}`,
+    'resizable=yes',
+    'scrollbars=yes',
+    'status=no',
+    'toolbar=no',
+    'location=no',
+    'menubar=no',
+  ].join(',');
+};
+
 export const usePopupPanel = ({
   dispatch,
   theme,
@@ -151,7 +180,13 @@ export const usePopupPanel = ({
         ? storedName
         : `gitbible-panel-${Date.now()}`;
 
-    const popup = window.open('', windowName);
+    const popupFeatures = buildPopupFeatures();
+
+    let popup = window.open('', windowName, popupFeatures);
+    if (!popup || popup.closed) {
+      popup = window.open('about:blank', windowName, popupFeatures);
+    }
+
     if (!popup || popup.closed) {
       return;
     }

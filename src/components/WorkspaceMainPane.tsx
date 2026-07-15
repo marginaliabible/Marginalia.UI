@@ -244,7 +244,6 @@ const WorkspaceMainPane: React.FC<WorkspaceMainPaneProps> = ({
   ) => {
     focusMainPane();
 
-    console.log('Verse cell select:', { verse, translationId, mode });
     const hasSelection = selectedVerses.length > 0 && Boolean(selectedVerseTranslationId);
     const translationLocked = hasSelection && selectedVerseTranslationId !== translationId;
 
@@ -423,7 +422,9 @@ const WorkspaceMainPane: React.FC<WorkspaceMainPaneProps> = ({
     return () => window.removeEventListener('keydown', handleArrowSelectionKey, true);
   }, [handleArrowSelectionKey]);
 
-  if (!currentBible && !pdfViewer.isOpen) {
+  const shouldRenderPdfViewer = pdfViewer.isOpen && !isPanelDetached;
+
+  if (!currentBible && !shouldRenderPdfViewer) {
     return null;
   }
 
@@ -441,7 +442,7 @@ const WorkspaceMainPane: React.FC<WorkspaceMainPaneProps> = ({
     >
       <div className="card border-0 shadow-sm">
         <div className="card-body workspace-scroll pb-4">
-          {pdfViewer.isOpen ? (
+          {shouldRenderPdfViewer ? (
             <PdfViewerPane />
           ) : selectedBook ? (
             <VerseDisplay
