@@ -15,6 +15,7 @@ import {
   refreshTranslations,
   setActiveTab,
   closeTab,
+  updateActiveVerseTabContext,
   setCurrentBibleFromId,
   removeLoadedTranslations,
 } from './store/slices/bibleSlice';
@@ -124,6 +125,7 @@ function App() {
     currentBible,
     isLoading,
     error,
+    tabs,
     activeTabId,
     isPanelDetached,
     detachedPanelName,
@@ -583,6 +585,15 @@ function App() {
         verses: [target.verse],
         anchorVerse: target.verse,
       }));
+
+      const activeTab = tabs.find((tab) => tab.id === activeTabId);
+      if (activeTab && (activeTab.type === 'translations' || activeTab.type === 'resources')) {
+        dispatch(updateActiveVerseTabContext({
+          book: target.book,
+          chapter: target.chapter,
+          verse: target.verse,
+        }));
+      }
     } else {
       dispatch(clearVerseSelection());
     }

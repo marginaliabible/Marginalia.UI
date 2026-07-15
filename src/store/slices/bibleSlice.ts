@@ -339,6 +339,19 @@ const bibleSlice = createSlice({
       state.tabs = [];
       state.activeTabId = null;
     },
+    updateActiveVerseTabContext: (state, action: PayloadAction<{ book: string; chapter: number; verse: number }>) => {
+      if (!state.activeTabId) {
+        return;
+      }
+
+      const activeTab = state.tabs.find((tab) => tab.id === state.activeTabId);
+      if (!activeTab || (activeTab.type !== 'translations' && activeTab.type !== 'resources')) {
+        return;
+      }
+
+      activeTab.verseContext = action.payload;
+      activeTab.updatedAt = Date.now();
+    },
     openVerseTabs: (state, action: PayloadAction<{ book: string; chapter: number; verse: number; hasResources: boolean }>) => {
       const { book, chapter, verse, hasResources } = action.payload;
       const now = Date.now();
@@ -419,6 +432,7 @@ export const {
   closeTab,
   setPanelDetached,
   clearSearch,
+  updateActiveVerseTabContext,
   openVerseTabs
 } = bibleSlice.actions;
 
