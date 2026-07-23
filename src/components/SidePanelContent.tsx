@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import PanelTabs from './PanelTabs';
 import SearchResults from './SearchResults';
 import TranslationsPanel from './TranslationsPanel';
@@ -24,6 +24,7 @@ interface SidePanelContentProps {
   onSelectTab: (tabId: string) => void;
   onCloseTab: (tabId: string) => void;
   onToggleDetach: () => void;
+  focusMainWindow: () => void;
 }
 
 const SidePanelContent: React.FC<SidePanelContentProps> = ({
@@ -43,8 +44,21 @@ const SidePanelContent: React.FC<SidePanelContentProps> = ({
   onSelectTab,
   onCloseTab,
   onToggleDetach,
+  focusMainWindow,
 }) => {
   const { tabs, activeTabId } = useAppSelector((state) => state.bible);
+  const contentRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const content = contentRef.current;
+    if (!content) {
+      return;
+    }
+
+    const activePanel = content.querySelector<HTMLElement>('.panel-content-scroll.is-active');
+    activePanel?.scrollTo({ top: 0, behavior: 'auto' });
+    content.closest<HTMLElement>('.panel-scroll-with-tabs')?.scrollTo({ top: 0, behavior: 'auto' });
+  }, [tabs, activeTabId]);
 
   return (
     <>
@@ -59,7 +73,7 @@ const SidePanelContent: React.FC<SidePanelContentProps> = ({
           onToggleDetach={onToggleDetach}
         />
       )}
-      <div className="panel-tabs-content">
+      <div className="panel-tabs-content" ref={contentRef}>
         {tabs.map((tab: PanelTab) => (
           <div
             key={tab.id}
@@ -74,7 +88,7 @@ const SidePanelContent: React.FC<SidePanelContentProps> = ({
                     setIsMobilePanelOpen(false);
                   }
                   if (isPanelDetached) {
-                    window.focus();
+                    focusMainWindow();
                   }
                 }}
               />

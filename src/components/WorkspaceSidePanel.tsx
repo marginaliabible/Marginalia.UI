@@ -22,6 +22,7 @@ interface WorkspaceSidePanelProps {
   onSelectTab: (tabId: string) => void;
   onCloseTab: (tabId: string) => void;
   onToggleDetach: () => void;
+  focusMainWindow: () => void;
 }
 
 const WorkspaceSidePanel: React.FC<WorkspaceSidePanelProps> = ({
@@ -42,6 +43,7 @@ const WorkspaceSidePanel: React.FC<WorkspaceSidePanelProps> = ({
   onSelectTab,
   onCloseTab,
   onToggleDetach,
+  focusMainWindow,
 }) => {
   const { tabs, activeTabId } = useAppSelector((state) => state.bible);
 
@@ -77,6 +79,7 @@ const WorkspaceSidePanel: React.FC<WorkspaceSidePanelProps> = ({
           onSelectTab={onSelectTab}
           onCloseTab={onCloseTab}
           onToggleDetach={onToggleDetach}
+          focusMainWindow={focusMainWindow}
         />
       </div>
     </aside>

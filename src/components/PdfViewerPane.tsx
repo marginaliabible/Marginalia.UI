@@ -166,7 +166,7 @@ const PdfViewerPane: React.FC = () => {
     setUseNativePopupFallback(false);
   }, [activeSourceUrl]);
 
-  const computeFitScaleForPageWidth = (pageWidth: number): number => {
+  const computeFitScaleForPageFrame = (pageWidth: number, pageHeight: number): number => {
     const stage = stageRef.current;
     if (!stage) {
       return 1;
@@ -174,8 +174,12 @@ const PdfViewerPane: React.FC = () => {
 
     const computed = getViewerWindow().getComputedStyle(stage);
     const horizontalPadding = Number.parseFloat(computed.paddingLeft || '0') + Number.parseFloat(computed.paddingRight || '0');
+    const verticalPadding = Number.parseFloat(computed.paddingTop || '0') + Number.parseFloat(computed.paddingBottom || '0');
     const availableWidth = Math.max(1, stage.clientWidth - horizontalPadding);
-    return clampScale(availableWidth / Math.max(1, pageWidth));
+    const availableHeight = Math.max(1, stage.clientHeight - verticalPadding);
+    const widthScale = availableWidth / Math.max(1, pageWidth);
+    const heightScale = availableHeight / Math.max(1, pageHeight);
+    return clampScale(Math.min(widthScale, heightScale));
   };
 
   const isClippedByWidth = (): boolean => {
@@ -198,6 +202,24 @@ const PdfViewerPane: React.FC = () => {
     }
 
     setScale(fitScale);
+  };
+
+  const resetZoomToFitFrame = async (): Promise<void> => {
+    if (!documentProxy) {
+      setScale(fitScaleRef.current);
+      return;
+    }
+
+    try {
+      const pageNumber = Math.min(Math.max(1, activePage), documentProxy.numPages);
+      const page = await documentProxy.getPage(pageNumber);
+      const baseViewport = page.getViewport({ scale: 1 });
+      const fitScale = computeFitScaleForPageFrame(baseViewport.width, baseViewport.height);
+      fitScaleRef.current = fitScale;
+      setScale(fitScale);
+    } catch {
+      setScale(fitScaleRef.current);
+    }
   };
 
   const isScrolledToTop = (): boolean => {
@@ -428,7 +450,7 @@ const PdfViewerPane: React.FC = () => {
         const pageForFit = Math.min(Math.max(1, activePage), nextDocument.numPages);
         const fitPage = await nextDocument.getPage(pageForFit);
         const baseViewport = fitPage.getViewport({ scale: 1 });
-        const fitScale = computeFitScaleForPageWidth(baseViewport.width);
+        const fitScale = computeFitScaleForPageFrame(baseViewport.width, baseViewport.height);
         fitScaleRef.current = fitScale;
         setScale(fitScale);
 
@@ -505,7 +527,7 @@ const PdfViewerPane: React.FC = () => {
         }
 
         const baseViewport = page.getViewport({ scale: 1 });
-        fitScaleRef.current = computeFitScaleForPageWidth(baseViewport.width);
+        fitScaleRef.current = computeFitScaleForPageFrame(baseViewport.width, baseViewport.height);
 
         const viewport = page.getViewport({ scale });
         const viewerWindow = getViewerWindow();
@@ -882,6 +904,8 @@ const PdfViewerPane: React.FC = () => {
               type="button"
               className="btn btn-outline-secondary"
               onClick={() => adjustScale(-1)}
+              title="zoom out"
+              aria-label="zoom out"
               disabled={scale <= MIN_SCALE}
             >
               <i className="fa-solid fa-magnifying-glass-minus" aria-hidden="true"></i>
@@ -889,7 +913,20 @@ const PdfViewerPane: React.FC = () => {
             <button
               type="button"
               className="btn btn-outline-secondary"
+              onClick={() => {
+                void resetZoomToFitFrame();
+              }}
+              title="fit to frame"
+              aria-label="fit to frame"
+            >
+              <i className="fa-solid fa-up-right-and-down-left-from-center" aria-hidden="true"></i>
+            </button>
+            <button
+              type="button"
+              className="btn btn-outline-secondary"
               onClick={() => adjustScale(1)}
+              title="zoom in"
+              aria-label="zoom in"
               disabled={scale >= MAX_SCALE}
             >
               <i className="fa-solid fa-magnifying-glass-plus" aria-hidden="true"></i>

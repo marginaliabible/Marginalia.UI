@@ -153,6 +153,6 @@ export const scrollToVerse = async (target: QuickJumpTarget): Promise<void> => {
 
   const element = document.getElementById(elementId);
   if (element) {
-    element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    element.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   }
 };

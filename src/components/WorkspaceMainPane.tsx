@@ -353,6 +353,7 @@ const WorkspaceMainPane: React.FC<WorkspaceMainPaneProps> = ({
         anchorVerse: nextVerse,
       }));
       setKeyboardCursor(selectedVerseTranslationId, nextVerse, nextVerse);
+      void scrollToVerse({ book: selectedBook, chapter: selectedChapter, verse: nextVerse });
       openVersePanel(nextVerse);
       event.preventDefault();
       return;
@@ -404,6 +405,7 @@ const WorkspaceMainPane: React.FC<WorkspaceMainPaneProps> = ({
       anchorVerse,
     }));
     setKeyboardCursor(selectedVerseTranslationId, anchorVerse, nextCursorVerse);
+    void scrollToVerse({ book: selectedBook, chapter: selectedChapter, verse: nextCursorVerse });
     event.preventDefault();
   }, [
     chaptersByTranslation,

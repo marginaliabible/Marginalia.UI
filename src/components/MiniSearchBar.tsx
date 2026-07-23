@@ -46,6 +46,7 @@ const MiniSearchBar = forwardRef<MiniSearchBarHandle, MiniSearchBarProps>(({
     handleFocus,
     handleBlur,
     runSearchByAction,
+    handleSelectQuickJump,
     handleSelectHistory,
     closeDropdown,
     handlePrimaryActionOrHide,
@@ -110,6 +111,7 @@ const MiniSearchBar = forwardRef<MiniSearchBarHandle, MiniSearchBarProps>(({
             historyEntries={historyEntries}
             selectedIndex={searchActionIndex}
             onSelectAction={(action) => runSearchByAction(normalizedSearchTerm, action)}
+            onSelectQuickJump={handleSelectQuickJump}
             onSelectHistory={handleSelectHistory}
             onClose={closeDropdown}
           />

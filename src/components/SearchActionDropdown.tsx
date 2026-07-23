@@ -18,6 +18,7 @@ interface SearchActionDropdownProps {
   historyEntries: SearchHistoryEntry[];
   selectedIndex: number | null;
   onSelectAction: (action: 'replace' | 'new') => void;
+  onSelectQuickJump: () => void;
   onSelectHistory: (entry: SearchHistoryEntry) => void;
   onClose: () => void;
 }
@@ -29,6 +30,7 @@ const SearchActionDropdown: React.FC<SearchActionDropdownProps> = ({
   historyEntries,
   selectedIndex,
   onSelectAction,
+  onSelectQuickJump,
   onSelectHistory,
   onClose,
 }) => {
@@ -37,7 +39,8 @@ const SearchActionDropdown: React.FC<SearchActionDropdownProps> = ({
   }
 
   const hasSearchActions = Boolean(activeTabTitle) && !quickJumpPreview;
-  const historyStartIndex = hasSearchActions ? 2 : 0;
+  const quickJumpStartIndex = hasSearchActions ? 2 : 0;
+  const historyStartIndex = quickJumpStartIndex + (quickJumpPreview ? 1 : 0);
 
   return (
     <div className="quick-jump-preview quick-jump-pulldown is-visible search-action-dropdown" role="listbox" aria-label="Search and jump options">
@@ -52,7 +55,12 @@ const SearchActionDropdown: React.FC<SearchActionDropdownProps> = ({
       </button>
 
       {quickJumpPreview && (
-        <div className="search-action-quick-jump">
+        <button
+          type="button"
+          className={`search-action-quick-jump search-action-item ${selectedIndex === quickJumpStartIndex ? 'is-selected' : ''}`}
+          onMouseDown={(event) => event.preventDefault()}
+          onClick={onSelectQuickJump}
+        >
           <span className="text-uppercase fw-semibold small text-primary">Jump to</span>
           <span className="reference">
             {quickJumpPreview.book} {quickJumpPreview.chapter}
@@ -61,7 +69,7 @@ const SearchActionDropdown: React.FC<SearchActionDropdownProps> = ({
           {quickJumpPreview.text && (
             <span className="preview-text text-body-secondary">"{quickJumpPreview.text}"</span>
           )}
-        </div>
+        </button>
       )}
 
       {hasSearchActions && (

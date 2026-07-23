@@ -39,6 +39,7 @@ const SearchBar: React.FC<SearchBarProps> = ({
     handleBlur,
     handleSubmitSearch,
     runSearchByAction,
+    handleSelectQuickJump,
     handleSelectHistory,
     closeDropdown,
   } = useSearchController({
@@ -109,6 +110,7 @@ const SearchBar: React.FC<SearchBarProps> = ({
                   historyEntries={historyEntries}
                   selectedIndex={searchActionIndex}
                   onSelectAction={(action) => runSearchByAction(normalizedSearchTerm, action)}
+                  onSelectQuickJump={handleSelectQuickJump}
                   onSelectHistory={handleSelectHistory}
                   onClose={closeDropdown}
                 />

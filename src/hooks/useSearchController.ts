@@ -47,6 +47,7 @@ export interface SearchControllerApi {
   handleSubmitSearch: (event?: React.FormEvent) => Promise<void>;
   runSearchByAction: (query: string, action: 'replace' | 'new') => Promise<void>;
   handleSelectHistory: (entry: SearchHistoryEntry) => Promise<void>;
+  handleSelectQuickJump: () => Promise<void>;
   closeDropdown: () => void;
   handlePrimaryActionOrHide: (explicitQuery?: string) => Promise<void>;
 }
@@ -102,7 +103,8 @@ export const useSearchController = ({
     normalizedSearchTerm.length > 0;
 
   const actionCount = canShowSearchActionDropdown ? 2 : 0;
-  const selectableCount = actionCount + historyEntries.length;
+  const quickJumpCount = quickJumpPreview ? 1 : 0;
+  const selectableCount = actionCount + quickJumpCount + historyEntries.length;
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -227,7 +229,7 @@ export const useSearchController = ({
       !nextQuickJumpTarget &&
       trimmedValue.length > 0;
 
-    setSearchActionIndex(nextCanShowSearchActionDropdown ? 0 : null);
+    setSearchActionIndex((nextCanShowSearchActionDropdown || nextQuickJumpTarget) ? 0 : null);
     dispatch(setSearchTerm(value));
   };
 
@@ -254,6 +256,19 @@ export const useSearchController = ({
       normalized,
       activeTabId && activeTab?.type === 'search' ? 'replace' : 'new'
     );
+  };
+
+  const handleSelectQuickJump = async () => {
+    if (!quickJumpTarget || !quickJumpPreview) {
+      return;
+    }
+
+    const normalized = `${quickJumpPreview.book} ${quickJumpPreview.chapter}${quickJumpPreview.verse ? `:${quickJumpPreview.verse}` : ''}`;
+    dispatch(setSearchTerm(normalized));
+    await goToReference(quickJumpTarget);
+    updateSearchHistory(normalized, quickJumpTarget);
+    setIsSearchActionDropdownOpen(false);
+    onSearchComplete?.();
   };
 
   const executeQuery = async (queryInput: string) => {
@@ -310,13 +325,17 @@ export const useSearchController = ({
       return;
     }
 
-    if (event.key === 'Enter' && quickJumpPreview) {
-      event.preventDefault();
-      void executeQuery(query);
+    if (!isSearchActionDropdownOpen) {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        if (quickJumpPreview) {
+          void handleSelectQuickJump();
+        } else if (query.length > 0) {
+          void executeQuery(query);
+        }
+      }
       return;
     }
-
-    if (!isSearchActionDropdownOpen) return;
 
     if (event.key === 'ArrowDown' && selectableCount > 0) {
       event.preventDefault();
@@ -349,11 +368,21 @@ export const useSearchController = ({
         return;
       }
 
+      if (searchActionIndex !== null && searchActionIndex < actionCount + quickJumpCount) {
+        void handleSelectQuickJump();
+        return;
+      }
+
       if (searchActionIndex !== null) {
-        const historyEntry = historyEntries[searchActionIndex - actionCount];
+        const historyEntry = historyEntries[searchActionIndex - actionCount - quickJumpCount];
         if (historyEntry) {
           void handleSelectHistory(historyEntry);
         }
+        return;
+      }
+
+      if (quickJumpPreview) {
+        void handleSelectQuickJump();
         return;
       }
 
@@ -388,7 +417,7 @@ export const useSearchController = ({
     handleFocus: () => {
       setIsSearchFocused(true);
       setIsSearchActionDropdownOpen(true);
-      setSearchActionIndex(normalizedSearchTerm.length > 0 && canShowSearchActionDropdown ? 0 : null);
+      setSearchActionIndex(normalizedSearchTerm.length > 0 && (canShowSearchActionDropdown || Boolean(quickJumpPreview)) ? 0 : null);
     },
     handleBlur: () => {
       setIsSearchFocused(false);
@@ -398,6 +427,7 @@ export const useSearchController = ({
     handleSubmitSearch,
     runSearchByAction,
     handleSelectHistory,
+    handleSelectQuickJump,
     closeDropdown,
     handlePrimaryActionOrHide,
   };

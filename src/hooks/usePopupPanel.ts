@@ -12,6 +12,7 @@ interface UsePopupPanelProps {
 interface UsePopupPanelReturn {
   popupContainer: HTMLElement | null;
   focusDetachedPanel: () => void;
+  focusMainWindow: () => void;
   handleToggleDetachPanel: () => void;
 }
 
@@ -60,6 +61,22 @@ export const usePopupPanel = ({
       return;
     }
     popup.focus();
+  };
+
+  const focusMainWindow = () => {
+    const popup = popupWindowRef.current;
+    if (!popup || popup.closed) {
+      window.focus();
+      return;
+    }
+
+    const opener = popup.opener;
+    if (opener && !opener.closed) {
+      opener.focus();
+      return;
+    }
+
+    window.focus();
   };
 
   const attachPopupWindow = (popup: Window, windowName: string) => {
@@ -253,5 +270,5 @@ export const usePopupPanel = ({
     openOrReconnectPopup(true);
   };
 
-  return { popupContainer, focusDetachedPanel, handleToggleDetachPanel };
+  return { popupContainer, focusDetachedPanel, focusMainWindow, handleToggleDetachPanel };
 };

@@ -155,7 +155,7 @@ function App() {
 
   const activeWorkspacePanel: WorkspacePanelKey | null = activeTabId ? 'search' : null;
 
-  const { popupContainer, focusDetachedPanel, handleToggleDetachPanel } = usePopupPanel({
+  const { popupContainer, focusDetachedPanel, focusMainWindow, handleToggleDetachPanel } = usePopupPanel({
     dispatch,
     theme,
     isPanelDetached,
@@ -314,6 +314,11 @@ function App() {
     const handleShortcut = (e: KeyboardEvent) => {
       if (e.key.toLowerCase() === 'k' && (e.ctrlKey || e.metaKey)) {
         e.preventDefault();
+        const eventWindow = (e.view as Window | null) ?? window;
+        if (eventWindow !== window && !window.closed) {
+          window.focus();
+        }
+
         const searchInput = searchInputRef.current;
         const rect = searchInput?.getBoundingClientRect();
         const isTopSearchVisible = Boolean(
@@ -321,7 +326,7 @@ function App() {
           && rect.width > 0
           && rect.height > 0
           && rect.bottom > 0
-          && rect.top < window.innerHeight
+          && rect.top < eventWindow.innerHeight
         );
 
         if (isTopSearchVisible) {
@@ -348,8 +353,18 @@ function App() {
     };
 
     window.addEventListener('keydown', handleShortcut, true);
-    return () => window.removeEventListener('keydown', handleShortcut, true);
-  }, [handleCopySelectedVerses, pdfViewer.isOpen]);
+    const detachedWindow = popupContainer?.ownerDocument.defaultView;
+    if (detachedWindow && detachedWindow !== window) {
+      detachedWindow.addEventListener('keydown', handleShortcut, true);
+    }
+
+    return () => {
+      window.removeEventListener('keydown', handleShortcut, true);
+      if (detachedWindow && detachedWindow !== window) {
+        detachedWindow.removeEventListener('keydown', handleShortcut, true);
+      }
+    };
+  }, [handleCopySelectedVerses, pdfViewer.isOpen, popupContainer]);
 
   // Initialize app
   useEffect(() => {
@@ -552,10 +567,6 @@ function App() {
   const hasSidePanel = !isPanelDetached && Boolean(activeWorkspacePanel);
 
   const goToReference = async (target: QuickJumpTarget, translationId?: string) => {
-    if (isPanelDetached) {
-      window.focus();
-    }
-
     const nextActiveId = translationId && safeSelectedTranslationIds.includes(translationId)
       ? translationId
       : selectedTranslationId;
@@ -780,6 +791,7 @@ function App() {
     onSelectTab: handleSelectTab,
     onCloseTab: handleCloseTab,
     onToggleDetach: handleToggleDetachPanel,
+    focusMainWindow,
   };
 
   const shareTarget = useMemo(() => {
@@ -892,6 +904,7 @@ function App() {
               onSelectTab={handleSelectTab}
               onCloseTab={handleCloseTab}
               onToggleDetach={handleToggleDetachPanel}
+              focusMainWindow={focusMainWindow}
             />
           )}
 

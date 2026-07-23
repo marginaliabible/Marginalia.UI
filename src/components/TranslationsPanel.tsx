@@ -92,7 +92,7 @@ const TranslationsPanel: React.FC<TranslationsPanelProps> = ({
 
   if (!verseContext) {
     return (
-      <div className="card border-0 shadow-sm h-100">
+      <div className="card border-0 shadow-sm">
         <div className="card-body d-flex flex-column justify-content-center align-items-center text-center">
           <p className="text-body-secondary mb-0">Click a verse or verse number to open translations</p>
         </div>
@@ -101,7 +101,7 @@ const TranslationsPanel: React.FC<TranslationsPanelProps> = ({
   }
 
   return (
-    <div className="card border-0 shadow-sm h-100 d-flex flex-column">
+    <div className="card border-0 shadow-sm d-flex flex-column">
       <div className="card-body d-flex flex-column gap-3 flex-grow-1 translations-panel-shell translations-panel-body">
         {/* Verse reference header */}
         <div className="d-flex align-items-center justify-content-between">
