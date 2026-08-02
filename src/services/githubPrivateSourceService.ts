@@ -1,7 +1,7 @@
 import type { BibleData } from '../models/bible';
 
-const PRIVATE_SOURCE_VERSION_CACHE_KEY = 'gitbible:github-private-source-versions';
-const GITHUB_AUTH_STORAGE_KEY = 'gitbible:github-auth';
+const PRIVATE_SOURCE_VERSION_CACHE_KEY = 'marginalia:github-private-source-versions';
+const GITHUB_AUTH_STORAGE_KEY = 'marginalia:github-auth';
 const PRIVATE_SOURCE_VERSION_TTL_MS = 1000 * 60 * 60 * 24;
 
 export interface GitHubPrivateSourceConfigFile {

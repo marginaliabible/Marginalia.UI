@@ -82,7 +82,7 @@ export const usePopupPanel = ({
   const attachPopupWindow = (popup: Window, windowName: string) => {
     popupWindowRef.current = popup;
 
-    popup.document.title = 'GitBible Panel';
+    popup.document.title = 'Marginalia Panel';
     popup.document.body.className = document.body.className;
     popup.document.documentElement.setAttribute('data-theme', theme);
     popup.document.documentElement.setAttribute('data-bs-theme', theme);
@@ -93,9 +93,9 @@ export const usePopupPanel = ({
     popup.document.body.style.display = 'flex';
     popup.document.body.style.flexDirection = 'column';
 
-    const existingRoot = popup.document.getElementById('gitbible-popout-root');
+    const existingRoot = popup.document.getElementById('marginalia-popout-root');
     const root = existingRoot ?? popup.document.createElement('div');
-    root.id = 'gitbible-popout-root';
+    root.id = 'marginalia-popout-root';
     root.style.display = 'flex';
     root.style.flexDirection = 'column';
     root.style.flex = '1 1 auto';
@@ -105,16 +105,16 @@ export const usePopupPanel = ({
       popup.document.body.appendChild(root);
     }
 
-    if (!popup.document.getElementById('gitbible-popout-base')) {
+    if (!popup.document.getElementById('marginalia-popout-base')) {
       const baseStyle = popup.document.createElement('style');
-      baseStyle.id = 'gitbible-popout-base';
+      baseStyle.id = 'marginalia-popout-base';
       baseStyle.textContent = `
         body {
           background: var(--bs-body-bg);
           color: var(--bs-body-color);
         }
 
-        #gitbible-popout-root .popout-panel-shell {
+        #marginalia-popout-root .popout-panel-shell {
           display: flex;
           flex: 1 1 auto;
           flex-direction: column;
@@ -122,27 +122,27 @@ export const usePopupPanel = ({
           max-height: none;
         }
 
-        #gitbible-popout-root .popout-panel-shell.workspace-scroll {
+        #marginalia-popout-root .popout-panel-shell.workspace-scroll {
           height: 100%;
           max-height: none;
           overflow: auto;
         }
 
-        #gitbible-popout-root .popout-panel-shell > .card {
+        #marginalia-popout-root .popout-panel-shell > .card {
           flex: 1 1 auto;
           min-height: 0;
         }
 
-        #gitbible-popout-root .popout-panel-shell .card-body {
+        #marginalia-popout-root .popout-panel-shell .card-body {
           min-height: 0;
         }
 
-        #gitbible-popout-root .popout-panel-shell .search-results-card {
+        #marginalia-popout-root .popout-panel-shell .search-results-card {
           flex: 1 1 auto;
           min-height: 0;
         }
 
-        #gitbible-popout-root .popout-panel-shell .search-results-body {
+        #marginalia-popout-root .popout-panel-shell .search-results-body {
           flex: 1 1 auto;
           min-height: 0;
         }
@@ -177,7 +177,7 @@ export const usePopupPanel = ({
       dispatch(setPanelDetached({ detached: false, panelName: null }));
       setPopupContainer(null);
       popupWindowRef.current = null;
-      sessionStorage.removeItem('gitbible-popout-name');
+      sessionStorage.removeItem('marginalia-popout-name');
     };
 
     popup.addEventListener('beforeunload', handlePopupBeforeUnload);
@@ -187,15 +187,15 @@ export const usePopupPanel = ({
 
     setPopupContainer(root);
     dispatch(setPanelDetached({ detached: true, panelName: windowName }));
-    sessionStorage.setItem('gitbible-popout-name', windowName);
+    sessionStorage.setItem('marginalia-popout-name', windowName);
   };
 
   const openOrReconnectPopup = (forceOpen: boolean) => {
-    const storedName = detachedPanelName ?? sessionStorage.getItem('gitbible-popout-name');
+    const storedName = detachedPanelName ?? sessionStorage.getItem('marginalia-popout-name');
     const windowName =
       storedName && storedName.trim().length > 0
         ? storedName
-        : `gitbible-panel-${Date.now()}`;
+        : `marginalia-panel-${Date.now()}`;
 
     const popupFeatures = buildPopupFeatures();
 
@@ -216,7 +216,7 @@ export const usePopupPanel = ({
 
   // Reconnect popup on mount if session storage indicates one was open
   useEffect(() => {
-    const popupName = sessionStorage.getItem('gitbible-popout-name');
+    const popupName = sessionStorage.getItem('marginalia-popout-name');
     if (!popupName) return;
     openOrReconnectPopup(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -230,7 +230,7 @@ export const usePopupPanel = ({
     if (!popup || popup.closed) {
       dispatch(setPanelDetached({ detached: false, panelName: null }));
       setPopupContainer(null);
-      sessionStorage.removeItem('gitbible-popout-name');
+      sessionStorage.removeItem('marginalia-popout-name');
     }
   }, [isPanelDetached, dispatch]);
 
@@ -254,7 +254,7 @@ export const usePopupPanel = ({
     if (isPanelDetached) {
       dispatch(setPanelDetached({ detached: false, panelName: null }));
       setPopupContainer(null);
-      sessionStorage.removeItem('gitbible-popout-name');
+      sessionStorage.removeItem('marginalia-popout-name');
       popupCleanupRef.current?.();
 
       const popup = popupWindowRef.current;

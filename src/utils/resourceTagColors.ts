@@ -1,4 +1,4 @@
-const TAG_COLOR_STORAGE_KEY = 'gitbible:resource-tag-colors';
+const TAG_COLOR_STORAGE_KEY = 'marginalia:resource-tag-colors';
 const TAG_COLOR_PALETTE = [
   '#0aa7a0', '#f1c40f', '#e84393', '#16a085', '#2ecc71', '#f39c12', '#e67e22', '#2980b9',
   '#1abc9c', '#c0392b', '#27ae60', '#8e44ad', '#d35400', '#3498db', '#7f8c8d', '#9b59b6',

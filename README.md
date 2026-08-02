@@ -1,6 +1,6 @@
-# GitBible
+# Marginalia
 
-GitBible is a browser-only React application for exploring and searching Scripture. The default King James Version is bundled locally and additional translations are fetched directly from the [scrollmapper/bible_databases](https://github.com/scrollmapper/bible_databases/tree/master/formats/json) repository on demand. Translations are cached in IndexedDB for offline reuse, and your last location, search term, and theme preference are stored in `localStorage`.
+Marginalia is a browser-only React application for exploring and searching Scripture. The default King James Version is bundled locally and additional translations are fetched directly from the [scrollmapper/bible_databases](https://github.com/scrollmapper/bible_databases/tree/master/formats/json) repository on demand. Translations are cached in IndexedDB for offline reuse, and your last location, search term, and theme preference are stored in `localStorage`.
 
 ## Features
 
@@ -40,12 +40,12 @@ GitBible is a browser-only React application for exploring and searching Scriptu
 
 ## AWS Integration
 
-GitBible uses one AWS Lambda URL for both GitHub OAuth callback handling and PDF proxying.
+Marginalia uses one AWS Lambda URL for both GitHub OAuth callback handling and PDF proxying.
 
 Set this in your local environment file:
 
 ```dotenv
-VITE_GITBIBLE_AWS_URL=https://your-lambda-function-url.lambda-url.us-east-1.on.aws/
+VITE_MARGINALIA_AWS_URL=https://your-lambda-function-url.lambda-url.us-east-1.on.aws/
 ```
 
 Notes:
@@ -58,17 +58,17 @@ Notes:
 
 - The quick search bar recognizes many standard book abbreviations. If a reference is recognized, a preview card appears before you press **Go**.
 - When the query is not a reference, pressing **Go** performs a full-text search within the active translation.
-- Translation downloads are stored in IndexedDB for 30 days. You can force a fresh copy by clearing browser storage or using devtools to delete the `gitbible-db` database.
+- Translation downloads are stored in IndexedDB for 30 days. You can force a fresh copy by clearing browser storage or using devtools to delete the `marginalia-db` database.
 - Theme preference, last translation, and the most recent verse location persist across browser sessions.
 
 ## Performance Monitoring
 
-GitBible includes built-in cache diagnostics for development and tuning:
+Marginalia includes built-in cache diagnostics for development and tuning:
 
 **View Cache Statistics:**
 Open your browser DevTools console and run:
 ```javascript
-__GITBIBLE_CACHE_STATS__()
+__MARGINALIA_CACHE_STATS__()
 ```
 
 This returns an object with:
@@ -114,7 +114,7 @@ src/
 ## Adding New Data Sources
 
 - Place additional bundled translations in `public/data/bibles/` to ship them with the app.
-- Remote translations must be accessible via raw JSON URLs. Add them to the GitBible dropdown by uploading to GitHub (or any CORS-enabled host) following the same structure as the Scrollmapper data set.
+- Remote translations must be accessible via raw JSON URLs. Add them to the Marginalia dropdown by uploading to GitHub (or any CORS-enabled host) following the same structure as the Scrollmapper data set.
 - Update `public/data/bibles/_settings.json` to register new translations.
 
 ## License Notes

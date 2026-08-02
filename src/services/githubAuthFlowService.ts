@@ -1,7 +1,7 @@
 const GITHUB_CLIENT_ID = "Ov23liiVOv0EIp9hJAAZ";
-const STATE_STORAGE_KEY = "gitbible:github-oauth-state";
-const TOKEN_STORAGE_KEY = "gitbible:github-auth";
-const AUTH_BRIDGE_STORAGE_KEY = "gitbible:github-auth-bridge";
+const STATE_STORAGE_KEY = "marginalia:github-oauth-state";
+const TOKEN_STORAGE_KEY = "marginalia:github-auth";
+const AUTH_BRIDGE_STORAGE_KEY = "marginalia:github-auth-bridge";
 const TOKEN_TTL_MS = 1000 * 60 * 60;
 
 interface StoredGitHubAuthSession {
@@ -137,7 +137,7 @@ export function initializeGitHubAuthFlow(): () => void {
 export function beginGitHubAuthorization(callbackBase: string): { ok: boolean; message?: string } {
   const trimmed = callbackBase.trim();
   if (!trimmed) {
-    return { ok: false, message: "Set VITE_GITBIBLE_AWS_URL before connecting." };
+    return { ok: false, message: "Set VITE_MARGINALIA_AWS_URL before connecting." };
   }
 
   try {

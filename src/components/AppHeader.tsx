@@ -17,7 +17,7 @@ const AppHeader: React.FC<AppHeaderProps> = ({ onOpenSettings }) => {
           />
           <div>
             <div className="d-flex align-items-center gap-2 flex-wrap">
-              <h1 className="display-6 fw-semibold mb-0">GitBible</h1>
+              <h1 className="display-6 fw-semibold mb-0">Marginalia</h1>
               <button
                 type="button"
                 className="btn btn-outline-secondary rounded-circle d-inline-flex align-items-center justify-content-center"

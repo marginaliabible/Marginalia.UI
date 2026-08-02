@@ -2,5 +2,5 @@
 /// <reference types="vite-plugin-svgr/client" />
 
 interface ImportMetaEnv {
-	readonly VITE_GITBIBLE_AWS_URL?: string;
+	readonly VITE_MARGINALIA_AWS_URL?: string;
 }

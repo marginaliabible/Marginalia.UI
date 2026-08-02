@@ -11,7 +11,7 @@ import { parseQuickJump } from '../utils/reference-parser';
 import type { QuickJumpTarget } from '../models/bible';
 import type { SearchHistoryEntry } from '../components/SearchActionDropdown';
 
-const SEARCH_HISTORY_KEY = 'gitbible:search-jump-history';
+const SEARCH_HISTORY_KEY = 'marginalia:search-jump-history';
 const MAX_SEARCH_HISTORY = 50;
 
 interface UseSearchControllerOptions {

@@ -4,7 +4,7 @@ import svgr from 'vite-plugin-svgr';
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '');
-  const tunnelHost = (env.VITE_EXTERNAL_DEV_HOST || 'gitbible.grinn.net').trim().toLowerCase();
+  const tunnelHost = (env.VITE_EXTERNAL_DEV_HOST || 'marginalia.grinn.net').trim().toLowerCase();
   const tunnelOrigin = `https://${tunnelHost}`;
 
   return {

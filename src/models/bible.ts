@@ -54,7 +54,7 @@ export interface TranslationRecord {
   starred: boolean;
 }
 
-export interface GitBibleState {
+export interface MarginaliaState {
   lastTranslationId: string;
   lastTranslationIds?: string[];
   translationRecords?: TranslationRecord[];

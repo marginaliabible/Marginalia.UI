@@ -66,7 +66,7 @@ import { useHashRouteSync } from './hooks/useHashRouteSync';
 import { beginGitHubAuthorization, initializeGitHubAuthFlow } from './services/githubAuthFlowService';
 import './App.scss';
 
-const STATE_CACHE_KEY = 'gitbible:state';
+const STATE_CACHE_KEY = 'marginalia:state';
 
 function App() {
     const formatSourceProbeFailure = (probe: Extract<SourceProbeResult, { ok: false }>): string => {
@@ -647,7 +647,7 @@ function App() {
   const handleContinueGitHubAuth = useCallback(() => {
     setIsLaunchingGitHubAuth(true);
     setGitHubAuthPromptError(null);
-    const callbackBase = (import.meta.env.VITE_GITBIBLE_AWS_URL || '').trim();
+    const callbackBase = (import.meta.env.VITE_MARGINALIA_AWS_URL || '').trim();
     const result = beginGitHubAuthorization(callbackBase);
 
     if (!result.ok) {

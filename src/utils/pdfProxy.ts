@@ -27,7 +27,7 @@ export function buildPdfProxyUrl(resourceUrl: string): string | null {
     return null;
   }
 
-  const proxyBase = normalizeProxyBase(import.meta.env.VITE_GITBIBLE_AWS_URL || "");
+  const proxyBase = normalizeProxyBase(import.meta.env.VITE_MARGINALIA_AWS_URL || "");
 
   if (!proxyBase) {
     return null;

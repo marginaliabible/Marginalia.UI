@@ -6,7 +6,7 @@ import type {
   ArtifactType,
   RepositoryType,
   BibleTranslationMeta,
-  GitBibleState,
+  MarginaliaState,
   SearchResultSet
 } from '../models/bible';
 import { SearchMatch } from '../models/bible';
@@ -142,8 +142,8 @@ const LOCAL_TRANSLATION_ID = 'KJV';
 const BIBLE_DATA_PATH = 'data/bibles';
 const SETTINGS_PATH = `${BIBLE_DATA_PATH}/_settings.json`;
 const LOCAL_TRANSLATION_SOURCE = `${BIBLE_DATA_PATH}/${LOCAL_TRANSLATION_ID}.json`;
-const META_CACHE_KEY = 'gitbible:translation-meta';
-const STATE_CACHE_KEY = 'gitbible:state';
+const META_CACHE_KEY = 'marginalia:translation-meta';
+const STATE_CACHE_KEY = 'marginalia:state';
 const REMOTE_TTL_MS = 1000 * 60 * 60 * 24 * 30; // 30 days
 const SEARCH_LIMIT = 5000;
 const META_TTL_MS = 1000 * 60 * 60 * 24 * 7; // 7 days
@@ -426,7 +426,7 @@ class BibleService {
 
     // Expose stats on window for dev inspection
     if (typeof window !== 'undefined') {
-      (window as any).__GITBIBLE_CACHE_STATS__ = () => ({
+      (window as any).__MARGINALIA_CACHE_STATS__ = () => ({
         ...this.cacheStats,
         chapterCacheSize: this.chapterCache.size,
         verseCacheSize: this.verseCache.size,
@@ -1098,7 +1098,7 @@ class BibleService {
     };
   }
 
-  readState(): GitBibleState {
+  readState(): MarginaliaState {
     if (typeof window === 'undefined') {
       return { lastTranslationId: LOCAL_TRANSLATION_ID, lastTranslationIds: [LOCAL_TRANSLATION_ID] };
     }
@@ -1109,7 +1109,7 @@ class BibleService {
         return { lastTranslationId: LOCAL_TRANSLATION_ID, lastTranslationIds: [LOCAL_TRANSLATION_ID] };
       }
 
-      const parsed = JSON.parse(raw) as GitBibleState;
+      const parsed = JSON.parse(raw) as MarginaliaState;
       if (!parsed.lastTranslationId) {
         parsed.lastTranslationId = LOCAL_TRANSLATION_ID;
       }
@@ -1181,13 +1181,13 @@ class BibleService {
     }
   }
 
-  persistState(update: Partial<GitBibleState>): GitBibleState {
+  persistState(update: Partial<MarginaliaState>): MarginaliaState {
     if (typeof window === 'undefined') {
       return { lastTranslationId: LOCAL_TRANSLATION_ID, lastTranslationIds: [LOCAL_TRANSLATION_ID] };
     }
 
     const current = this.readState();
-    const next: GitBibleState = { ...current, ...update };
+    const next: MarginaliaState = { ...current, ...update };
     if (!next.lastTranslationIds || next.lastTranslationIds.length === 0) {
       next.lastTranslationIds = [next.lastTranslationId || LOCAL_TRANSLATION_ID];
     }
@@ -1324,7 +1324,7 @@ class BibleService {
 
   private async getDatabase(): Promise<IDBPDatabase<BibleDB>> {
     if (!this.dbPromise) {
-      this.dbPromise = openDB<BibleDB>('gitbible-db', 4, {
+      this.dbPromise = openDB<BibleDB>('marginalia-db', 4, {
         upgrade(db) {
           if (!db.objectStoreNames.contains('translations')) {
             db.createObjectStore('translations');

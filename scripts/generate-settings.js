@@ -89,7 +89,7 @@ async function loadReadme() {
 }
 
 async function fetchJson(url) {
-  const res = await fetch(url, { headers: { 'User-Agent': 'gitbible-settings-generator' } });
+  const res = await fetch(url, { headers: { 'User-Agent': 'marginalia-settings-generator' } });
   if (!res.ok) {
     throw new Error(`Failed to fetch ${url}: ${res.status}`);
   }
@@ -97,7 +97,7 @@ async function fetchJson(url) {
 }
 
 async function fetchText(url) {
-  const res = await fetch(url, { headers: { 'User-Agent': 'gitbible-settings-generator' } });
+  const res = await fetch(url, { headers: { 'User-Agent': 'marginalia-settings-generator' } });
   if (!res.ok) {
     throw new Error(`Failed to fetch ${url}: ${res.status}`);
   }

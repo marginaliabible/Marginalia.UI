@@ -8,7 +8,7 @@
 	- Summary: Generated Angular workspace in-place with Angular CLI 18 using routing, strict mode, and SCSS styling.
 
 - [x] Customize the Project
-	- Summary: Implemented GitBible UI, Bible/translation services, theming, quick search, and bundled KJV data.
+	- Summary: Implemented Marginalia UI, Bible/translation services, theming, quick search, and bundled KJV data.
 
 - [x] Install Required Extensions
 	- Summary: No extensions requested by project setup info.
@@ -22,7 +22,7 @@
 - [ ] Launch the Project
 
 - [x] Ensure Documentation is Complete
-	- Summary: README refreshed with GitBible details and instruction comments removed.
+	- Summary: README refreshed with Marginalia details and instruction comments removed.
 - Work through each checklist item systematically.
 - Keep communication concise and focused.
 - Follow development best practices.
