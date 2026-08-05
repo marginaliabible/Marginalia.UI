@@ -40,19 +40,48 @@ Marginalia is a browser-only React application for exploring and searching Scrip
 
 ## AWS Integration
 
-Marginalia uses one AWS Lambda URL for both GitHub OAuth callback handling and PDF proxying.
+Marginalia uses one AWS Lambda URL for GitHub OAuth callback handling, PDF proxying, and federated token exchange (Google + Microsoft).
 
 Set this in your local environment file:
 
 ```dotenv
-VITE_MARGINALIA_AWS_URL=https://your-lambda-function-url.lambda-url.us-east-1.on.aws/
+VITE_AUTH_SERVICE_URL=https://your-lambda-function-url.lambda-url.us-east-1.on.aws/
 ```
 
 Notes:
 
 - This single URL is used when starting GitHub authorization.
 - The PDF viewer also builds its proxy URL from the same base.
+- Google and Microsoft sign-in token exchange is always brokered through this Lambda.
 - If you change the Lambda URL, update this value and restart Vite.
+
+## Account Sync Configuration
+
+Marginalia supports federated account login for configuration sync with Google and Microsoft.
+
+Add provider client IDs to your local frontend environment file:
+
+```dotenv
+VITE_GOOGLE_CLIENT_ID=your-google-oauth-client-id
+VITE_MICROSOFT_CLIENT_ID=your-microsoft-oauth-client-id
+```
+
+Notes:
+
+- These IDs are required for the header account icon sign-in flow.
+- Client secrets are not stored in the browser app.
+- The Lambda service must be configured with provider secrets/server credentials.
+
+Lambda environment variables required for brokered exchange:
+
+```dotenv
+GOOGLE_CLIENT_ID=your-google-oauth-client-id
+GOOGLE_CLIENT_SECRET=your-google-oauth-client-secret
+MICROSOFT_CLIENT_ID=your-microsoft-app-client-id
+MICROSOFT_CLIENT_SECRET=your-microsoft-app-client-secret
+MICROSOFT_TENANT=common
+```
+- Configuration sync currently targets Google and Microsoft only.
 
 ## Usage Tips
 

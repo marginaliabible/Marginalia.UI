@@ -137,7 +137,7 @@ export function initializeGitHubAuthFlow(): () => void {
 export function beginGitHubAuthorization(callbackBase: string): { ok: boolean; message?: string } {
   const trimmed = callbackBase.trim();
   if (!trimmed) {
-    return { ok: false, message: "Set VITE_MARGINALIA_AWS_URL before connecting." };
+    return { ok: false, message: "Set VITE_AUTH_SERVICE_URL before connecting." };
   }
 
   try {

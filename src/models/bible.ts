@@ -54,6 +54,17 @@ export interface TranslationRecord {
   starred: boolean;
 }
 
+export type FederatedProvider = 'google' | 'microsoft';
+
+export interface LinkedCloudAccount {
+  provider: FederatedProvider;
+  providerAccountId: string;
+  email?: string;
+  displayName?: string;
+  avatarUrl?: string;
+  linkedAt: number;
+}
+
 export interface MarginaliaState {
   lastTranslationId: string;
   lastTranslationIds?: string[];
@@ -66,6 +77,9 @@ export interface MarginaliaState {
   sourceUrls?: string[];
   resourceHiddenTags?: string[];
   theme?: ThemePreference;
+  cloudLinkedAccounts?: LinkedCloudAccount[];
+  cloudConfigUpdatedAt?: number;
+  cloudConfigLastSyncedAt?: number;
 }
 
 export type ThemePreference = 'light' | 'dark';

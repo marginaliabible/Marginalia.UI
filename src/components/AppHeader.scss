@@ -3,6 +3,12 @@
   flex-shrink: 0;
 }
 
+.app-header-controls .btn {
+  width: 2.25rem;
+  height: 2.25rem;
+  padding: 0;
+}
+
 :root[data-theme='dark'] .app-header-icon {
   color: var(--bs-heading-color);
 }

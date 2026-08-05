@@ -92,7 +92,7 @@ function storeGitHubAuthSession(token: string): StoredGitHubAuthSession {
 }
 
 export default function GitHubAuth() {
-  const callbackBase = (import.meta.env.VITE_MARGINALIA_AWS_URL || "").trim();
+  const callbackBase = (import.meta.env.VITE_AUTH_SERVICE_URL || "").trim();
 
   const [token, setToken] = useState<string | null>(null);
   const [tokenExpiresAt, setTokenExpiresAt] = useState<number | null>(null);
@@ -165,7 +165,7 @@ export default function GitHubAuth() {
 
   const handleConnect = useCallback(() => {
     if (!isConfigured) {
-      setStatusMessage("Set VITE_MARGINALIA_AWS_URL before connecting.");
+      setStatusMessage("Set VITE_AUTH_SERVICE_URL before connecting.");
       return;
     }
 
@@ -257,7 +257,7 @@ export default function GitHubAuth() {
 
         {!isConfigured && (
           <div className="alert alert-warning mb-0" role="alert">
-            Missing VITE_MARGINALIA_AWS_URL in the frontend environment.
+            Missing VITE_AUTH_SERVICE_URL in the frontend environment.
           </div>
         )}
 

@@ -10,6 +10,7 @@ interface UseHashRouteSyncOptions {
   selectedBook: string | null;
   selectedChapter: number;
   selectedTranslationId: string;
+  selectedVerses: number[];
 }
 
 export const useHashRouteSync = ({
@@ -18,10 +19,27 @@ export const useHashRouteSync = ({
   selectedBook,
   selectedChapter,
   selectedTranslationId,
+  selectedVerses,
 }: UseHashRouteSyncOptions): void => {
   const dispatch = useAppDispatch();
   const hasSyncedChapterHashRef = useRef(false);
   const suppressNextHashApplyRef = useRef(false);
+  const lastSelectedChapterKeyRef = useRef<string | null>(null);
+  const selectedBookRef = useRef<string | null>(selectedBook);
+  const selectedChapterRef = useRef<number>(selectedChapter);
+  const selectedTranslationIdRef = useRef<string>(selectedTranslationId);
+
+  useEffect(() => {
+    selectedBookRef.current = selectedBook;
+  }, [selectedBook]);
+
+  useEffect(() => {
+    selectedChapterRef.current = selectedChapter;
+  }, [selectedChapter]);
+
+  useEffect(() => {
+    selectedTranslationIdRef.current = selectedTranslationId;
+  }, [selectedTranslationId]);
 
   const applyHashRouteFromLocation = useCallback(async () => {
     if (typeof window === 'undefined' || !currentBible) {
@@ -40,9 +58,16 @@ export const useHashRouteSync = ({
 
     const chapterExists = book.chapters.some((entry) => entry.chapter === route.chapter);
     const nextChapter = chapterExists ? route.chapter : (book.chapters[0]?.chapter ?? 1);
+    const currentSelectedBook = selectedBookRef.current;
+    const currentSelectedChapter = selectedChapterRef.current;
+    const didChangeReference = currentSelectedBook !== book.name || currentSelectedChapter !== nextChapter;
 
-    dispatch(setSelectedBook(book.name));
-    dispatch(setSelectedChapter(nextChapter));
+    if (currentSelectedBook !== book.name) {
+      dispatch(setSelectedBook(book.name));
+    }
+    if (currentSelectedChapter !== nextChapter) {
+      dispatch(setSelectedChapter(nextChapter));
+    }
 
     if (route.verse) {
       const chapterEntry = book.chapters.find((entry) => entry.chapter === nextChapter);
@@ -50,7 +75,7 @@ export const useHashRouteSync = ({
 
       if (verseExists) {
         dispatch(setVerseSelection({
-          translationId: selectedTranslationId,
+          translationId: selectedTranslationIdRef.current,
           verses: [route.verse],
           anchorVerse: route.verse,
         }));
@@ -59,8 +84,10 @@ export const useHashRouteSync = ({
       }
     }
 
-    dispatch(clearVerseSelection());
-  }, [currentBible, dispatch, selectedTranslationId]);
+    if (didChangeReference) {
+      dispatch(clearVerseSelection());
+    }
+  }, [currentBible, dispatch]);
 
   useEffect(() => {
     if (!ready || !currentBible || typeof window === 'undefined') {
@@ -87,19 +114,27 @@ export const useHashRouteSync = ({
       return;
     }
 
+    const selectedVerse = selectedVerses.find((verse) => Number.isInteger(verse) && verse > 0);
+    const nextChapterHash = buildHashRoute({ book: selectedBook, chapter: selectedChapter });
+    const nextVerseHash = selectedVerse
+      ? buildHashRoute({ book: selectedBook, chapter: selectedChapter, verse: selectedVerse }, true)
+      : nextChapterHash;
+    const chapterKey = `${selectedBook}::${selectedChapter}`;
+
     const parsedCurrentHash = parseHashRoute(window.location.hash);
     const keepCurrentVerseHash =
       parsedCurrentHash?.book === selectedBook
       && parsedCurrentHash.chapter === selectedChapter
-      && typeof parsedCurrentHash.verse === 'number';
+      && parsedCurrentHash.verse === selectedVerse;
     if (keepCurrentVerseHash) {
       hasSyncedChapterHashRef.current = true;
+      lastSelectedChapterKeyRef.current = chapterKey;
       return;
     }
 
-    const nextHash = buildHashRoute({ book: selectedBook, chapter: selectedChapter });
-    if (window.location.hash === nextHash) {
+    if (window.location.hash === nextVerseHash) {
       hasSyncedChapterHashRef.current = true;
+      lastSelectedChapterKeyRef.current = chapterKey;
       return;
     }
 
@@ -107,13 +142,37 @@ export const useHashRouteSync = ({
       window.history.replaceState(
         window.history.state,
         '',
-        `${window.location.pathname}${window.location.search}${nextHash}`
+        `${window.location.pathname}${window.location.search}${nextVerseHash}`
       );
       hasSyncedChapterHashRef.current = true;
+      lastSelectedChapterKeyRef.current = chapterKey;
       return;
     }
 
-    suppressNextHashApplyRef.current = true;
-    window.location.hash = nextHash;
-  }, [ready, selectedBook, selectedChapter]);
+    const chapterChanged = lastSelectedChapterKeyRef.current !== chapterKey;
+
+    if (chapterChanged) {
+      if (window.location.hash !== nextChapterHash) {
+        suppressNextHashApplyRef.current = true;
+        window.location.hash = nextChapterHash;
+      }
+
+      if (nextVerseHash !== nextChapterHash && window.location.hash !== nextVerseHash) {
+        window.history.replaceState(
+          window.history.state,
+          '',
+          `${window.location.pathname}${window.location.search}${nextVerseHash}`
+        );
+      }
+
+      lastSelectedChapterKeyRef.current = chapterKey;
+      return;
+    }
+
+    window.history.replaceState(
+      window.history.state,
+      '',
+      `${window.location.pathname}${window.location.search}${nextVerseHash}`
+    );
+  }, [ready, selectedBook, selectedChapter, selectedVerses]);
 };

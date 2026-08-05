@@ -7,6 +7,7 @@ import DetachedPanelPortal from './components/DetachedPanelPortal';
 import LoadingStatus from './components/LoadingStatus';
 import SettingsModal from './components/SettingsModal';
 import GitHubAuthPromptModal from './components/GitHubAuthPromptModal';
+import AccountControl from './components/AccountControl';
 import { useCallback, useEffect, useMemo, useRef, useState, ChangeEvent } from 'react';
 import { useAppDispatch, useAppSelector } from './store/hooks';
 import {
@@ -488,6 +489,7 @@ function App() {
     selectedBook,
     selectedChapter,
     selectedTranslationId,
+    selectedVerses,
   });
 
   const translationMetadataById = useMemo(
@@ -647,7 +649,7 @@ function App() {
   const handleContinueGitHubAuth = useCallback(() => {
     setIsLaunchingGitHubAuth(true);
     setGitHubAuthPromptError(null);
-    const callbackBase = (import.meta.env.VITE_MARGINALIA_AWS_URL || '').trim();
+    const callbackBase = (import.meta.env.VITE_AUTH_SERVICE_URL || '').trim();
     const result = beginGitHubAuthorization(callbackBase);
 
     if (!result.ok) {
@@ -839,7 +841,10 @@ function App() {
   return (
     <>
       <div className={`container app-shell ${useWideLayout ? 'app-shell-wide' : ''}`}>
-        <AppHeader onOpenSettings={openSettingsModal} />
+        <AppHeader
+          onOpenSettings={openSettingsModal}
+          accountControl={<AccountControl />}
+        />
 
         <SearchBar
           searchInputRef={searchInputRef}
