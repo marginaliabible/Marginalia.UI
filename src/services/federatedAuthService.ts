@@ -40,6 +40,29 @@ interface MicrosoftProfileResponse {
   mail?: string;
 }
 
+interface OAuthErrorPayload {
+  error?: string;
+  error_description?: string;
+}
+
+class FederatedTokenRefreshError extends Error {
+  provider: FederatedProvider;
+  status: number;
+  responseBody: string;
+  oauthError?: string;
+  oauthErrorDescription?: string;
+
+  constructor(provider: FederatedProvider, status: number, responseBody: string, payload?: OAuthErrorPayload) {
+    super(`${provider === 'google' ? 'Google' : 'Microsoft'} token refresh failed via broker (${status}): ${responseBody}`);
+    this.name = 'FederatedTokenRefreshError';
+    this.provider = provider;
+    this.status = status;
+    this.responseBody = responseBody;
+    this.oauthError = payload?.error;
+    this.oauthErrorDescription = payload?.error_description;
+  }
+}
+
 export interface FederatedAccountProfile {
   providerAccountId: string;
   displayName?: string;
@@ -210,6 +233,38 @@ function buildTokenRefreshEndpoint(baseUrl: string): string {
   endpoint.search = '';
   endpoint.hash = '';
   return endpoint.toString();
+}
+
+function tryParseOAuthErrorPayload(value: string): OAuthErrorPayload | null {
+  try {
+    const parsed = JSON.parse(value) as OAuthErrorPayload;
+    if (!parsed || typeof parsed !== 'object') {
+      return null;
+    }
+
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function shouldRemoveSessionAfterRefreshFailure(error: unknown): boolean {
+  if (!(error instanceof FederatedTokenRefreshError)) {
+    return false;
+  }
+
+  const oauthError = (error.oauthError || '').toLowerCase();
+  const oauthDescription = (error.oauthErrorDescription || '').toLowerCase();
+
+  if (oauthError === 'invalid_grant' || oauthError === 'invalid_request') {
+    return true;
+  }
+
+  if (oauthDescription.includes('must sign in again') || oauthDescription.includes('grant is expired')) {
+    return true;
+  }
+
+  return error.status === 400 && oauthDescription.includes('interaction_required');
 }
 
 function isSessionShape(value: unknown): value is FederatedSession {
@@ -466,7 +521,8 @@ async function refreshProviderToken(
 
   if (!response.ok) {
     const text = await response.text();
-    throw new Error(`${provider === 'google' ? 'Google' : 'Microsoft'} token refresh failed via broker (${response.status}): ${text}`);
+    const payload = tryParseOAuthErrorPayload(text);
+    throw new FederatedTokenRefreshError(provider, response.status, text, payload || undefined);
   }
 
   return (await response.json()) as GoogleTokenResponse | MicrosoftTokenResponse;
@@ -511,8 +567,13 @@ export async function getFreshFederatedSessions(): Promise<StoredFederatedSessio
         scope: refreshed.scope || existing.scope,
       };
       changed = true;
-    } catch {
-      // If refresh fails, keep existing token until caller attempts API usage.
+    } catch (error) {
+      if (shouldRemoveSessionAfterRefreshFailure(error)) {
+        delete sessions[provider];
+        changed = true;
+      }
+
+      // If refresh fails transiently, keep existing token until caller attempts API usage.
     }
   }
 

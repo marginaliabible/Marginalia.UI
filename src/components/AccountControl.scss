@@ -2,7 +2,7 @@
   display: inline-flex;
 }
 
-.account-trigger {
+.btn.account-trigger {
   width: 2.25rem;
   height: 2.25rem;
   overflow: hidden;
@@ -10,8 +10,8 @@
 }
 
 .account-avatar-image {
-  width: 100%;
-  height: 100%;
+  width: 2.25rem;
+  height: 2.25rem;
   object-fit: cover;
   border-radius: 999px;
 }
@@ -51,79 +51,119 @@
   gap: 0.75rem;
 }
 
-.account-brand-btn {
+.account-provider-accordion {
+  border: 1px solid var(--bs-border-color-translucent);
+  border-radius: 0.75rem;
+  background: var(--bs-body-bg);
+  overflow: hidden;
+}
+
+.account-provider-accordion-toggle {
   width: 100%;
-  min-height: 2.5rem;
-  display: inline-flex;
+  border: 0;
+  background: transparent;
+  display: flex;
   align-items: center;
-  justify-content: center;
+  justify-content: space-between;
   gap: 0.625rem;
-  border-radius: 0.5rem;
-  border: 1px solid #dadce0;
-  background: #fff;
-  color: #3c4043;
+  padding: 0.75rem;
+  color: var(--bs-emphasis-color);
   font-size: 0.875rem;
-  font-weight: 500;
+  font-weight: 600;
   line-height: 1.25;
-  transition: background-color 120ms ease, box-shadow 120ms ease, border-color 120ms ease;
+  text-align: left;
+  transition: background-color 120ms ease, box-shadow 120ms ease;
 }
 
-.account-brand-btn:hover {
-  background: #f8f9fa;
-  border-color: #c7c8cc;
+.account-provider-accordion-toggle:hover {
+  background: var(--bs-secondary-bg);
 }
 
-.account-brand-btn:focus-visible {
+.account-provider-accordion-toggle:focus-visible {
   outline: none;
   box-shadow: 0 0 0 0.2rem rgba(13, 110, 253, 0.2);
 }
 
-.account-brand-btn-icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 1rem;
-}
-
-.account-brand-btn-label {
-  white-space: nowrap;
-}
-
-.account-brand-btn-google .account-brand-btn-icon {
-  color: #db4437;
-}
-
-.account-brand-btn-microsoft .account-brand-btn-icon {
-  color: #00a4ef;
-}
-
-.account-provider-hero {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.75rem;
-  padding: 0.75rem;
-  border: 1px solid var(--bs-border-color-translucent);
-  border-radius: 0.75rem;
-  background: var(--bs-body-bg);
-}
-
-.account-provider-hero-main {
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0.125rem;
-}
-
-.account-provider-hero-title {
+.account-provider-accordion-toggle-label {
   display: inline-flex;
   align-items: center;
   gap: 0.5rem;
-  font-size: 0.95rem;
+}
+
+.account-provider-connected-icon {
+  color: #198754;
+  font-size: 0.8rem;
+  transform: translateY(2px);
+}
+
+.account-provider-accordion-chevron {
+  color: var(--bs-secondary-color);
+}
+
+.account-provider-accordion-panel {
+  border-top: 1px solid var(--bs-border-color-translucent);
+  padding: 0.875rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.account-provider-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.65rem;
+  margin: 0;
+}
+
+.account-provider-option input[type='checkbox'] {
+  margin-top: 0.3rem;
+}
+
+.account-provider-option-content {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.account-provider-option-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.925rem;
   font-weight: 600;
 }
 
-.account-provider-hero-subtitle {
+.account-provider-option-description {
+  color: var(--bs-secondary-color);
+  font-size: 0.8rem;
+  line-height: 1.35;
+}
+
+button.account-provider-modify-link {
+  padding: 0;
+  font-size: 0.8rem;
+  line-height: 1.1;
+}
+
+.account-provider-identity {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  padding: 0.65rem;
+  border: 1px solid var(--bs-border-color-translucent);
+  border-radius: 0.5rem;
+  background: var(--bs-tertiary-bg);
+}
+
+.account-provider-accordion .fa-google {
+  color: #db4437;
+}
+
+.account-provider-accordion .fa-microsoft {
+  color: #00a4ef;
+}
+
+.account-provider-header-subtitle {
   display: block;
   color: var(--bs-secondary-color);
   font-size: 0.875rem;

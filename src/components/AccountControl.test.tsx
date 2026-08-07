@@ -1,9 +1,10 @@
 import React from 'react';
-import { act, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import AccountControl from './AccountControl';
 import { useAppDispatch, useAppSelector } from '../store/hooks';
 import { bibleService } from '../services/bibleService';
 import {
+  beginFederatedAuthorization,
   completeFederatedAuthorizationFromUrl,
   getFreshFederatedSessions,
   getStoredFederatedSessions,
@@ -58,6 +59,7 @@ const mockUseAppDispatch = useAppDispatch as unknown as jest.Mock;
 const mockUseAppSelector = useAppSelector as unknown as jest.Mock;
 const mockReadState = bibleService.readState as jest.Mock;
 const mockPersistState = bibleService.persistState as jest.Mock;
+const mockBeginAuth = beginFederatedAuthorization as jest.Mock;
 const mockCompleteAuth = completeFederatedAuthorizationFromUrl as jest.Mock;
 const mockGetStoredSessions = getStoredFederatedSessions as jest.Mock;
 const mockGetFreshSessions = getFreshFederatedSessions as jest.Mock;
@@ -120,10 +122,33 @@ function linkedBothProviders() {
   ];
 }
 
+function openAccountModal() {
+  fireEvent.click(screen.getByRole('button', { name: /open account controls/i }));
+}
+
+function expandProvider(provider: 'Google' | 'Microsoft') {
+  fireEvent.click(screen.getByRole('button', { name: new RegExp(`(Connect|Connected) to ${provider}`, 'i') }));
+}
+
+function getProviderCheckbox(id: 'google-sync-settings' | 'google-sync-files' | 'microsoft-sync-settings' | 'microsoft-sync-files') {
+  return document.getElementById(id) as HTMLInputElement;
+}
+
+async function renderAccountControl() {
+  let view: ReturnType<typeof render> | null = null;
+  await act(async () => {
+    view = render(<AccountControl />);
+    await Promise.resolve();
+  });
+
+  return view as unknown as ReturnType<typeof render>;
+}
+
 describe('AccountControl', () => {
   beforeEach(() => {
     jest.useRealTimers();
     jest.clearAllMocks();
+    window.localStorage.clear();
 
     mockUseAppDispatch.mockReturnValue(jest.fn());
     mockUseAppSelector.mockImplementation((selector: (state: any) => any) => selector({ ui: baseUiState }));
@@ -134,6 +159,7 @@ describe('AccountControl', () => {
     }));
 
     mockCompleteAuth.mockResolvedValue({ handled: false });
+    mockBeginAuth.mockResolvedValue(undefined);
     mockReadCloudConfigForSession.mockResolvedValue(null);
     mockWriteCloudConfigForSession.mockResolvedValue(undefined);
     mockGetFreshSessions.mockResolvedValue({});
@@ -159,7 +185,7 @@ describe('AccountControl', () => {
     mockGetStoredSessions.mockReturnValue({ microsoft: msSession });
     mockGetFreshSessions.mockResolvedValue({ microsoft: msSession });
 
-    render(<AccountControl />);
+    await renderAccountControl();
 
     await waitFor(() => {
       expect(screen.getByText('Reconnect required')).toBeInTheDocument();
@@ -179,13 +205,13 @@ describe('AccountControl', () => {
     mockGetStoredSessions.mockReturnValue({ microsoft: msSession });
     mockGetFreshSessions.mockResolvedValue({ microsoft: msSession });
 
-    const first = render(<AccountControl />);
+    const first = await renderAccountControl();
     await waitFor(() => {
       expect(screen.getByText(/Reconnect Google on this device/i)).toBeInTheDocument();
     });
     first.unmount();
 
-    render(<AccountControl />);
+    await renderAccountControl();
     await waitFor(() => {
       expect(screen.getByText(/Reconnect Google on this device/i)).toBeInTheDocument();
     });
@@ -245,7 +271,7 @@ describe('AccountControl', () => {
       },
     });
 
-    render(<AccountControl />);
+    await renderAccountControl();
 
     await waitFor(() => {
       expect(mockReadCloudConfigForSession).toHaveBeenCalled();
@@ -292,7 +318,7 @@ describe('AccountControl', () => {
     });
     mockReadCloudConfigForSession.mockResolvedValue(null);
 
-    render(<AccountControl />);
+    await renderAccountControl();
 
     await waitFor(() => {
       expect(mockReadCloudConfigForSession).toHaveBeenCalled();
@@ -312,12 +338,132 @@ describe('AccountControl', () => {
   it('does not attempt cloud writes when no linked accounts exist', async () => {
     jest.useFakeTimers();
 
-    render(<AccountControl />);
+    await renderAccountControl();
 
     await act(async () => {
       jest.advanceTimersByTime(2000);
     });
 
     expect(mockWriteCloudConfigForSession).not.toHaveBeenCalled();
+  });
+
+  it('requires at least one option before connect is enabled', async () => {
+    await renderAccountControl();
+
+    openAccountModal();
+    expandProvider('Google');
+
+    const connectButton = screen.getByRole('button', { name: 'Connect' });
+    expect(connectButton).toBeDisabled();
+
+    fireEvent.click(getProviderCheckbox('google-sync-settings'));
+    expect(connectButton).toBeEnabled();
+
+    fireEvent.click(connectButton);
+    expect(mockBeginAuth).toHaveBeenCalledWith('google');
+  });
+
+  it('shows disabled options and reconnect action when linked provider is missing local session', async () => {
+    mockReadState.mockReturnValue({
+      lastTranslationId: 'KJV',
+      lastTranslationIds: ['KJV'],
+      cloudLinkedAccounts: [
+        {
+          provider: 'google',
+          providerAccountId: 'g-user-1',
+          email: 'g@example.com',
+          linkedAt: Date.now() - 5000,
+        },
+      ],
+      cloudConfigUpdatedAt: Date.now() - 10_000,
+      cloudConfigLastSyncedAt: Date.now() - 10_000,
+    });
+
+    mockGetStoredSessions.mockReturnValue({});
+    mockGetFreshSessions.mockResolvedValue({});
+
+    render(<AccountControl />);
+
+    await waitFor(() => {
+      expect(screen.getByText(/Reconnect Google on this device/i)).toBeInTheDocument();
+    });
+
+    expandProvider('Google');
+
+    const syncSettingsCheckbox = getProviderCheckbox('google-sync-settings');
+    const syncFilesCheckbox = getProviderCheckbox('google-sync-files');
+
+    expect(syncSettingsCheckbox).toBeDisabled();
+    expect(syncFilesCheckbox).toBeDisabled();
+    expect(syncSettingsCheckbox).toHaveAttribute('title', 'Reconnect to modify');
+    expect(syncFilesCheckbox).toHaveAttribute('title', 'Reconnect to modify');
+    expect(screen.getByRole('button', { name: 'Reconnect' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Modify' })).toBeInTheDocument();
+  });
+
+  it('asks for confirmation before disconnect when file sync was selected', async () => {
+    const confirmSpy = jest.spyOn(window, 'confirm').mockReturnValue(false);
+
+    mockReadState.mockReturnValue({
+      lastTranslationId: 'KJV',
+      lastTranslationIds: ['KJV'],
+      cloudLinkedAccounts: [],
+      cloudConfigUpdatedAt: Date.now() - 10_000,
+      cloudConfigLastSyncedAt: Date.now() - 10_000,
+    });
+    mockGetStoredSessions.mockReturnValue({});
+    mockGetFreshSessions.mockResolvedValue({});
+
+    const firstRender = await renderAccountControl();
+    openAccountModal();
+    expandProvider('Google');
+    fireEvent.click(getProviderCheckbox('google-sync-files'));
+    fireEvent.click(screen.getByRole('button', { name: 'Connect' }));
+    expect(mockBeginAuth).toHaveBeenCalledWith('google');
+    firstRender.unmount();
+
+    mockReadState.mockReturnValue({
+      lastTranslationId: 'KJV',
+      lastTranslationIds: ['KJV'],
+      cloudLinkedAccounts: [
+        {
+          provider: 'google',
+          providerAccountId: 'g-user-1',
+          email: 'g@example.com',
+          linkedAt: Date.now() - 5000,
+        },
+      ],
+      cloudConfigUpdatedAt: Date.now() - 10_000,
+      cloudConfigLastSyncedAt: Date.now() - 10_000,
+    });
+
+    mockGetStoredSessions.mockReturnValue({ google: googleSession });
+    mockGetFreshSessions.mockResolvedValue({ google: googleSession });
+
+    await renderAccountControl();
+    openAccountModal();
+    expandProvider('Google');
+
+    expect(screen.getByRole('button', { name: /Connected to Google/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Disconnect' })).toHaveClass('btn-danger');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Disconnect' }));
+
+    expect(confirmSpy).toHaveBeenCalledWith(
+      'Your synchronization data will be kept for 30 days. If you reconnect after 30 days than you may incur additional data usage to reprocess your files. Are you sure you wish to disconnect this service from file sync?'
+    );
+
+    expect(mockPersistState).not.toHaveBeenCalledWith(expect.objectContaining({
+      cloudLinkedAccounts: [],
+    }));
+
+    confirmSpy.mockReturnValue(true);
+    fireEvent.click(screen.getByRole('button', { name: 'Disconnect' }));
+
+    expect(mockPersistState).toHaveBeenCalledWith(expect.objectContaining({
+      cloudLinkedAccounts: [],
+    }));
+
+    confirmSpy.mockRestore();
   });
 });

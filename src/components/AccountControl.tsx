@@ -23,11 +23,91 @@ import './AccountControl.scss';
 
 type SyncState = 'idle' | 'syncing' | 'error';
 const THIRTY_MINUTES_MS = 30 * 60 * 1000;
+const PROVIDERS: FederatedProvider[] = ['google', 'microsoft'];
+const DISCONNECT_FILE_SYNC_CONFIRMATION = 'Your synchronization data will be kept for 30 days. If you reconnect after 30 days than you may incur additional data usage to reprocess your files. Are you sure you wish to disconnect this service from file sync?';
+const PROVIDER_SYNC_PREFERENCES_STORAGE_KEY = 'marginalia:provider-sync-preferences';
 
 const PROVIDER_LABEL: Record<FederatedProvider, string> = {
   google: 'Google',
   microsoft: 'Microsoft',
 };
+
+const PROVIDER_ICON: Record<FederatedProvider, string> = {
+  google: 'fa-google',
+  microsoft: 'fa-microsoft',
+};
+
+interface ProviderSyncPreferences {
+  syncSettings: boolean;
+  syncFiles: boolean;
+}
+
+type ProviderSyncPreferenceMap = Record<FederatedProvider, ProviderSyncPreferences>;
+
+const createDefaultProviderPreferences = (): ProviderSyncPreferenceMap => ({
+  google: {
+    syncSettings: false,
+    syncFiles: false,
+  },
+  microsoft: {
+    syncSettings: false,
+    syncFiles: false,
+  },
+});
+
+function isProviderSyncPreferences(value: unknown): value is ProviderSyncPreferences {
+  if (!value || typeof value !== 'object') {
+    return false;
+  }
+
+  const candidate = value as Partial<ProviderSyncPreferences>;
+  return typeof candidate.syncSettings === 'boolean' && typeof candidate.syncFiles === 'boolean';
+}
+
+function normalizeStoredProviderSyncPreferences(value: unknown): Partial<ProviderSyncPreferenceMap> {
+  if (!value || typeof value !== 'object') {
+    return {};
+  }
+
+  const source = value as Partial<Record<FederatedProvider, unknown>>;
+  const normalized: Partial<ProviderSyncPreferenceMap> = {};
+
+  for (const provider of PROVIDERS) {
+    const candidate = source[provider];
+    if (!isProviderSyncPreferences(candidate)) {
+      continue;
+    }
+
+    normalized[provider] = candidate;
+  }
+
+  return normalized;
+}
+
+function readStoredProviderSyncPreferences(): Partial<ProviderSyncPreferenceMap> {
+  if (typeof window === 'undefined') {
+    return {};
+  }
+
+  try {
+    const raw = window.localStorage.getItem(PROVIDER_SYNC_PREFERENCES_STORAGE_KEY);
+    if (!raw) {
+      return {};
+    }
+
+    return normalizeStoredProviderSyncPreferences(JSON.parse(raw));
+  } catch {
+    return {};
+  }
+}
+
+function writeStoredProviderSyncPreferences(preferences: Partial<ProviderSyncPreferenceMap>): void {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  window.localStorage.setItem(PROVIDER_SYNC_PREFERENCES_STORAGE_KEY, JSON.stringify(preferences));
+}
 
 function createInitials(source: { displayName?: string; email?: string }): string {
   const raw = (source.displayName || source.email || '').trim();
@@ -112,7 +192,15 @@ const AccountControl: React.FC = () => {
   const [linkedAccounts, setLinkedAccounts] = useState<LinkedCloudAccount[]>([]);
   const [sessions, setSessions] = useState(getStoredFederatedSessions());
   const [missingProviderPrompts, setMissingProviderPrompts] = useState<FederatedProvider[]>([]);
+  const [expandedProvider, setExpandedProvider] = useState<FederatedProvider | null>(null);
+  const [providerSyncPreferences, setProviderSyncPreferences] = useState<ProviderSyncPreferenceMap>(
+    createDefaultProviderPreferences
+  );
+  const [lockedProviderSyncPreferences, setLockedProviderSyncPreferences] = useState<Partial<ProviderSyncPreferenceMap>>(
+    readStoredProviderSyncPreferences
+  );
   const linkedAccountsRef = useRef<LinkedCloudAccount[]>([]);
+  const isMountedRef = useRef(false);
   const hasBootstrappedAuthRef = useRef(false);
   const hasInitializedCloudStateRef = useRef(false);
   const hasLoadedCloudSnapshotRef = useRef(false);
@@ -217,9 +305,55 @@ const AccountControl: React.FC = () => {
     bibleService.persistState(updates);
   }, []);
 
+  const providerAccountByType = useMemo<Record<FederatedProvider, LinkedCloudAccount | null>>(() => {
+    return {
+      google: linkedAccounts.find((entry) => entry.provider === 'google') ?? null,
+      microsoft: linkedAccounts.find((entry) => entry.provider === 'microsoft') ?? null,
+    };
+  }, [linkedAccounts]);
+
+  const isProviderConnected = useCallback((provider: FederatedProvider): boolean => {
+    return Boolean(providerAccountByType[provider]);
+  }, [providerAccountByType]);
+
+  const getEffectiveProviderPreferences = useCallback((provider: FederatedProvider): ProviderSyncPreferences => {
+    if (isProviderConnected(provider) && lockedProviderSyncPreferences[provider]) {
+      return lockedProviderSyncPreferences[provider] as ProviderSyncPreferences;
+    }
+
+    return providerSyncPreferences[provider];
+  }, [isProviderConnected, lockedProviderSyncPreferences, providerSyncPreferences]);
+
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
+
   useEffect(() => {
     linkedAccountsRef.current = linkedAccounts;
   }, [linkedAccounts]);
+
+  useEffect(() => {
+    writeStoredProviderSyncPreferences(lockedProviderSyncPreferences);
+  }, [lockedProviderSyncPreferences]);
+
+  useEffect(() => {
+    setLockedProviderSyncPreferences((current) => {
+      let changed = false;
+      const next = { ...current };
+
+      for (const provider of PROVIDERS) {
+        if (providerAccountByType[provider] && !next[provider]) {
+          next[provider] = providerSyncPreferences[provider];
+          changed = true;
+        }
+      }
+
+      return changed ? next : current;
+    });
+  }, [providerAccountByType, providerSyncPreferences]);
 
   const applyRemoteConfig = useCallback(async (payload: SyncedCloudConfig) => {
     const remote = payload.config;
@@ -384,6 +518,10 @@ const AccountControl: React.FC = () => {
 
     void (async () => {
       const refreshedSessions = await getFreshFederatedSessions();
+      if (!isMountedRef.current) {
+        return;
+      }
+
       setSessions(refreshedSessions);
       const refreshedMissing = Array.from(new Set(initialLinked.map((entry) => entry.provider)))
         .filter((provider) => !refreshedSessions[provider]);
@@ -394,6 +532,10 @@ const AccountControl: React.FC = () => {
 
     const bootstrap = async () => {
       const callbackResult = await completeFederatedAuthorizationFromUrl();
+      if (!isMountedRef.current) {
+        return;
+      }
+
       if (!callbackResult.handled) {
         return;
       }
@@ -630,6 +772,16 @@ const AccountControl: React.FC = () => {
     const nextSessions = removeStoredFederatedSession(provider);
     setSessions(nextSessions);
 
+    setLockedProviderSyncPreferences((current) => {
+      if (!current[provider]) {
+        return current;
+      }
+
+      const next = { ...current };
+      delete next[provider];
+      return next;
+    });
+
     persistCloudState({
       cloudLinkedAccounts: nextLinked,
       cloudConfigUpdatedAt: configUpdatedAt,
@@ -643,8 +795,50 @@ const AccountControl: React.FC = () => {
     setStatusMessage(`${PROVIDER_LABEL[provider]} account detached. Configuration now syncs only to remaining linked providers.`);
   }, [configUpdatedAt, lastSyncedAt, linkedAccounts, persistCloudState]);
 
-  const googleAccount = linkedAccounts.find((entry) => entry.provider === 'google') ?? null;
-  const microsoftAccount = linkedAccounts.find((entry) => entry.provider === 'microsoft') ?? null;
+  const handleSyncPreferenceToggle = useCallback((provider: FederatedProvider, field: keyof ProviderSyncPreferences) => {
+    setProviderSyncPreferences((current) => ({
+      ...current,
+      [provider]: {
+        ...current[provider],
+        [field]: !current[provider][field],
+      },
+    }));
+  }, []);
+
+  const handleProviderAction = useCallback((provider: FederatedProvider) => {
+    const connected = isProviderConnected(provider);
+    const providerSession = providerSessionByType[provider];
+
+    if (!connected) {
+      const selected = getEffectiveProviderPreferences(provider);
+      if (!selected.syncSettings && !selected.syncFiles) {
+        return;
+      }
+
+      setLockedProviderSyncPreferences((current) => ({
+        ...current,
+        [provider]: selected,
+      }));
+
+      void handleConnect(provider);
+      return;
+    }
+
+    if (!providerSession) {
+      void handleConnect(provider);
+      return;
+    }
+
+    const selected = getEffectiveProviderPreferences(provider);
+    if (selected.syncFiles) {
+      const confirmed = window.confirm(DISCONNECT_FILE_SYNC_CONFIRMATION);
+      if (!confirmed) {
+        return;
+      }
+    }
+
+    handleDetachProvider(provider);
+  }, [getEffectiveProviderPreferences, handleConnect, handleDetachProvider, isProviderConnected, providerSessionByType]);
 
   const closeModal = () => {
     setIsModalOpen(false);
@@ -695,6 +889,12 @@ const AccountControl: React.FC = () => {
 
                 <div className="modal-body d-flex flex-column gap-3">
 
+                  {linkedAccounts.length === 0 && (
+                    <div className="alert alert-secondary mb-0" role="alert">
+                      No linked accounts yet. Connect Google or Microsoft to enable cloud sync.
+                    </div>
+                  )}
+
                   {missingProviderPrompts.length > 0 && (
                     <div className="alert alert-warning mb-0" role="alert">
                       <div className="fw-semibold mb-1">Reconnect required</div>
@@ -706,108 +906,116 @@ const AccountControl: React.FC = () => {
 
 
                   <section className="account-provider-stack">
-                    {googleAccount ? (
-                      <div className="account-provider-hero" role="group" aria-label="Google account">
-                        <div className="account-provider-hero-main">
-                          <span className="account-provider-hero-title">
-                            <i className="fa-brands fa-google" aria-hidden="true"></i>
-                            Google
-                          </span>
-                          <span className="account-provider-hero-subtitle text-truncate">
-                            {googleAccount.email || googleAccount.displayName || googleAccount.providerAccountId}
-                          </span>
-                        </div>
-                        <div className="d-flex align-items-center gap-2">
-                          {!providerSessionByType.google && (
-                            <button
-                              type="button"
-                              className="btn btn-sm btn-primary"
-                              onClick={() => {
-                                void handleConnect('google');
-                              }}
-                            >
-                              Reconnect
-                            </button>
-                          )}
-                          <button
-                            type="button"
-                            className="btn btn-sm btn-outline-secondary"
-                            onClick={() => handleDetachProvider('google')}
-                          >
-                            Remove
-                          </button>
-                        </div>
-                      </div>
-                    ) : (
-                      <button
-                        type="button"
-                        className="account-brand-btn account-brand-btn-google"
-                        onClick={() => {
-                          void handleConnect('google');
-                        }}
-                        aria-label="Sign in with Google"
-                      >
-                        <span className="account-brand-btn-icon" aria-hidden="true">
-                          <i className="fa-brands fa-google"></i>
-                        </span>
-                        <span className="account-brand-btn-label">Sign in with Google</span>
-                      </button>
-                    )}
+                    {PROVIDERS.map((provider) => {
+                      const connected = isProviderConnected(provider);
+                      const providerSession = providerSessionByType[provider];
+                      const providerAccount = providerAccountByType[provider];
+                      const providerPreferences = getEffectiveProviderPreferences(provider);
+                      const canConnect = providerPreferences.syncSettings || providerPreferences.syncFiles;
+                      const isExpanded = expandedProvider === provider;
 
-                    {microsoftAccount ? (
-                      <div className="account-provider-hero" role="group" aria-label="Microsoft account">
-                        <div className="account-provider-hero-main">
-                          <span className="account-provider-hero-title">
-                            <i className="fa-brands fa-microsoft" aria-hidden="true"></i>
-                            Microsoft
-                          </span>
-                          <span className="account-provider-hero-subtitle text-truncate">
-                            {microsoftAccount.email || microsoftAccount.displayName || microsoftAccount.providerAccountId}
-                          </span>
-                        </div>
-                        <div className="d-flex align-items-center gap-2">
-                          {!providerSessionByType.microsoft && (
-                            <button
-                              type="button"
-                              className="btn btn-sm btn-primary"
-                              onClick={() => {
-                                void handleConnect('microsoft');
-                              }}
-                            >
-                              Reconnect
-                            </button>
-                          )}
+                      let actionLabel = 'Connect';
+                      if (connected) {
+                        actionLabel = providerSession ? 'Disconnect' : 'Reconnect';
+                      }
+
+                      const headerPrefix = connected ? 'Connected to' : 'Connect to';
+
+                      return (
+                        <article
+                          key={provider}
+                          className="account-provider-accordion"
+                          aria-label={`${PROVIDER_LABEL[provider]} sync options`}
+                        >
                           <button
                             type="button"
-                            className="btn btn-sm btn-outline-secondary"
-                            onClick={() => handleDetachProvider('microsoft')}
+                            className="account-provider-accordion-toggle"
+                            aria-expanded={isExpanded}
+                            aria-controls={`provider-panel-${provider}`}
+                            onClick={() => {
+                              setExpandedProvider((current) => current === provider ? null : provider);
+                            }}
                           >
-                            Remove
+                            <span className="account-provider-accordion-toggle-label">
+                              <i className={`fa-brands ${PROVIDER_ICON[provider]}`} aria-hidden="true"></i>
+                              {headerPrefix} {PROVIDER_LABEL[provider]}
+                              {connected && providerAccount && (
+                                <span className="account-provider-header-subtitle text-truncate">
+                                  {providerAccount.email || providerAccount.displayName || providerAccount.providerAccountId}
+                                </span>
+                              )}
+
+                              {connected && (
+                                <i className="fa-regular fa-circle-check account-provider-connected-icon" aria-hidden="true"></i>
+                              )}
+                            </span>
+                            <i
+                              className={`fa-solid ${isExpanded ? 'fa-chevron-up' : 'fa-chevron-down'} account-provider-accordion-chevron`}
+                              aria-hidden="true"
+                            ></i>
                           </button>
-                        </div>
-                      </div>
-                    ) : (
-                      <button
-                        type="button"
-                        className="account-brand-btn account-brand-btn-microsoft"
-                        onClick={() => {
-                          void handleConnect('microsoft');
-                        }}
-                        aria-label="Sign in with Microsoft"
-                      >
-                        <span className="account-brand-btn-icon" aria-hidden="true">
-                          <i className="fa-brands fa-microsoft"></i>
-                        </span>
-                        <span className="account-brand-btn-label">Sign in with Microsoft</span>
-                      </button>
-                    )}
+
+                          {isExpanded && (
+                            <div id={`provider-panel-${provider}`} className="account-provider-accordion-panel">
+                              <label className="account-provider-option" htmlFor={`${provider}-sync-settings`}>
+                                <input
+                                  id={`${provider}-sync-settings`}
+                                  type="checkbox"
+                                  checked={providerPreferences.syncSettings}
+                                  disabled={connected}
+                                  title={connected ? 'Reconnect to modify' : undefined}
+                                  onChange={() => handleSyncPreferenceToggle(provider, 'syncSettings')}
+                                />
+                                <span className="account-provider-option-content">
+                                  <span className="account-provider-option-title">Sync my settings</span>
+                                  <span className="account-provider-option-description">
+                                    Stores your Marginalia settings in {provider === 'google' ? 'Google Drive' : 'OneDrive'}. We'll only access a tiny file in your {provider === 'google' ? 'Drive' : 'OneDrive'}.
+                                  </span>
+                                </span>
+                              </label>
+
+                              <div className="account-provider-option account-provider-option-files">
+                                <input
+                                  id={`${provider}-sync-files`}
+                                  type="checkbox"
+                                  checked={providerPreferences.syncFiles}
+                                  disabled={connected}
+                                  title={connected ? 'Reconnect to modify' : undefined}
+                                  onChange={() => handleSyncPreferenceToggle(provider, 'syncFiles')}
+                                />
+                                <label className="account-provider-option-content" htmlFor={`${provider}-sync-files`}>
+                                  <span className="account-provider-option-title">
+                                    Sync my files
+                                    {connected && (
+                                      <button type="button" className="btn btn-link btn-sm account-provider-modify-link">
+                                        Modify
+                                      </button>
+                                    )}
+                                  </span>
+                                  <span className="account-provider-option-description">
+                                    Access your own Bible notes accessible directly in Marginalia, indexed by verse! You pick which files & folders we have access to in your {provider === 'google' ? 'Google Drive' : 'OneDrive'}. We'll only be able to read those files.
+                                  </span>
+                                </label>
+                              </div>
+
+                              <div className="d-grid gap-2">
+                                <button
+                                  type="button"
+                                  className={`btn ${actionLabel === 'Disconnect' ? 'btn-danger' : 'btn-primary'} account-provider-connect-btn`}
+                                  disabled={!connected && !canConnect}
+                                  onClick={() => {
+                                    handleProviderAction(provider);
+                                  }}
+                                >
+                                  {actionLabel}
+                                </button>
+                              </div>
+                            </div>
+                          )}
+                        </article>
+                      );
+                    })}
                   </section>
-
-                  {linkedAccounts.length === 0 && (
-                    <div className="alert alert-secondary mb-0" role="alert">
-                      No linked accounts yet. Connect Google or Microsoft to enable cloud sync.
-                    </div>
-                  )}
 
                   {lastSyncedAt && (
                     <p className="small text-body-secondary mb-0">
