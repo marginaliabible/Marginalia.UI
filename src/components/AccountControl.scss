@@ -31,11 +31,26 @@
 }
 
 .account-modal {
-  z-index: 1080;
+  z-index: 920;
+}
+
+.account-modal .account-modal-dialog {
+  width: min(92vw, 1200px);
+  max-width: min(92vw, 1200px);
+  max-height: calc(100dvh - 2rem);
+  margin: 1rem auto;
+}
+
+.account-modal .modal-content {
+  max-height: calc(100dvh - 2rem);
+}
+
+.account-modal .modal-body {
+  overflow: auto;
 }
 
 .account-modal-backdrop {
-  z-index: 1075;
+  z-index: 915;
 }
 
 .account-sync-overview {
@@ -125,6 +140,13 @@
   gap: 0.15rem;
 }
 
+.account-provider-option-content.is-highlighted {
+  border: 1px solid color-mix(in srgb, var(--bs-primary) 65%, transparent);
+  border-radius: 0.5rem;
+  padding: 0.4rem 0.55rem;
+  animation: account-option-highlight-fade 3s ease forwards;
+}
+
 .account-provider-option-title {
   display: inline-flex;
   align-items: center;
@@ -143,6 +165,44 @@ button.account-provider-modify-link {
   padding: 0;
   font-size: 0.8rem;
   line-height: 1.1;
+}
+
+.cloud-folder-picker {
+  position: relative;
+}
+
+.cloud-folder-tree-name-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.cloud-folder-tree-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cloud-folder-tree-name.is-highlighted {
+  border: 1px solid color-mix(in srgb, var(--bs-primary) 65%, transparent);
+  border-radius: 0.45rem;
+  padding: 0.1rem 0.3rem;
+  animation: account-option-highlight-fade 3s ease forwards;
+}
+
+.cloud-folder-tree-connect-link {
+  flex: 0 0 auto;
+  padding: 0;
+  font-size: 0.8rem;
+  line-height: 1.1;
+}
+
+.cloud-folder-tree-row.is-service-highlighted {
+  border-color: color-mix(in srgb, var(--bs-primary) 65%, transparent);
+  animation: account-option-highlight-fade 3s ease forwards;
 }
 
 .account-provider-identity {
@@ -171,4 +231,184 @@ button.account-provider-modify-link {
 
 .account-status-message {
   color: var(--bs-secondary-color);
+}
+
+.cloud-folder-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  border: 1px solid var(--bs-border-color-translucent);
+  border-radius: 0.75rem;
+  padding: 0.75rem;
+  background: var(--bs-tertiary-bg);
+}
+
+.cloud-folder-picker-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.cloud-folder-picker-layout {
+  display: flex;
+  min-height: 23rem;
+  max-height: 56dvh;
+  border: 1px solid var(--bs-border-color-translucent);
+  border-radius: 0.6rem;
+  overflow: hidden;
+  background: var(--bs-body-bg);
+}
+
+.cloud-folder-picker-left,
+.cloud-folder-picker-right {
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  padding: 0.5rem;
+}
+
+.cloud-folder-picker-left {
+  border-right: 1px solid var(--bs-border-color-translucent);
+}
+
+.cloud-folder-picker-layout > .workspace-divider {
+  flex: 0 0 0.75rem;
+}
+
+.cloud-folder-tree-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.cloud-folder-tree-row {
+  display: grid;
+  grid-template-columns: auto auto 1fr auto;
+  align-items: center;
+  gap: 0.35rem;
+  border: 1px solid transparent;
+  border-radius: 0.4rem;
+  padding: 0.2rem 0.2rem;
+}
+
+.cloud-folder-tree-row.is-highlighted {
+  border-color: color-mix(in srgb, var(--bs-primary) 55%, transparent);
+  animation: cloud-folder-highlight-fade 3s ease forwards;
+}
+
+.cloud-folder-tree-chevron,
+.cloud-folder-tree-chevron-spacer {
+  width: 1rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.cloud-folder-tree-chevron {
+  border: 0;
+  background: transparent;
+  color: var(--bs-secondary-color);
+  padding: 0;
+}
+
+.cloud-folder-tree-name {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  text-align: left;
+  color: var(--bs-body-color);
+}
+
+.cloud-folder-tree-size {
+  color: var(--bs-secondary-color);
+  font-size: 0.78rem;
+}
+
+.cloud-folder-tree-loading {
+  padding-left: 2rem;
+}
+
+.cloud-folder-selected-table .cloud-folder-selected-remove-col {
+  width: 2rem;
+}
+
+.cloud-folder-selected-remove {
+  color: var(--bs-danger);
+}
+
+.cloud-folder-selected-remove > i,
+.cloud-folder-selected-remove > span {
+  font-size: 0.78rem;
+  transform: translateY(2px);
+}
+
+.cloud-folder-selected-reconnect {
+  padding: 0;
+  font-size: 0.78rem;
+  line-height: 1.1;
+}
+
+.cloud-folder-selected-path {
+  white-space: normal;
+  word-break: break-word;
+  text-decoration: none;
+}
+
+.cloud-folder-selected-path.is-disabled {
+  color: var(--bs-secondary-color);
+  text-decoration: none;
+  cursor: default;
+  pointer-events: none;
+}
+
+@keyframes cloud-folder-highlight-fade {
+  0% {
+    background: color-mix(in srgb, var(--bs-primary-bg-subtle) 75%, transparent);
+  }
+  100% {
+    background: transparent;
+  }
+}
+
+@keyframes account-option-highlight-fade {
+  0% {
+    background: color-mix(in srgb, var(--bs-primary-bg-subtle) 70%, transparent);
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--bs-primary) 55%, transparent);
+  }
+  100% {
+    background: transparent;
+    box-shadow: none;
+  }
+}
+
+@media (max-width: 991.98px) {
+  .account-modal .account-modal-dialog {
+    width: min(96vw, 1200px);
+    max-width: min(96vw, 1200px);
+    max-height: calc(100dvh - 1rem);
+    margin: 0.5rem auto;
+  }
+
+  .account-modal .modal-content {
+    max-height: calc(100dvh - 1rem);
+  }
+
+  .cloud-folder-picker-layout {
+    flex-direction: column;
+    max-height: 68vh;
+  }
+
+  .cloud-folder-picker-left,
+  .cloud-folder-picker-right {
+    flex-basis: auto !important;
+    max-height: 34vh;
+  }
+
+  .cloud-folder-picker-layout > .workspace-divider {
+    display: none;
+  }
 }

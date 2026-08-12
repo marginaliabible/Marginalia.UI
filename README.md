@@ -59,6 +59,15 @@ Notes:
 
 Marginalia supports federated account login for configuration sync with Google and Microsoft.
 
+Permission behavior:
+
+- Sync my settings requests only configuration-sync scopes for the selected provider.
+- Sync my files requests file-access scopes for the selected provider.
+	- Microsoft requests Files.Read.Selected.
+	- Google requests drive.file.
+- When connected, the Modify action beside Sync my files lets users update the allowed files/folders for that specific provider.
+- Provider checkbox selections are persisted and reused on reconnect unless changed by the user.
+
 Add provider client IDs to your local frontend environment file:
 
 ```dotenv

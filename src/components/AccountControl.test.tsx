@@ -10,6 +10,9 @@ import {
   getStoredFederatedSessions,
 } from '../services/federatedAuthService';
 import {
+  listFolderChildrenForSession,
+  readFolderSizeForSession,
+  readFolderRootSizeForSession,
   readCloudConfigForSession,
   writeCloudConfigForSession,
 } from '../services/cloudConfigProviderService';
@@ -50,7 +53,10 @@ jest.mock('../services/federatedAuthService', () => ({
 }));
 
 jest.mock('../services/cloudConfigProviderService', () => ({
+  listFolderChildrenForSession: jest.fn(),
   mergeLinkedAccounts: jest.requireActual('../services/cloudConfigProviderService').mergeLinkedAccounts,
+  readFolderSizeForSession: jest.fn(),
+  readFolderRootSizeForSession: jest.fn(),
   readCloudConfigForSession: jest.fn(),
   writeCloudConfigForSession: jest.fn(),
 }));
@@ -63,6 +69,9 @@ const mockBeginAuth = beginFederatedAuthorization as jest.Mock;
 const mockCompleteAuth = completeFederatedAuthorizationFromUrl as jest.Mock;
 const mockGetStoredSessions = getStoredFederatedSessions as jest.Mock;
 const mockGetFreshSessions = getFreshFederatedSessions as jest.Mock;
+const mockListFolderChildrenForSession = listFolderChildrenForSession as jest.Mock;
+const mockReadFolderSizeForSession = readFolderSizeForSession as jest.Mock;
+const mockReadFolderRootSizeForSession = readFolderRootSizeForSession as jest.Mock;
 const mockReadCloudConfigForSession = readCloudConfigForSession as jest.Mock;
 const mockWriteCloudConfigForSession = writeCloudConfigForSession as jest.Mock;
 
@@ -160,6 +169,8 @@ describe('AccountControl', () => {
 
     mockCompleteAuth.mockResolvedValue({ handled: false });
     mockBeginAuth.mockResolvedValue(undefined);
+    mockListFolderChildrenForSession.mockResolvedValue([]);
+    mockReadFolderRootSizeForSession.mockResolvedValue(0);
     mockReadCloudConfigForSession.mockResolvedValue(null);
     mockWriteCloudConfigForSession.mockResolvedValue(undefined);
     mockGetFreshSessions.mockResolvedValue({});
@@ -220,6 +231,20 @@ describe('AccountControl', () => {
   it('pushes merged linked-account metadata to all active linked providers after second provider sign-in', async () => {
     jest.useFakeTimers();
 
+    window.localStorage.setItem('marginalia:provider-sync-preferences', JSON.stringify({
+      google: {
+        syncSettings: true,
+        syncFiles: false,
+        selectedTargets: [],
+      },
+      microsoft: {
+        syncSettings: true,
+        syncFiles: false,
+        selectedTargets: [],
+      },
+    }));
+
+    mockReadFolderSizeForSession.mockResolvedValue(0);
     mockReadState.mockReturnValue({
       lastTranslationId: 'KJV',
       lastTranslationIds: ['KJV'],
@@ -301,6 +326,19 @@ describe('AccountControl', () => {
   it('writes only to available sessions when another linked provider is missing on this device', async () => {
     jest.useFakeTimers();
 
+    window.localStorage.setItem('marginalia:provider-sync-preferences', JSON.stringify({
+      google: {
+        syncSettings: true,
+        syncFiles: false,
+        selectedTargets: [],
+      },
+      microsoft: {
+        syncSettings: true,
+        syncFiles: false,
+        selectedTargets: [],
+      },
+    }));
+
     mockReadState.mockReturnValue({
       lastTranslationId: 'KJV',
       lastTranslationIds: ['KJV'],
@@ -360,7 +398,10 @@ describe('AccountControl', () => {
     expect(connectButton).toBeEnabled();
 
     fireEvent.click(connectButton);
-    expect(mockBeginAuth).toHaveBeenCalledWith('google');
+    expect(mockBeginAuth).toHaveBeenCalledWith('google', {
+      syncSettings: true,
+      syncFiles: false,
+    });
   });
 
   it('shows disabled options and reconnect action when linked provider is missing local session', async () => {
@@ -398,7 +439,7 @@ describe('AccountControl', () => {
     expect(syncSettingsCheckbox).toHaveAttribute('title', 'Reconnect to modify');
     expect(syncFilesCheckbox).toHaveAttribute('title', 'Reconnect to modify');
     expect(screen.getByRole('button', { name: 'Reconnect' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Modify' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Modify' })).not.toBeInTheDocument();
   });
 
   it('asks for confirmation before disconnect when file sync was selected', async () => {
@@ -419,7 +460,10 @@ describe('AccountControl', () => {
     expandProvider('Google');
     fireEvent.click(getProviderCheckbox('google-sync-files'));
     fireEvent.click(screen.getByRole('button', { name: 'Connect' }));
-    expect(mockBeginAuth).toHaveBeenCalledWith('google');
+    expect(mockBeginAuth).toHaveBeenCalledWith('google', {
+      syncSettings: false,
+      syncFiles: true,
+    });
     firstRender.unmount();
 
     mockReadState.mockReturnValue({
@@ -465,5 +509,234 @@ describe('AccountControl', () => {
     }));
 
     confirmSpy.mockRestore();
+  });
+
+  it('autosaves folder selections from the custom picker', async () => {
+    mockReadState.mockReturnValue({
+      lastTranslationId: 'KJV',
+      lastTranslationIds: ['KJV'],
+      cloudLinkedAccounts: [
+        {
+          provider: 'google',
+          providerAccountId: 'g-user-1',
+          email: 'g@example.com',
+          linkedAt: Date.now() - 5000,
+        },
+      ],
+      cloudConfigUpdatedAt: Date.now() - 10_000,
+      cloudConfigLastSyncedAt: Date.now() - 10_000,
+    });
+
+    window.localStorage.setItem('marginalia:provider-sync-preferences', JSON.stringify({
+      google: {
+        syncSettings: false,
+        syncFiles: true,
+        selectedTargets: [],
+      },
+      microsoft: {
+        syncSettings: false,
+        syncFiles: false,
+        selectedTargets: [],
+      },
+    }));
+
+    mockGetStoredSessions.mockReturnValue({ google: googleSession });
+    mockGetFreshSessions.mockResolvedValue({ google: googleSession });
+    mockReadFolderRootSizeForSession.mockResolvedValue(0);
+    mockReadFolderSizeForSession.mockResolvedValue(24 * 1024 * 1024);
+    mockListFolderChildrenForSession.mockResolvedValue([
+      {
+        id: 'g-folder-1',
+        name: 'Bible Notes Folder',
+        sizeBytes: 24 * 1024 * 1024,
+        hasChildren: false,
+      },
+    ]);
+
+    await renderAccountControl();
+    openAccountModal();
+    expandProvider('Google');
+
+    expect(screen.getByText('File Sync')).toBeInTheDocument();
+
+    await waitFor(() => {
+      expect(screen.getByText('Google Drive')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByLabelText('Expand Google Drive'));
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('Google Drive/Bible Notes Folder')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByLabelText('Google Drive/Bible Notes Folder'));
+
+    await waitFor(() => {
+      const persisted = JSON.parse(window.localStorage.getItem('marginalia:provider-sync-preferences') || '{}');
+      expect(persisted.google.selectedTargets).toEqual([
+        {
+          id: 'g-folder-1',
+          kind: 'folder',
+          name: 'Bible Notes Folder',
+          path: 'Google Drive/Bible Notes Folder',
+          sizeBytes: 25165824,
+          sizeKnown: true,
+        },
+      ]);
+    });
+  });
+
+  it('keeps prior folder selections when picker is opened', async () => {
+    mockReadState.mockReturnValue({
+      lastTranslationId: 'KJV',
+      lastTranslationIds: ['KJV'],
+      cloudLinkedAccounts: [
+        {
+          provider: 'google',
+          providerAccountId: 'g-user-1',
+          email: 'g@example.com',
+          linkedAt: Date.now() - 5000,
+        },
+      ],
+      cloudConfigUpdatedAt: Date.now() - 10_000,
+      cloudConfigLastSyncedAt: Date.now() - 10_000,
+    });
+
+    window.localStorage.setItem('marginalia:provider-sync-preferences', JSON.stringify({
+      google: {
+        syncSettings: false,
+        syncFiles: true,
+        selectedTargets: [
+          {
+            id: 'existing-1',
+            kind: 'folder',
+            name: 'Existing Notes',
+            path: 'Google Drive/Existing Notes',
+            sizeBytes: 4096,
+          },
+        ],
+      },
+      microsoft: {
+        syncSettings: false,
+        syncFiles: false,
+        selectedTargets: [],
+      },
+    }));
+
+    mockGetStoredSessions.mockReturnValue({ google: googleSession });
+    mockGetFreshSessions.mockResolvedValue({ google: googleSession });
+    mockReadFolderRootSizeForSession.mockResolvedValue(0);
+    mockReadFolderSizeForSession.mockResolvedValue(4096);
+
+    await renderAccountControl();
+    openAccountModal();
+    expandProvider('Google');
+
+    expect(screen.getByText('File Sync')).toBeInTheDocument();
+
+    await waitFor(() => {
+      expect(screen.getByText('Google Drive')).toBeInTheDocument();
+    });
+
+    const persisted = JSON.parse(window.localStorage.getItem('marginalia:provider-sync-preferences') || '{}');
+    expect(persisted.google.selectedTargets).toEqual([
+      {
+        id: 'existing-1',
+        kind: 'folder',
+        name: 'Existing Notes',
+        path: 'Google Drive/Existing Notes',
+        sizeBytes: 4096,
+      },
+    ]);
+  });
+
+  it('always shows both provider roots in file sync panel', async () => {
+    mockReadState.mockReturnValue({
+      lastTranslationId: 'KJV',
+      lastTranslationIds: ['KJV'],
+      cloudLinkedAccounts: [
+        {
+          provider: 'microsoft',
+          providerAccountId: 'ms-user-1',
+          email: 'ms@example.com',
+          linkedAt: Date.now() - 5000,
+        },
+      ],
+      cloudConfigUpdatedAt: Date.now() - 10_000,
+      cloudConfigLastSyncedAt: Date.now() - 10_000,
+    });
+
+    window.localStorage.setItem('marginalia:provider-sync-preferences', JSON.stringify({
+      google: {
+        syncSettings: false,
+        syncFiles: false,
+        selectedTargets: [],
+      },
+      microsoft: {
+        syncSettings: false,
+        syncFiles: true,
+        selectedTargets: [],
+      },
+    }));
+
+    mockGetStoredSessions.mockReturnValue({ microsoft: msSession });
+    mockGetFreshSessions.mockResolvedValue({ microsoft: msSession });
+    mockReadFolderRootSizeForSession.mockResolvedValue(0);
+
+    await renderAccountControl();
+    openAccountModal();
+    expandProvider('Microsoft');
+
+    expect(screen.getByText('File Sync')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText('OneDrive')).toBeInTheDocument();
+      expect(screen.getByText('Google Drive')).toBeInTheDocument();
+    });
+  });
+
+  it('shows a helpful message when root loading fails', async () => {
+    mockReadState.mockReturnValue({
+      lastTranslationId: 'KJV',
+      lastTranslationIds: ['KJV'],
+      cloudLinkedAccounts: [
+        {
+          provider: 'microsoft',
+          providerAccountId: 'ms-user-1',
+          email: 'ms@example.com',
+          linkedAt: Date.now() - 5000,
+        },
+      ],
+      cloudConfigUpdatedAt: Date.now() - 10_000,
+      cloudConfigLastSyncedAt: Date.now() - 10_000,
+    });
+
+    window.localStorage.setItem('marginalia:provider-sync-preferences', JSON.stringify({
+      google: {
+        syncSettings: false,
+        syncFiles: false,
+        selectedTargets: [],
+      },
+      microsoft: {
+        syncSettings: false,
+        syncFiles: true,
+        selectedTargets: [],
+      },
+    }));
+
+    mockGetStoredSessions.mockReturnValue({ microsoft: msSession });
+    mockGetFreshSessions.mockResolvedValue({ microsoft: msSession });
+    mockReadFolderRootSizeForSession.mockRejectedValue(new Error('Graph unavailable'));
+
+    await renderAccountControl();
+    openAccountModal();
+    expandProvider('Microsoft');
+
+    await waitFor(() => {
+      expect(screen.getByText('File Sync')).toBeInTheDocument();
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText(/Unable to initialize folder picker: Graph unavailable/i)).toBeInTheDocument();
+    });
   });
 });

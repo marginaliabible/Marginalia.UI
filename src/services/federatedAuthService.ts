@@ -92,6 +92,11 @@ export interface OAuthCallbackResult {
   error?: string;
 }
 
+export interface FederatedAuthorizationOptions {
+  syncSettings?: boolean;
+  syncFiles?: boolean;
+}
+
 function readClientId(provider: FederatedProvider): string {
   if (provider === 'google') {
     return (import.meta.env['VITE_GOOGLE_CLIENT_ID'] || '').trim();
@@ -397,32 +402,81 @@ async function fetchMicrosoftProfile(accessToken: string): Promise<FederatedAcco
   };
 }
 
-function buildGoogleAuthorizeUrl(clientId: string, redirectUri: string, state: string, challenge: string): string {
+function buildGoogleAuthorizeUrl(
+  clientId: string,
+  redirectUri: string,
+  state: string,
+  challenge: string,
+  scope: string
+): string {
   const url = new URL('https://accounts.google.com/o/oauth2/v2/auth');
   url.searchParams.set('client_id', clientId);
   url.searchParams.set('redirect_uri', redirectUri);
   url.searchParams.set('response_type', 'code');
-  url.searchParams.set('scope', 'openid profile email https://www.googleapis.com/auth/drive.appdata');
+  url.searchParams.set('scope', scope);
   url.searchParams.set('code_challenge', challenge);
   url.searchParams.set('code_challenge_method', 'S256');
   url.searchParams.set('state', state);
-  url.searchParams.set('include_granted_scopes', 'true');
+    // Removed include_granted_scopes to only include explicitly requested scopes
   url.searchParams.set('access_type', 'offline');
   url.searchParams.set('prompt', 'select_account consent');
   return url.toString();
 }
 
-function buildMicrosoftAuthorizeUrl(clientId: string, redirectUri: string, state: string, challenge: string): string {
+function buildMicrosoftAuthorizeUrl(
+  clientId: string,
+  redirectUri: string,
+  state: string,
+  challenge: string,
+  scope: string
+): string {
   const url = new URL('https://login.microsoftonline.com/common/oauth2/v2.0/authorize');
   url.searchParams.set('client_id', clientId);
   url.searchParams.set('redirect_uri', redirectUri);
   url.searchParams.set('response_type', 'code');
-  url.searchParams.set('scope', 'openid profile email offline_access Files.ReadWrite.AppFolder User.Read');
+  url.searchParams.set('scope', scope);
   url.searchParams.set('code_challenge', challenge);
   url.searchParams.set('code_challenge_method', 'S256');
   url.searchParams.set('state', state);
   url.searchParams.set('prompt', 'select_account');
   return url.toString();
+}
+
+function buildGoogleScope(options: Required<FederatedAuthorizationOptions>): string {
+  const scopes = ['openid', 'profile', 'email'];
+
+  if (options.syncSettings) {
+    scopes.push('https://www.googleapis.com/auth/drive.appdata');
+  }
+
+  if (options.syncFiles) {
+    scopes.push('https://www.googleapis.com/auth/drive.readonly');
+  }
+
+  return scopes.join(' ');
+}
+
+function buildMicrosoftScope(options: Required<FederatedAuthorizationOptions>): string {
+  const scopes = ['openid', 'profile', 'email', 'offline_access', 'User.Read'];
+
+  if (options.syncSettings) {
+    scopes.push('Files.ReadWrite.AppFolder');
+  }
+
+  if (options.syncFiles) {
+    scopes.push('Files.Read', 'Sites.Read.All');
+  }
+
+  return scopes.join(' ');
+}
+
+function normalizeAuthorizationOptions(
+  options?: FederatedAuthorizationOptions
+): Required<FederatedAuthorizationOptions> {
+  return {
+    syncSettings: options?.syncSettings ?? true,
+    syncFiles: options?.syncFiles ?? false,
+  };
 }
 
 async function exchangeGoogleCode(
@@ -601,7 +655,10 @@ export function removeStoredFederatedSession(provider: FederatedProvider): Store
   return sessions;
 }
 
-export async function beginFederatedAuthorization(provider: FederatedProvider): Promise<void> {
+export async function beginFederatedAuthorization(
+  provider: FederatedProvider,
+  options?: FederatedAuthorizationOptions
+): Promise<void> {
   const clientId = readClientId(provider);
   if (!clientId) {
     const envVar = provider === 'google' ? 'VITE_GOOGLE_CLIENT_ID' : 'VITE_MICROSOFT_CLIENT_ID';
@@ -620,6 +677,10 @@ export async function beginFederatedAuthorization(provider: FederatedProvider): 
   const codeVerifier = createRandomHex(64);
   const codeChallenge = await createCodeChallenge(codeVerifier);
   const redirectUri = getRedirectUri();
+  const authorizationOptions = normalizeAuthorizationOptions(options);
+  const scope = provider === 'google'
+    ? buildGoogleScope(authorizationOptions)
+    : buildMicrosoftScope(authorizationOptions);
 
   const pendingRequest: PendingAuthRequest = {
     provider,
@@ -633,8 +694,8 @@ export async function beginFederatedAuthorization(provider: FederatedProvider): 
   writePendingRequestMap(map);
 
   const authorizeUrl = provider === 'google'
-    ? buildGoogleAuthorizeUrl(clientId, redirectUri, state, codeChallenge)
-    : buildMicrosoftAuthorizeUrl(clientId, redirectUri, state, codeChallenge);
+    ? buildGoogleAuthorizeUrl(clientId, redirectUri, state, codeChallenge, scope)
+    : buildMicrosoftAuthorizeUrl(clientId, redirectUri, state, codeChallenge, scope);
 
   window.location.assign(authorizeUrl);
 }

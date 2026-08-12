@@ -19,6 +19,7 @@ import {
   type SyncedCloudConfig,
 } from '../services/cloudConfigProviderService';
 import type { FederatedProvider, LinkedCloudAccount, MarginaliaState } from '../models/bible';
+import CloudFolderPicker, { type FolderSelectionTarget } from './CloudFolderPicker';
 import './AccountControl.scss';
 
 type SyncState = 'idle' | 'syncing' | 'error';
@@ -40,6 +41,16 @@ const PROVIDER_ICON: Record<FederatedProvider, string> = {
 interface ProviderSyncPreferences {
   syncSettings: boolean;
   syncFiles: boolean;
+  selectedTargets: ProviderSyncTarget[];
+}
+
+interface ProviderSyncTarget {
+  id: string;
+  kind: 'folder';
+  name?: string;
+  path?: string;
+  sizeBytes?: number;
+  sizeKnown?: boolean;
 }
 
 type ProviderSyncPreferenceMap = Record<FederatedProvider, ProviderSyncPreferences>;
@@ -48,20 +59,51 @@ const createDefaultProviderPreferences = (): ProviderSyncPreferenceMap => ({
   google: {
     syncSettings: false,
     syncFiles: false,
+    selectedTargets: [],
   },
   microsoft: {
     syncSettings: false,
     syncFiles: false,
+    selectedTargets: [],
   },
 });
 
-function isProviderSyncPreferences(value: unknown): value is ProviderSyncPreferences {
+function isProviderSyncTarget(value: unknown): value is ProviderSyncTarget {
   if (!value || typeof value !== 'object') {
     return false;
   }
 
+  const candidate = value as Partial<ProviderSyncTarget>;
+  return (
+    candidate.kind === 'folder'
+    && typeof candidate.id === 'string'
+    && candidate.id.trim().length > 0
+    && (typeof candidate.name === 'undefined' || typeof candidate.name === 'string')
+    && (typeof candidate.path === 'undefined' || typeof candidate.path === 'string')
+    && (typeof candidate.sizeBytes === 'undefined' || typeof candidate.sizeBytes === 'number')
+    && (typeof candidate.sizeKnown === 'undefined' || typeof candidate.sizeKnown === 'boolean')
+  );
+}
+
+function normalizeProviderSyncPreferences(value: unknown): ProviderSyncPreferences | null {
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+
   const candidate = value as Partial<ProviderSyncPreferences>;
-  return typeof candidate.syncSettings === 'boolean' && typeof candidate.syncFiles === 'boolean';
+  if (typeof candidate.syncSettings !== 'boolean' || typeof candidate.syncFiles !== 'boolean') {
+    return null;
+  }
+
+  const selectedTargets = Array.isArray(candidate.selectedTargets)
+    ? candidate.selectedTargets.filter((entry): entry is ProviderSyncTarget => isProviderSyncTarget(entry))
+    : [];
+
+  return {
+    syncSettings: candidate.syncSettings,
+    syncFiles: candidate.syncFiles,
+    selectedTargets,
+  };
 }
 
 function normalizeStoredProviderSyncPreferences(value: unknown): Partial<ProviderSyncPreferenceMap> {
@@ -74,11 +116,12 @@ function normalizeStoredProviderSyncPreferences(value: unknown): Partial<Provide
 
   for (const provider of PROVIDERS) {
     const candidate = source[provider];
-    if (!isProviderSyncPreferences(candidate)) {
+    const normalizedPreference = normalizeProviderSyncPreferences(candidate);
+    if (!normalizedPreference) {
       continue;
     }
 
-    normalized[provider] = candidate;
+    normalized[provider] = normalizedPreference;
   }
 
   return normalized;
@@ -107,6 +150,28 @@ function writeStoredProviderSyncPreferences(preferences: Partial<ProviderSyncPre
   }
 
   window.localStorage.setItem(PROVIDER_SYNC_PREFERENCES_STORAGE_KEY, JSON.stringify(preferences));
+}
+
+function mergeProviderPreferences(
+  defaults: ProviderSyncPreferenceMap,
+  stored: Partial<ProviderSyncPreferenceMap>
+): ProviderSyncPreferenceMap {
+  return {
+    google: stored.google
+      ? {
+        syncSettings: stored.google.syncSettings,
+        syncFiles: stored.google.syncFiles,
+        selectedTargets: stored.google.selectedTargets,
+      }
+      : defaults.google,
+    microsoft: stored.microsoft
+      ? {
+        syncSettings: stored.microsoft.syncSettings,
+        syncFiles: stored.microsoft.syncFiles,
+        selectedTargets: stored.microsoft.selectedTargets,
+      }
+      : defaults.microsoft,
+  };
 }
 
 function createInitials(source: { displayName?: string; email?: string }): string {
@@ -193,12 +258,15 @@ const AccountControl: React.FC = () => {
   const [sessions, setSessions] = useState(getStoredFederatedSessions());
   const [missingProviderPrompts, setMissingProviderPrompts] = useState<FederatedProvider[]>([]);
   const [expandedProvider, setExpandedProvider] = useState<FederatedProvider | null>(null);
-  const [providerSyncPreferences, setProviderSyncPreferences] = useState<ProviderSyncPreferenceMap>(
-    createDefaultProviderPreferences
-  );
-  const [lockedProviderSyncPreferences, setLockedProviderSyncPreferences] = useState<Partial<ProviderSyncPreferenceMap>>(
-    readStoredProviderSyncPreferences
-  );
+  const [fileSyncFocusRequest, setFileSyncFocusRequest] = useState<{ provider: FederatedProvider; requestId: number } | null>(null);
+  const [highlightedSyncFilesProvider, setHighlightedSyncFilesProvider] = useState<FederatedProvider | null>(null);
+  const [providerSyncPreferences, setProviderSyncPreferences] = useState<ProviderSyncPreferenceMap>(() => {
+    const defaults = createDefaultProviderPreferences();
+    const stored = readStoredProviderSyncPreferences();
+    return mergeProviderPreferences(defaults, stored);
+  });
+  const fileSyncFocusCounterRef = useRef(0);
+  const syncFilesHighlightTimeoutRef = useRef<number | null>(null);
   const linkedAccountsRef = useRef<LinkedCloudAccount[]>([]);
   const isMountedRef = useRef(false);
   const hasBootstrappedAuthRef = useRef(false);
@@ -316,14 +384,6 @@ const AccountControl: React.FC = () => {
     return Boolean(providerAccountByType[provider]);
   }, [providerAccountByType]);
 
-  const getEffectiveProviderPreferences = useCallback((provider: FederatedProvider): ProviderSyncPreferences => {
-    if (isProviderConnected(provider) && lockedProviderSyncPreferences[provider]) {
-      return lockedProviderSyncPreferences[provider] as ProviderSyncPreferences;
-    }
-
-    return providerSyncPreferences[provider];
-  }, [isProviderConnected, lockedProviderSyncPreferences, providerSyncPreferences]);
-
   useEffect(() => {
     isMountedRef.current = true;
     return () => {
@@ -336,24 +396,8 @@ const AccountControl: React.FC = () => {
   }, [linkedAccounts]);
 
   useEffect(() => {
-    writeStoredProviderSyncPreferences(lockedProviderSyncPreferences);
-  }, [lockedProviderSyncPreferences]);
-
-  useEffect(() => {
-    setLockedProviderSyncPreferences((current) => {
-      let changed = false;
-      const next = { ...current };
-
-      for (const provider of PROVIDERS) {
-        if (providerAccountByType[provider] && !next[provider]) {
-          next[provider] = providerSyncPreferences[provider];
-          changed = true;
-        }
-      }
-
-      return changed ? next : current;
-    });
-  }, [providerAccountByType, providerSyncPreferences]);
+    writeStoredProviderSyncPreferences(providerSyncPreferences);
+  }, [providerSyncPreferences]);
 
   const applyRemoteConfig = useCallback(async (payload: SyncedCloudConfig) => {
     const remote = payload.config;
@@ -396,12 +440,13 @@ const AccountControl: React.FC = () => {
       const currentSessions = await getFreshFederatedSessions();
       setSessions(currentSessions);
       const linkedProviders = Array.from(new Set(linkedAccounts.map((entry) => entry.provider)));
+      const settingsProviders = linkedProviders.filter((provider) => providerSyncPreferences[provider].syncSettings);
       const missingOnThisDevice = linkedProviders.filter((provider) => !currentSessions[provider]);
       setMissingProviderPrompts(missingOnThisDevice);
 
       let newestPayload: SyncedCloudConfig | null = null;
 
-      for (const provider of linkedProviders) {
+      for (const provider of settingsProviders) {
         const session = currentSessions[provider];
         if (!session) {
           continue;
@@ -439,7 +484,7 @@ const AccountControl: React.FC = () => {
     } finally {
       cloudRefreshInFlightRef.current = false;
     }
-  }, [applyRemoteConfig, configUpdatedAt, linkedAccounts, persistCloudState, ready]);
+  }, [applyRemoteConfig, configUpdatedAt, linkedAccounts, persistCloudState, providerSyncPreferences, ready]);
 
   const handleSessionAfterSignIn = useCallback(async (session: FederatedSession) => {
     const localSessions = await getFreshFederatedSessions();
@@ -457,33 +502,37 @@ const AccountControl: React.FC = () => {
         .filter((provider) => !localSessions[provider]);
     };
 
-    try {
-      const remotePayload = await readCloudConfigForSession(session);
-      if (remotePayload) {
-        const mergedLinked = mergeLinkedAccounts(nextLinked, remotePayload.linkedAccounts);
-        setLinkedAccounts(mergedLinked);
+    const shouldReadCloudConfig = providerSyncPreferences[session.provider].syncSettings;
 
-        if (remotePayload.updatedAt > configUpdatedAt) {
-          await applyRemoteConfig(remotePayload);
-          nextConfigUpdatedAt = remotePayload.updatedAt;
-          setConfigUpdatedAt(nextConfigUpdatedAt);
-          setStatusMessage(`Pulled newer configuration from ${PROVIDER_LABEL[session.provider]}.`);
+    if (shouldReadCloudConfig) {
+      try {
+        const remotePayload = await readCloudConfigForSession(session);
+        if (remotePayload) {
+          const mergedLinked = mergeLinkedAccounts(nextLinked, remotePayload.linkedAccounts);
+          setLinkedAccounts(mergedLinked);
+
+          if (remotePayload.updatedAt > configUpdatedAt) {
+            await applyRemoteConfig(remotePayload);
+            nextConfigUpdatedAt = remotePayload.updatedAt;
+            setConfigUpdatedAt(nextConfigUpdatedAt);
+            setStatusMessage(`Pulled newer configuration from ${PROVIDER_LABEL[session.provider]}.`);
+          }
+
+          setMissingProviderPrompts(deriveMissingProviders(mergedLinked));
+
+          persistCloudState({
+            cloudLinkedAccounts: mergedLinked,
+            cloudConfigUpdatedAt: nextConfigUpdatedAt,
+          });
+
+          // Always publish merged linkage to all signed-in providers after auth.
+          setHasPendingSync(true);
+          return;
         }
-
-        setMissingProviderPrompts(deriveMissingProviders(mergedLinked));
-
-        persistCloudState({
-          cloudLinkedAccounts: mergedLinked,
-          cloudConfigUpdatedAt: nextConfigUpdatedAt,
-        });
-
-        // Always publish merged linkage to all signed-in providers after auth.
-        setHasPendingSync(true);
-        return;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        setStatusMessage(`Signed in, but cloud read failed: ${message}`);
       }
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      setStatusMessage(`Signed in, but cloud read failed: ${message}`);
     }
 
     setMissingProviderPrompts(deriveMissingProviders(nextLinked));
@@ -494,7 +543,7 @@ const AccountControl: React.FC = () => {
 
     // New linkage should always publish to currently signed-in providers.
     setHasPendingSync(true);
-  }, [applyRemoteConfig, configUpdatedAt, persistCloudState]);
+  }, [applyRemoteConfig, configUpdatedAt, persistCloudState, providerSyncPreferences]);
 
   useEffect(() => {
     if (hasBootstrappedAuthRef.current) {
@@ -695,6 +744,7 @@ const AccountControl: React.FC = () => {
     setSessions(currentSessions);
 
     const linkedProviders = Array.from(new Set(linkedAccounts.map((entry) => entry.provider)));
+    const settingsProviders = linkedProviders.filter((provider) => providerSyncPreferences[provider].syncSettings);
     const payload = toSyncedCloudConfig(configSnapshot, linkedAccounts, configUpdatedAt);
 
     setSyncState('syncing');
@@ -703,7 +753,7 @@ const AccountControl: React.FC = () => {
     const failures: string[] = [];
     let successfulWrites = 0;
 
-    for (const provider of linkedProviders) {
+    for (const provider of settingsProviders) {
       const session = currentSessions[provider];
       if (!session) {
         failures.push(`${PROVIDER_LABEL[provider]} not signed in on this device`);
@@ -739,7 +789,7 @@ const AccountControl: React.FC = () => {
     setSyncState('idle');
     setStatusMessage(successfulWrites > 0 ? 'Configuration synced.' : null);
     setHasPendingSync(false);
-  }, [configSnapshot, configUpdatedAt, linkedAccounts, persistCloudState, ready]);
+  }, [configSnapshot, configUpdatedAt, linkedAccounts, persistCloudState, providerSyncPreferences, ready]);
 
   useEffect(() => {
     if (!ready || linkedAccounts.length === 0 || !hasPendingSync) {
@@ -755,14 +805,36 @@ const AccountControl: React.FC = () => {
     };
   }, [configUpdatedAt, hasPendingSync, linkedAccounts.length, ready, syncNow]);
 
-  const handleConnect = useCallback(async (provider: FederatedProvider) => {
+  const handleConnect = useCallback(async (provider: FederatedProvider, preferences: ProviderSyncPreferences) => {
     setStatusMessage(null);
     try {
-      await beginFederatedAuthorization(provider);
+      await beginFederatedAuthorization(provider, {
+        syncSettings: preferences.syncSettings,
+        syncFiles: preferences.syncFiles,
+      });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       setStatusMessage(message);
     }
+  }, []);
+
+  const focusFileSyncService = useCallback((provider: FederatedProvider) => {
+    setExpandedProvider(provider);
+    fileSyncFocusCounterRef.current += 1;
+    const requestId = fileSyncFocusCounterRef.current;
+    setFileSyncFocusRequest({ provider, requestId });
+
+    setHighlightedSyncFilesProvider(null);
+    if (syncFilesHighlightTimeoutRef.current !== null) {
+      window.clearTimeout(syncFilesHighlightTimeoutRef.current);
+    }
+
+    syncFilesHighlightTimeoutRef.current = window.setTimeout(() => {
+      setHighlightedSyncFilesProvider(provider);
+      syncFilesHighlightTimeoutRef.current = window.setTimeout(() => {
+        setHighlightedSyncFilesProvider((current) => current === provider ? null : current);
+      }, 3000);
+    }, 0);
   }, []);
 
   const handleDetachProvider = useCallback((provider: FederatedProvider) => {
@@ -771,16 +843,6 @@ const AccountControl: React.FC = () => {
 
     const nextSessions = removeStoredFederatedSession(provider);
     setSessions(nextSessions);
-
-    setLockedProviderSyncPreferences((current) => {
-      if (!current[provider]) {
-        return current;
-      }
-
-      const next = { ...current };
-      delete next[provider];
-      return next;
-    });
 
     persistCloudState({
       cloudLinkedAccounts: nextLinked,
@@ -795,7 +857,7 @@ const AccountControl: React.FC = () => {
     setStatusMessage(`${PROVIDER_LABEL[provider]} account detached. Configuration now syncs only to remaining linked providers.`);
   }, [configUpdatedAt, lastSyncedAt, linkedAccounts, persistCloudState]);
 
-  const handleSyncPreferenceToggle = useCallback((provider: FederatedProvider, field: keyof ProviderSyncPreferences) => {
+  const handleSyncPreferenceToggle = useCallback((provider: FederatedProvider, field: 'syncSettings' | 'syncFiles') => {
     setProviderSyncPreferences((current) => ({
       ...current,
       [provider]: {
@@ -805,31 +867,64 @@ const AccountControl: React.FC = () => {
     }));
   }, []);
 
+  const handleModifyFilesAccess = useCallback((provider: FederatedProvider) => {
+    const session = providerSessionByType[provider];
+    if (!session) {
+      setStatusMessage(`Reconnect ${PROVIDER_LABEL[provider]} on this device before modifying file access.`);
+      return;
+    }
+
+    setStatusMessage(null);
+    focusFileSyncService(provider);
+  }, [focusFileSyncService, providerSessionByType]);
+
+  const handleApplyFolderSelections = useCallback((nextSelections: Record<FederatedProvider, FolderSelectionTarget[]>) => {
+    setProviderSyncPreferences((current) => ({
+      ...current,
+      google: {
+        ...current.google,
+        selectedTargets: nextSelections.google.map((target) => ({
+          id: target.id,
+          kind: 'folder',
+          name: target.name,
+          path: target.path,
+          sizeBytes: target.sizeBytes,
+          sizeKnown: target.sizeKnown,
+        })),
+      },
+      microsoft: {
+        ...current.microsoft,
+        selectedTargets: nextSelections.microsoft.map((target) => ({
+          id: target.id,
+          kind: 'folder',
+          name: target.name,
+          path: target.path,
+          sizeBytes: target.sizeBytes,
+          sizeKnown: target.sizeKnown,
+        })),
+      },
+    }));
+  }, []);
+
   const handleProviderAction = useCallback((provider: FederatedProvider) => {
     const connected = isProviderConnected(provider);
     const providerSession = providerSessionByType[provider];
+    const selected = providerSyncPreferences[provider];                                                                                                                                                                     
 
     if (!connected) {
-      const selected = getEffectiveProviderPreferences(provider);
       if (!selected.syncSettings && !selected.syncFiles) {
         return;
       }
 
-      setLockedProviderSyncPreferences((current) => ({
-        ...current,
-        [provider]: selected,
-      }));
-
-      void handleConnect(provider);
+      void handleConnect(provider, selected);
       return;
     }
 
     if (!providerSession) {
-      void handleConnect(provider);
+      void handleConnect(provider, selected);
       return;
     }
 
-    const selected = getEffectiveProviderPreferences(provider);
     if (selected.syncFiles) {
       const confirmed = window.confirm(DISCONNECT_FILE_SYNC_CONFIRMATION);
       if (!confirmed) {
@@ -838,7 +933,31 @@ const AccountControl: React.FC = () => {
     }
 
     handleDetachProvider(provider);
-  }, [getEffectiveProviderPreferences, handleConnect, handleDetachProvider, isProviderConnected, providerSessionByType]);
+  }, [handleConnect, handleDetachProvider, isProviderConnected, providerSessionByType, providerSyncPreferences]);
+
+  const handleConnectRequestedFromPicker = useCallback((provider: FederatedProvider) => {
+    focusFileSyncService(provider);
+
+    const session = providerSessionByType[provider];
+    if (!session) {
+      void handleProviderAction(provider);
+      return;
+    }
+
+    setProviderSyncPreferences((current) => {
+      if (current[provider].syncFiles) {
+        return current;
+      }
+
+      return {
+        ...current,
+        [provider]: {
+          ...current[provider],
+          syncFiles: true,
+        },
+      };
+    });
+  }, [focusFileSyncService, handleProviderAction, providerSessionByType]);
 
   const closeModal = () => {
     setIsModalOpen(false);
@@ -872,7 +991,7 @@ const AccountControl: React.FC = () => {
             onClick={closeModal}
           />
           <div className="modal fade show d-block account-modal" tabIndex={-1} aria-modal="true" role="dialog">
-            <div className="modal-dialog modal-dialog-centered modal-lg">
+            <div className="modal-dialog modal-dialog-centered modal-lg account-modal-dialog">
               <div className="modal-content shadow border-0">
                 <div className="modal-header">
                   <div className="d-flex align-items-center gap-2">
@@ -904,13 +1023,27 @@ const AccountControl: React.FC = () => {
                     </div>
                   )}
 
+                  <CloudFolderPicker
+                    sessions={providerSessionByType}
+                    initialSelections={{
+                      google: providerSyncPreferences.google.selectedTargets,
+                      microsoft: providerSyncPreferences.microsoft.selectedTargets,
+                    }}
+                    providerSyncFilesEnabled={{
+                      google: providerSyncPreferences.google.syncFiles,
+                      microsoft: providerSyncPreferences.microsoft.syncFiles,
+                    }}
+                    focusRequest={fileSyncFocusRequest}
+                    onSelectionsChange={handleApplyFolderSelections}
+                    onConnectRequested={handleConnectRequestedFromPicker}
+                  />
 
                   <section className="account-provider-stack">
                     {PROVIDERS.map((provider) => {
                       const connected = isProviderConnected(provider);
                       const providerSession = providerSessionByType[provider];
                       const providerAccount = providerAccountByType[provider];
-                      const providerPreferences = getEffectiveProviderPreferences(provider);
+                      const providerPreferences = providerSyncPreferences[provider];
                       const canConnect = providerPreferences.syncSettings || providerPreferences.syncFiles;
                       const isExpanded = expandedProvider === provider;
 
@@ -983,11 +1116,19 @@ const AccountControl: React.FC = () => {
                                   title={connected ? 'Reconnect to modify' : undefined}
                                   onChange={() => handleSyncPreferenceToggle(provider, 'syncFiles')}
                                 />
-                                <label className="account-provider-option-content" htmlFor={`${provider}-sync-files`}>
+                                <label className={`account-provider-option-content${highlightedSyncFilesProvider === provider ? ' is-highlighted' : ''}`} htmlFor={`${provider}-sync-files`}>
                                   <span className="account-provider-option-title">
                                     Sync my files
-                                    {connected && (
-                                      <button type="button" className="btn btn-link btn-sm account-provider-modify-link">
+                                    {connected && providerSession && providerPreferences.syncFiles && (
+                                      <button
+                                        type="button"
+                                        className="btn btn-link btn-sm account-provider-modify-link"
+                                        onClick={(event) => {
+                                          event.preventDefault();
+                                          event.stopPropagation();
+                                          handleModifyFilesAccess(provider);
+                                        }}
+                                      >
                                         Modify
                                       </button>
                                     )}
