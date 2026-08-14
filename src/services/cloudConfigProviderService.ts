@@ -24,6 +24,15 @@ export interface CloudFolderLineageEntry {
   hasChildren: boolean;
 }
 
+export interface SyncedCloudFolderSelection {
+  id: string;
+  kind: 'folder';
+  name?: string;
+  path?: string;
+  sizeBytes?: number;
+  sizeKnown?: boolean;
+}
+
 export interface SyncedCloudConfig {
   schemaVersion: 1;
   updatedAt: number;
@@ -39,7 +48,9 @@ export interface SyncedCloudConfig {
     | 'sourceUrls'
     | 'resourceHiddenTags'
     | 'theme'
-  >;
+  > & {
+    providerFolderSelections?: Partial<Record<FederatedProvider, SyncedCloudFolderSelection[]>>;
+  };
 }
 
 function isLinkedCloudAccount(value: unknown): value is LinkedCloudAccount {

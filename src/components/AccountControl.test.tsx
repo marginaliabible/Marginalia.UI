@@ -511,7 +511,7 @@ describe('AccountControl', () => {
     confirmSpy.mockRestore();
   });
 
-  it('autosaves folder selections from the custom picker', async () => {
+  it('saves folder selections from the custom picker after clicking Apply', async () => {
     mockReadState.mockReturnValue({
       lastTranslationId: 'KJV',
       lastTranslationIds: ['KJV'],
@@ -571,6 +571,8 @@ describe('AccountControl', () => {
 
     fireEvent.click(screen.getByLabelText('Google Drive/Bible Notes Folder'));
 
+    fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
+
     await waitFor(() => {
       const persisted = JSON.parse(window.localStorage.getItem('marginalia:provider-sync-preferences') || '{}');
       expect(persisted.google.selectedTargets).toEqual([
@@ -584,6 +586,76 @@ describe('AccountControl', () => {
         },
       ]);
     });
+  });
+
+  it('discards folder selections when Cancel is clicked', async () => {
+    mockReadState.mockReturnValue({
+      lastTranslationId: 'KJV',
+      lastTranslationIds: ['KJV'],
+      cloudLinkedAccounts: [
+        {
+          provider: 'google',
+          providerAccountId: 'g-user-1',
+          email: 'g@example.com',
+          linkedAt: Date.now() - 5000,
+        },
+      ],
+      cloudConfigUpdatedAt: Date.now() - 10_000,
+      cloudConfigLastSyncedAt: Date.now() - 10_000,
+    });
+
+    window.localStorage.setItem('marginalia:provider-sync-preferences', JSON.stringify({
+      google: {
+        syncSettings: false,
+        syncFiles: true,
+        selectedTargets: [],
+      },
+      microsoft: {
+        syncSettings: false,
+        syncFiles: false,
+        selectedTargets: [],
+      },
+    }));
+
+    mockGetStoredSessions.mockReturnValue({ google: googleSession });
+    mockGetFreshSessions.mockResolvedValue({ google: googleSession });
+    mockReadFolderRootSizeForSession.mockResolvedValue(0);
+    mockReadFolderSizeForSession.mockResolvedValue(24 * 1024 * 1024);
+    mockListFolderChildrenForSession.mockResolvedValue([
+      {
+        id: 'g-folder-1',
+        name: 'Bible Notes Folder',
+        sizeBytes: 24 * 1024 * 1024,
+        hasChildren: false,
+      },
+    ]);
+
+    await renderAccountControl();
+    openAccountModal();
+    expandProvider('Google');
+
+    await waitFor(() => {
+      expect(screen.getByText('Google Drive')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByLabelText('Expand Google Drive'));
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('Google Drive/Bible Notes Folder')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByLabelText('Google Drive/Bible Notes Folder'));
+
+    expect(screen.getByRole('button', { name: 'Apply' })).toBeEnabled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('Google Drive/Bible Notes Folder')).not.toBeChecked();
+    });
+
+    const persisted = JSON.parse(window.localStorage.getItem('marginalia:provider-sync-preferences') || '{}');
+    expect(persisted.google.selectedTargets).toEqual([]);
   });
 
   it('keeps prior folder selections when picker is opened', async () => {

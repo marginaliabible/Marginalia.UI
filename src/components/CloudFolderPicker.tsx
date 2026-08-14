@@ -30,6 +30,7 @@ interface CloudFolderPickerProps {
   focusRequest: { provider: FederatedProvider; requestId: number } | null;
   onSelectionsChange: (next: Record<FederatedProvider, FolderSelectionTarget[]>) => void;
   onConnectRequested: (provider: FederatedProvider) => void;
+  onDirtyChange?: (isDirty: boolean) => void;
 }
 
 interface FolderTreeNode {
@@ -198,6 +199,34 @@ function hasSelectedAncestor(
   return false;
 }
 
+function buildSelectedMapFromPayload(
+  payload: Record<FederatedProvider, FolderSelectionTarget[]>
+): Record<string, SelectedFolder> {
+  const nextSelected: Record<string, SelectedFolder> = {};
+
+  for (const provider of ['google', 'microsoft'] as FederatedProvider[]) {
+    const providerTargets = payload[provider] || [];
+    for (const target of providerTargets) {
+      if (target.kind !== 'folder') {
+        continue;
+      }
+
+      const key = makeNodeKey(provider, target.id);
+      nextSelected[key] = {
+        key,
+        provider,
+        id: target.id,
+        name: target.name || target.id,
+        path: target.path || `${ROOT_LABEL[provider]}/${target.name || target.id}`,
+        sizeBytes: Number(target.sizeBytes || 0) || 0,
+        sizeKnown: !(provider === 'google' && target.id !== 'root' && (Number(target.sizeBytes || 0) || 0) === 0),
+      };
+    }
+  }
+
+  return nextSelected;
+}
+
 const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
   sessions,
   initialSelections,
@@ -205,6 +234,7 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
   focusRequest,
   onSelectionsChange,
   onConnectRequested,
+  onDirtyChange,
 }) => {
   const [loadingRoots, setLoadingRoots] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -220,7 +250,6 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
   const nodeRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const rootRowRefs = useRef<Record<FederatedProvider, HTMLDivElement | null>>({ google: null, microsoft: null });
   const initialSelectionsRef = useRef(initialSelections);
-  const hasUserSelectionInteractionRef = useRef(false);
   const hasBootstrappedSelectionsRef = useRef(false);
   const {
     primaryPercent: splitPercent,
@@ -424,26 +453,7 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
         nextRootKeys.push(root.key);
       }
 
-      const initialSelected: Record<string, SelectedFolder> = {};
-      for (const provider of ['google', 'microsoft'] as FederatedProvider[]) {
-        const providerTargets = initialSelectionsRef.current[provider] || [];
-        for (const target of providerTargets) {
-          if (target.kind !== 'folder') {
-            continue;
-          }
-
-          const key = makeNodeKey(provider, target.id);
-          initialSelected[key] = {
-            key,
-            provider,
-            id: target.id,
-            name: target.name || target.id,
-            path: target.path || `${ROOT_LABEL[provider]}/${target.name || target.id}`,
-            sizeBytes: Number(target.sizeBytes || 0) || 0,
-            sizeKnown: !(provider === 'google' && target.id !== 'root' && (Number(target.sizeBytes || 0) || 0) === 0),
-          };
-        }
-      }
+      const initialSelected = buildSelectedMapFromPayload(initialSelectionsRef.current);
 
       nodesRef.current = nextNodes;
       setNodes(nextNodes);
@@ -523,8 +533,6 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
       return;
     }
 
-    hasUserSelectionInteractionRef.current = true;
-
     setSelected((current) => {
       const ancestorSelected = hasSelectedAncestor(key, current, nodes);
       if (ancestorSelected) {
@@ -557,23 +565,25 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
     });
   }, [nodes]);
 
-  useEffect(() => {
+  const isDirty = useMemo(() => {
     if (!hasBootstrappedSelectionsRef.current) {
-      return;
+      return false;
     }
 
-    const nextPayload = toSelectionPayload(selectedRows);
-    const initialPayload: Record<FederatedProvider, FolderSelectionTarget[]> = {
-      google: initialSelectionsRef.current.google || [],
-      microsoft: initialSelectionsRef.current.microsoft || [],
-    };
+    return !areSelectionPayloadsEqual(toSelectionPayload(selectedRows), initialSelections);
+  }, [initialSelections, selectedRows]);
 
-    if (!hasUserSelectionInteractionRef.current && areSelectionPayloadsEqual(nextPayload, initialPayload)) {
-      return;
-    }
+  useEffect(() => {
+    onDirtyChange?.(isDirty);
+  }, [isDirty, onDirtyChange]);
 
-    onSelectionsChange(nextPayload);
+  const handleApply = useCallback(() => {
+    onSelectionsChange(toSelectionPayload(selectedRows));
   }, [onSelectionsChange, selectedRows]);
+
+  const handleCancel = useCallback(() => {
+    setSelected(buildSelectedMapFromPayload(initialSelectionsRef.current));
+  }, []);
 
   const revealPath = useCallback(async (row: SelectedFolder) => {
     const trace: string[] = [];
@@ -806,6 +816,24 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
           <div className="fw-semibold">File Sync</div>
           <div className="small text-body-secondary">Select folders to allow for sync across connected providers.</div>
         </div>
+        <div className="cloud-folder-picker-header-actions d-flex gap-2">
+          <button
+            type="button"
+            className="btn btn-outline-secondary btn-sm"
+            disabled={!isDirty}
+            onClick={handleCancel}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="btn btn-primary btn-sm"
+            disabled={!isDirty}
+            onClick={handleApply}
+          >
+            Apply
+          </button>
+        </div>
       </div>
 
       <div ref={layoutRef} className="cloud-folder-picker-layout">
@@ -917,7 +945,7 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
                 <tr>
                   <th scope="col" className="cloud-folder-selected-remove-col"></th>
                   <th scope="col">Folder</th>
-                  <th scope="col" className="text-end">Size</th>
+                  <th scope="col" className="text-end text-nowrap">Size</th>
                 </tr>
               </thead>
               <tbody>
@@ -945,7 +973,6 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
                           title="Stop syncing folder"
                           aria-label={`Stop syncing ${row.path}`}
                           onClick={() => {
-                            hasUserSelectionInteractionRef.current = true;
                             setSelected((current) => {
                               const next = { ...current };
                               delete next[row.key];
@@ -972,7 +999,7 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
                         {row.path}
                       </button>
                     </td>
-                    <td className="text-end text-body-secondary">
+                    <td className="text-end text-nowrap text-body-secondary">
                       {formatFolderSize(row.sizeBytes, {
                         provider: row.provider,
                         isRoot: row.id === 'root',

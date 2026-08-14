@@ -26,6 +26,7 @@ type SyncState = 'idle' | 'syncing' | 'error';
 const THIRTY_MINUTES_MS = 30 * 60 * 1000;
 const PROVIDERS: FederatedProvider[] = ['google', 'microsoft'];
 const DISCONNECT_FILE_SYNC_CONFIRMATION = 'Your synchronization data will be kept for 30 days. If you reconnect after 30 days than you may incur additional data usage to reprocess your files. Are you sure you wish to disconnect this service from file sync?';
+const UNSAVED_FILE_SYNC_CONFIRMATION = 'You have unapplied File Sync folder changes. Discard them?';
 const PROVIDER_SYNC_PREFERENCES_STORAGE_KEY = 'marginalia:provider-sync-preferences';
 
 const PROVIDER_LABEL: Record<FederatedProvider, string> = {
@@ -260,6 +261,8 @@ const AccountControl: React.FC = () => {
   const [expandedProvider, setExpandedProvider] = useState<FederatedProvider | null>(null);
   const [fileSyncFocusRequest, setFileSyncFocusRequest] = useState<{ provider: FederatedProvider; requestId: number } | null>(null);
   const [highlightedSyncFilesProvider, setHighlightedSyncFilesProvider] = useState<FederatedProvider | null>(null);
+  const [hasUnsavedFileSyncChanges, setHasUnsavedFileSyncChanges] = useState(false);
+  const [forceSyncRequestId, setForceSyncRequestId] = useState(0);
   const [providerSyncPreferences, setProviderSyncPreferences] = useState<ProviderSyncPreferenceMap>(() => {
     const defaults = createDefaultProviderPreferences();
     const stored = readStoredProviderSyncPreferences();
@@ -289,6 +292,10 @@ const AccountControl: React.FC = () => {
       sourceUrls,
       resourceHiddenTags,
       theme,
+      providerFolderSelections: {
+        google: providerSyncPreferences.google.selectedTargets,
+        microsoft: providerSyncPreferences.microsoft.selectedTargets,
+      },
     });
   }, [
     selectedTranslationId,
@@ -300,6 +307,7 @@ const AccountControl: React.FC = () => {
     sourceUrls,
     resourceHiddenTags,
     theme,
+    providerSyncPreferences,
   ]);
 
   const configSnapshot = useMemo<SyncedCloudConfig['config']>(() => {
@@ -313,6 +321,10 @@ const AccountControl: React.FC = () => {
       sourceUrls,
       resourceHiddenTags,
       theme,
+      providerFolderSelections: {
+        google: providerSyncPreferences.google.selectedTargets,
+        microsoft: providerSyncPreferences.microsoft.selectedTargets,
+      },
     };
   }, [
     selectedTranslationId,
@@ -324,6 +336,7 @@ const AccountControl: React.FC = () => {
     sourceUrls,
     resourceHiddenTags,
     theme,
+    providerSyncPreferences,
   ]);
 
   const activeSession = useMemo(() => getMostRecentlyGrantedSession(sessions), [sessions]);
@@ -416,6 +429,26 @@ const AccountControl: React.FC = () => {
       resourceHiddenTags: Array.isArray(remote.resourceHiddenTags) ? remote.resourceHiddenTags : [],
       theme: remote.theme || 'light',
     }));
+
+    const remoteFolderSelections = remote.providerFolderSelections;
+    if (remoteFolderSelections) {
+      setProviderSyncPreferences((current) => {
+        const next = { ...current };
+        for (const provider of PROVIDERS) {
+          const remoteTargets = remoteFolderSelections[provider];
+          if (!Array.isArray(remoteTargets)) {
+            continue;
+          }
+
+          next[provider] = {
+            ...next[provider],
+            selectedTargets: remoteTargets.filter((entry): entry is ProviderSyncTarget => isProviderSyncTarget(entry)),
+          };
+        }
+
+        return next;
+      });
+    }
 
     if (remote.lastTranslationId) {
       await dispatch(loadTranslation(remote.lastTranslationId));
@@ -609,6 +642,11 @@ const AccountControl: React.FC = () => {
 
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
+        if (hasUnsavedFileSyncChanges && !window.confirm(UNSAVED_FILE_SYNC_CONFIRMATION)) {
+          return;
+        }
+
+        setHasUnsavedFileSyncChanges(false);
         setIsModalOpen(false);
       }
     };
@@ -617,7 +655,23 @@ const AccountControl: React.FC = () => {
     return () => {
       window.removeEventListener('keydown', onKeyDown);
     };
-  }, [isModalOpen]);
+  }, [isModalOpen, hasUnsavedFileSyncChanges]);
+
+  useEffect(() => {
+    if (!isModalOpen || !hasUnsavedFileSyncChanges) {
+      return;
+    }
+
+    const onBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = '';
+    };
+
+    window.addEventListener('beforeunload', onBeforeUnload);
+    return () => {
+      window.removeEventListener('beforeunload', onBeforeUnload);
+    };
+  }, [isModalOpen, hasUnsavedFileSyncChanges]);
 
   useEffect(() => {
     if (missingProviderPrompts.length === 0) {
@@ -805,6 +859,14 @@ const AccountControl: React.FC = () => {
     };
   }, [configUpdatedAt, hasPendingSync, linkedAccounts.length, ready, syncNow]);
 
+  useEffect(() => {
+    if (forceSyncRequestId === 0) {
+      return;
+    }
+
+    void syncNow();
+  }, [forceSyncRequestId, syncNow]);
+
   const handleConnect = useCallback(async (provider: FederatedProvider, preferences: ProviderSyncPreferences) => {
     setStatusMessage(null);
     try {
@@ -904,6 +966,10 @@ const AccountControl: React.FC = () => {
         })),
       },
     }));
+
+    // Push the updated folder selections to the cloud right away instead of waiting on the debounced autosync.
+    setConfigUpdatedAt(Date.now());
+    setForceSyncRequestId((current) => current + 1);
   }, []);
 
   const handleProviderAction = useCallback((provider: FederatedProvider) => {
@@ -960,6 +1026,11 @@ const AccountControl: React.FC = () => {
   }, [focusFileSyncService, handleProviderAction, providerSessionByType]);
 
   const closeModal = () => {
+    if (hasUnsavedFileSyncChanges && !window.confirm(UNSAVED_FILE_SYNC_CONFIRMATION)) {
+      return;
+    }
+
+    setHasUnsavedFileSyncChanges(false);
     setIsModalOpen(false);
   };
 
@@ -1036,6 +1107,7 @@ const AccountControl: React.FC = () => {
                     focusRequest={fileSyncFocusRequest}
                     onSelectionsChange={handleApplyFolderSelections}
                     onConnectRequested={handleConnectRequestedFromPicker}
+                    onDirtyChange={setHasUnsavedFileSyncChanges}
                   />
 
                   <section className="account-provider-stack">
@@ -1134,7 +1206,8 @@ const AccountControl: React.FC = () => {
                                     )}
                                   </span>
                                   <span className="account-provider-option-description">
-                                    Access your own Bible notes accessible directly in Marginalia, indexed by verse! You pick which files & folders we have access to in your {provider === 'google' ? 'Google Drive' : 'OneDrive'}. We'll only be able to read those files.
+                                    Access your own Bible notes accessible directly in Marginalia, indexed by verse! 
+                                    You pick which files & folders we have access to in your {provider === 'google' ? 'Google Drive' : 'OneDrive'}. We'll only read those files.
                                   </span>
                                 </label>
                               </div>
@@ -1158,15 +1231,18 @@ const AccountControl: React.FC = () => {
                     })}
                   </section>
 
-                  {lastSyncedAt && (
-                    <p className="small text-body-secondary mb-0">
-                      Last synced {new Date(lastSyncedAt).toLocaleString()}.
-                    </p>
-                  )}
-
-                  {syncState === 'syncing' && (
-                    <p className="small text-body-secondary mb-0">
-                      Syncing configuration...
+                  {(lastSyncedAt || syncState === 'syncing') && (
+                    <p className="small text-body-secondary mb-0 d-flex align-items-center gap-2">
+                      <i
+                        className="fa-solid fa-circle-notch fa-spin account-sync-spinner"
+                        style={{ visibility: syncState === 'syncing' ? 'visible' : 'hidden' }}
+                        aria-hidden="true"
+                      ></i>
+                      <span>
+                        {lastSyncedAt
+                          ? `Last synced ${new Date(lastSyncedAt).toLocaleString()}.`
+                          : 'Syncing configuration...'}
+                      </span>
                     </p>
                   )}
 
