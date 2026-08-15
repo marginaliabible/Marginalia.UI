@@ -1,5 +1,4 @@
-import React from 'react';
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import AccountControl from './AccountControl';
 import { useAppDispatch, useAppSelector } from '../store/hooks';
 import { bibleService } from '../services/bibleService';
@@ -11,8 +10,7 @@ import {
 } from '../services/federatedAuthService';
 import {
   listFolderChildrenForSession,
-  readFolderSizeForSession,
-  readFolderRootSizeForSession,
+  computeSupportedFolderSizeForSession,
   readCloudConfigForSession,
   writeCloudConfigForSession,
 } from '../services/cloudConfigProviderService';
@@ -29,6 +27,7 @@ jest.mock('../store/slices/bibleSlice', () => ({
 
 jest.mock('../store/slices/uiSlice', () => ({
   restoreState: jest.fn((payload: unknown) => ({ type: 'ui/restoreState', payload })),
+  setUserId: jest.fn((payload: unknown) => ({ type: 'ui/setUserId', payload })),
 }));
 
 jest.mock('../services/bibleService', () => ({
@@ -55,8 +54,7 @@ jest.mock('../services/federatedAuthService', () => ({
 jest.mock('../services/cloudConfigProviderService', () => ({
   listFolderChildrenForSession: jest.fn(),
   mergeLinkedAccounts: jest.requireActual('../services/cloudConfigProviderService').mergeLinkedAccounts,
-  readFolderSizeForSession: jest.fn(),
-  readFolderRootSizeForSession: jest.fn(),
+  computeSupportedFolderSizeForSession: jest.fn(),
   readCloudConfigForSession: jest.fn(),
   writeCloudConfigForSession: jest.fn(),
 }));
@@ -70,8 +68,7 @@ const mockCompleteAuth = completeFederatedAuthorizationFromUrl as jest.Mock;
 const mockGetStoredSessions = getStoredFederatedSessions as jest.Mock;
 const mockGetFreshSessions = getFreshFederatedSessions as jest.Mock;
 const mockListFolderChildrenForSession = listFolderChildrenForSession as jest.Mock;
-const mockReadFolderSizeForSession = readFolderSizeForSession as jest.Mock;
-const mockReadFolderRootSizeForSession = readFolderRootSizeForSession as jest.Mock;
+const mockComputeSupportedFolderSizeForSession = computeSupportedFolderSizeForSession as jest.Mock;
 const mockReadCloudConfigForSession = readCloudConfigForSession as jest.Mock;
 const mockWriteCloudConfigForSession = writeCloudConfigForSession as jest.Mock;
 
@@ -170,7 +167,7 @@ describe('AccountControl', () => {
     mockCompleteAuth.mockResolvedValue({ handled: false });
     mockBeginAuth.mockResolvedValue(undefined);
     mockListFolderChildrenForSession.mockResolvedValue([]);
-    mockReadFolderRootSizeForSession.mockResolvedValue(0);
+    mockComputeSupportedFolderSizeForSession.mockResolvedValue(0);
     mockReadCloudConfigForSession.mockResolvedValue(null);
     mockWriteCloudConfigForSession.mockResolvedValue(undefined);
     mockGetFreshSessions.mockResolvedValue({});
@@ -244,7 +241,7 @@ describe('AccountControl', () => {
       },
     }));
 
-    mockReadFolderSizeForSession.mockResolvedValue(0);
+    mockComputeSupportedFolderSizeForSession.mockResolvedValue(0);
     mockReadState.mockReturnValue({
       lastTranslationId: 'KJV',
       lastTranslationIds: ['KJV'],
@@ -542,12 +539,12 @@ describe('AccountControl', () => {
 
     mockGetStoredSessions.mockReturnValue({ google: googleSession });
     mockGetFreshSessions.mockResolvedValue({ google: googleSession });
-    mockReadFolderRootSizeForSession.mockResolvedValue(0);
-    mockReadFolderSizeForSession.mockResolvedValue(24 * 1024 * 1024);
+    mockComputeSupportedFolderSizeForSession.mockResolvedValue(24 * 1024 * 1024);
     mockListFolderChildrenForSession.mockResolvedValue([
       {
         id: 'g-folder-1',
         name: 'Bible Notes Folder',
+        kind: 'folder',
         sizeBytes: 24 * 1024 * 1024,
         hasChildren: false,
       },
@@ -571,6 +568,17 @@ describe('AccountControl', () => {
 
     fireEvent.click(screen.getByLabelText('Google Drive/Bible Notes Folder'));
 
+    // The right panel shows the full path for the root selection, not just the folder name.
+    await waitFor(() => {
+      expect(screen.getByText('Google Drive/Bible Notes Folder')).toBeInTheDocument();
+    });
+
+    // Folder size in the right panel is computed lazily; wait for it before Apply so the
+    // persisted selection includes the resolved size.
+    await waitFor(() => {
+      expect(screen.getByText('24 MB')).toBeInTheDocument();
+    });
+
     fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
 
     await waitFor(() => {
@@ -585,6 +593,277 @@ describe('AccountControl', () => {
           sizeKnown: true,
         },
       ]);
+    });
+  });
+
+  it('excludes an individual supported file from sync without affecting unsupported files or the root selection', async () => {
+    mockReadState.mockReturnValue({
+      lastTranslationId: 'KJV',
+      lastTranslationIds: ['KJV'],
+      cloudLinkedAccounts: [
+        {
+          provider: 'google',
+          providerAccountId: 'g-user-1',
+          email: 'g@example.com',
+          linkedAt: Date.now() - 5000,
+        },
+      ],
+      cloudConfigUpdatedAt: Date.now() - 10_000,
+      cloudConfigLastSyncedAt: Date.now() - 10_000,
+    });
+
+    window.localStorage.setItem('marginalia:provider-sync-preferences', JSON.stringify({
+      google: {
+        syncSettings: false,
+        syncFiles: true,
+        selectedTargets: [],
+      },
+      microsoft: {
+        syncSettings: false,
+        syncFiles: false,
+        selectedTargets: [],
+      },
+    }));
+
+    mockGetStoredSessions.mockReturnValue({ google: googleSession });
+    mockGetFreshSessions.mockResolvedValue({ google: googleSession });
+    mockComputeSupportedFolderSizeForSession.mockResolvedValue(1024);
+    mockListFolderChildrenForSession.mockImplementation(async (_session: unknown, parentId: string) => {
+      if (parentId === 'g-folder-1') {
+        return [
+          { id: 'g-file-notes', name: 'notes.txt', kind: 'file', sizeBytes: 1024, hasChildren: false },
+          { id: 'g-file-video', name: 'clip.mov', kind: 'file', sizeBytes: 2048, hasChildren: false },
+        ];
+      }
+
+      return [
+        { id: 'g-folder-1', name: 'Bible Notes Folder', kind: 'folder', sizeBytes: 0, hasChildren: true },
+      ];
+    });
+
+    await renderAccountControl();
+    openAccountModal();
+    expandProvider('Google');
+
+    await waitFor(() => {
+      expect(screen.getByText('Google Drive')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByLabelText('Expand Google Drive'));
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('Google Drive/Bible Notes Folder')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByLabelText('Google Drive/Bible Notes Folder'));
+
+    // Expand the selected root row in the right panel to reveal its files.
+    const rightPanel = within(document.querySelector('.cloud-folder-picker-right') as HTMLElement);
+    fireEvent.click(rightPanel.getByLabelText('Expand Bible Notes Folder'));
+
+    await waitFor(() => {
+      expect(rightPanel.getByText('notes.txt')).toBeInTheDocument();
+      expect(rightPanel.getByText('clip.mov')).toBeInTheDocument();
+    });
+
+    // The unsupported file has no size and no sync-toggle button.
+    expect(rightPanel.queryByLabelText(/clip\.mov from sync/i)).not.toBeInTheDocument();
+
+    fireEvent.click(rightPanel.getByLabelText(/Exclude .*notes\.txt from sync/i));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
+
+    await waitFor(() => {
+      const persisted = JSON.parse(window.localStorage.getItem('marginalia:provider-sync-preferences') || '{}');
+      expect(persisted.google.selectedTargets).toHaveLength(1);
+      expect(persisted.google.selectedTargets[0].excludedItemIds).toEqual(['g-file-notes']);
+    });
+  });
+
+  it('hides (without collapsing layout) the sync toggle for descendants of an excluded subfolder', async () => {
+    mockReadState.mockReturnValue({
+      lastTranslationId: 'KJV',
+      lastTranslationIds: ['KJV'],
+      cloudLinkedAccounts: [
+        {
+          provider: 'google',
+          providerAccountId: 'g-user-1',
+          email: 'g@example.com',
+          linkedAt: Date.now() - 5000,
+        },
+      ],
+      cloudConfigUpdatedAt: Date.now() - 10_000,
+      cloudConfigLastSyncedAt: Date.now() - 10_000,
+    });
+
+    window.localStorage.setItem('marginalia:provider-sync-preferences', JSON.stringify({
+      google: {
+        syncSettings: false,
+        syncFiles: true,
+        selectedTargets: [],
+      },
+      microsoft: {
+        syncSettings: false,
+        syncFiles: false,
+        selectedTargets: [],
+      },
+    }));
+
+    mockGetStoredSessions.mockReturnValue({ google: googleSession });
+    mockGetFreshSessions.mockResolvedValue({ google: googleSession });
+    mockComputeSupportedFolderSizeForSession.mockResolvedValue(0);
+    mockListFolderChildrenForSession.mockImplementation(async (_session: unknown, parentId: string) => {
+      if (parentId === 'g-folder-1') {
+        return [
+          { id: 'g-sub-a', name: 'Old Testament', kind: 'folder', sizeBytes: 0, hasChildren: true },
+        ];
+      }
+
+      if (parentId === 'g-sub-a') {
+        return [
+          { id: 'g-sub-b', name: 'Genesis', kind: 'folder', sizeBytes: 0, hasChildren: true },
+        ];
+      }
+
+      if (parentId === 'g-sub-b') {
+        return [
+          { id: 'g-file-c', name: 'chapter1.txt', kind: 'file', sizeBytes: 100, hasChildren: false },
+        ];
+      }
+
+      return [
+        { id: 'g-folder-1', name: 'Bible Notes Folder', kind: 'folder', sizeBytes: 0, hasChildren: true },
+      ];
+    });
+
+    await renderAccountControl();
+    openAccountModal();
+    expandProvider('Google');
+
+    await waitFor(() => {
+      expect(screen.getByText('Google Drive')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByLabelText('Expand Google Drive'));
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('Google Drive/Bible Notes Folder')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByLabelText('Google Drive/Bible Notes Folder'));
+
+    const rightPanel = within(document.querySelector('.cloud-folder-picker-right') as HTMLElement);
+    fireEvent.click(rightPanel.getByLabelText('Expand Bible Notes Folder'));
+
+    await waitFor(() => {
+      expect(rightPanel.getByText('Old Testament')).toBeInTheDocument();
+    });
+
+    // Exclude "Old Testament" itself; its own sync toggle should remain visible.
+    fireEvent.click(rightPanel.getByLabelText(/Exclude .*Old Testament from sync/i));
+    expect(rightPanel.getByLabelText(/Resume syncing .*Old Testament/i)).toBeInTheDocument();
+
+    fireEvent.click(rightPanel.getByLabelText('Expand Old Testament'));
+
+    await waitFor(() => {
+      expect(rightPanel.getByText('Genesis')).toBeInTheDocument();
+    });
+
+    // A descendant folder of an excluded folder keeps its sync-toggle slot (for layout) but the
+    // button itself is hidden and disabled since it's already excluded via its ancestor.
+    const genesisSyncButton = rightPanel.getByLabelText(/Exclude .*Genesis from sync/i);
+    expect(genesisSyncButton).toHaveStyle({ visibility: 'hidden' });
+    expect(genesisSyncButton).toBeDisabled();
+
+    fireEvent.click(rightPanel.getByLabelText('Expand Genesis'));
+
+    await waitFor(() => {
+      expect(rightPanel.getByText('chapter1.txt')).toBeInTheDocument();
+    });
+
+    // Same for a deeper descendant file.
+    const chapterSyncButton = rightPanel.getByLabelText(/Exclude .*chapter1\.txt from sync/i);
+    expect(chapterSyncButton).toHaveStyle({ visibility: 'hidden' });
+    expect(chapterSyncButton).toBeDisabled();
+  });
+
+  it('expands a nested subfolder in the right panel independently of the left panel', async () => {
+    mockReadState.mockReturnValue({
+      lastTranslationId: 'KJV',
+      lastTranslationIds: ['KJV'],
+      cloudLinkedAccounts: [
+        {
+          provider: 'google',
+          providerAccountId: 'g-user-1',
+          email: 'g@example.com',
+          linkedAt: Date.now() - 5000,
+        },
+      ],
+      cloudConfigUpdatedAt: Date.now() - 10_000,
+      cloudConfigLastSyncedAt: Date.now() - 10_000,
+    });
+
+    window.localStorage.setItem('marginalia:provider-sync-preferences', JSON.stringify({
+      google: {
+        syncSettings: false,
+        syncFiles: true,
+        selectedTargets: [],
+      },
+      microsoft: {
+        syncSettings: false,
+        syncFiles: false,
+        selectedTargets: [],
+      },
+    }));
+
+    mockGetStoredSessions.mockReturnValue({ google: googleSession });
+    mockGetFreshSessions.mockResolvedValue({ google: googleSession });
+    mockComputeSupportedFolderSizeForSession.mockResolvedValue(1024);
+    mockListFolderChildrenForSession.mockImplementation(async (_session: unknown, parentId: string) => {
+      if (parentId === 'g-folder-1') {
+        return [
+          { id: 'g-subfolder-1', name: 'Old Testament', kind: 'folder', sizeBytes: 0, hasChildren: true },
+        ];
+      }
+
+      if (parentId === 'g-subfolder-1') {
+        return [
+          { id: 'g-file-genesis', name: 'genesis.txt', kind: 'file', sizeBytes: 512, hasChildren: false },
+        ];
+      }
+
+      return [
+        { id: 'g-folder-1', name: 'Bible Notes Folder', kind: 'folder', sizeBytes: 0, hasChildren: true },
+      ];
+    });
+
+    await renderAccountControl();
+    openAccountModal();
+    expandProvider('Google');
+
+    await waitFor(() => {
+      expect(screen.getByText('Google Drive')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByLabelText('Expand Google Drive'));
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('Google Drive/Bible Notes Folder')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByLabelText('Google Drive/Bible Notes Folder'));
+
+    const rightPanel = within(document.querySelector('.cloud-folder-picker-right') as HTMLElement);
+    fireEvent.click(rightPanel.getByLabelText('Expand Bible Notes Folder'));
+
+    await waitFor(() => {
+      expect(rightPanel.getByText('Old Testament')).toBeInTheDocument();
+    });
+
+    fireEvent.click(rightPanel.getByLabelText('Expand Old Testament'));
+
+    await waitFor(() => {
+      expect(rightPanel.getByText('genesis.txt')).toBeInTheDocument();
     });
   });
 
@@ -619,12 +898,12 @@ describe('AccountControl', () => {
 
     mockGetStoredSessions.mockReturnValue({ google: googleSession });
     mockGetFreshSessions.mockResolvedValue({ google: googleSession });
-    mockReadFolderRootSizeForSession.mockResolvedValue(0);
-    mockReadFolderSizeForSession.mockResolvedValue(24 * 1024 * 1024);
+    mockComputeSupportedFolderSizeForSession.mockResolvedValue(24 * 1024 * 1024);
     mockListFolderChildrenForSession.mockResolvedValue([
       {
         id: 'g-folder-1',
         name: 'Bible Notes Folder',
+        kind: 'folder',
         sizeBytes: 24 * 1024 * 1024,
         hasChildren: false,
       },
@@ -656,6 +935,151 @@ describe('AccountControl', () => {
 
     const persisted = JSON.parse(window.localStorage.getItem('marginalia:provider-sync-preferences') || '{}');
     expect(persisted.google.selectedTargets).toEqual([]);
+  });
+
+  it('only shows a left-panel chevron for subfolders that themselves contain a subfolder', async () => {
+    mockReadState.mockReturnValue({
+      lastTranslationId: 'KJV',
+      lastTranslationIds: ['KJV'],
+      cloudLinkedAccounts: [
+        {
+          provider: 'google',
+          providerAccountId: 'g-user-1',
+          email: 'g@example.com',
+          linkedAt: Date.now() - 5000,
+        },
+      ],
+      cloudConfigUpdatedAt: Date.now() - 10_000,
+      cloudConfigLastSyncedAt: Date.now() - 10_000,
+    });
+
+    window.localStorage.setItem('marginalia:provider-sync-preferences', JSON.stringify({
+      google: {
+        syncSettings: false,
+        syncFiles: true,
+        selectedTargets: [],
+      },
+      microsoft: {
+        syncSettings: false,
+        syncFiles: false,
+        selectedTargets: [],
+      },
+    }));
+
+    mockGetStoredSessions.mockReturnValue({ google: googleSession });
+    mockGetFreshSessions.mockResolvedValue({ google: googleSession });
+    mockListFolderChildrenForSession.mockImplementation(async (_session: unknown, parentId: string) => {
+      if (parentId === 'root') {
+        return [
+          { id: 'g-has-sub', name: 'HasSub', kind: 'folder', sizeBytes: 0, hasChildren: true },
+          { id: 'g-no-sub', name: 'NoSub', kind: 'folder', sizeBytes: 0, hasChildren: true },
+        ];
+      }
+
+      if (parentId === 'g-has-sub') {
+        return [
+          { id: 'g-deeper', name: 'Deeper', kind: 'folder', sizeBytes: 0, hasChildren: true },
+        ];
+      }
+
+      if (parentId === 'g-no-sub') {
+        return [
+          { id: 'g-leaf-file', name: 'leaf.txt', kind: 'file', sizeBytes: 10, hasChildren: false },
+        ];
+      }
+
+      return [];
+    });
+
+    await renderAccountControl();
+    openAccountModal();
+    expandProvider('Google');
+
+    await waitFor(() => {
+      expect(screen.getByText('Google Drive')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByLabelText('Expand Google Drive'));
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('Google Drive/HasSub')).toBeInTheDocument();
+      expect(screen.getByLabelText('Google Drive/NoSub')).toBeInTheDocument();
+    });
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('Expand HasSub')).toBeInTheDocument();
+    });
+
+    expect(screen.queryByLabelText('Expand NoSub')).not.toBeInTheDocument();
+  });
+
+  it('hides a right-panel folder chevron once expansion reveals it is completely empty', async () => {
+    mockReadState.mockReturnValue({
+      lastTranslationId: 'KJV',
+      lastTranslationIds: ['KJV'],
+      cloudLinkedAccounts: [
+        {
+          provider: 'google',
+          providerAccountId: 'g-user-1',
+          email: 'g@example.com',
+          linkedAt: Date.now() - 5000,
+        },
+      ],
+      cloudConfigUpdatedAt: Date.now() - 10_000,
+      cloudConfigLastSyncedAt: Date.now() - 10_000,
+    });
+
+    window.localStorage.setItem('marginalia:provider-sync-preferences', JSON.stringify({
+      google: {
+        syncSettings: false,
+        syncFiles: true,
+        selectedTargets: [],
+      },
+      microsoft: {
+        syncSettings: false,
+        syncFiles: false,
+        selectedTargets: [],
+      },
+    }));
+
+    mockGetStoredSessions.mockReturnValue({ google: googleSession });
+    mockGetFreshSessions.mockResolvedValue({ google: googleSession });
+    mockComputeSupportedFolderSizeForSession.mockResolvedValue(0);
+    mockListFolderChildrenForSession.mockImplementation(async (_session: unknown, parentId: string) => {
+      if (parentId === 'g-folder-1') {
+        return [];
+      }
+
+      return [
+        { id: 'g-folder-1', name: 'Empty Folder', kind: 'folder', sizeBytes: 0, hasChildren: true },
+      ];
+    });
+
+    await renderAccountControl();
+    openAccountModal();
+    expandProvider('Google');
+
+    await waitFor(() => {
+      expect(screen.getByText('Google Drive')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByLabelText('Expand Google Drive'));
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('Google Drive/Empty Folder')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByLabelText('Google Drive/Empty Folder'));
+
+    const rightPanel = within(document.querySelector('.cloud-folder-picker-right') as HTMLElement);
+    expect(rightPanel.getByLabelText('Expand Empty Folder')).toBeInTheDocument();
+
+    fireEvent.click(rightPanel.getByLabelText('Expand Empty Folder'));
+
+    await waitFor(() => {
+      expect(rightPanel.queryByLabelText('Expand Empty Folder')).not.toBeInTheDocument();
+      expect(rightPanel.queryByLabelText('Collapse Empty Folder')).not.toBeInTheDocument();
+    });
   });
 
   it('keeps prior folder selections when picker is opened', async () => {
@@ -697,8 +1121,7 @@ describe('AccountControl', () => {
 
     mockGetStoredSessions.mockReturnValue({ google: googleSession });
     mockGetFreshSessions.mockResolvedValue({ google: googleSession });
-    mockReadFolderRootSizeForSession.mockResolvedValue(0);
-    mockReadFolderSizeForSession.mockResolvedValue(4096);
+    mockComputeSupportedFolderSizeForSession.mockResolvedValue(4096);
 
     await renderAccountControl();
     openAccountModal();
@@ -720,6 +1143,75 @@ describe('AccountControl', () => {
         sizeBytes: 4096,
       },
     ]);
+  });
+
+  it('shows all persisted folder selections in the right panel on load, without expanding the left panel', async () => {
+    mockReadState.mockReturnValue({
+      lastTranslationId: 'KJV',
+      lastTranslationIds: ['KJV'],
+      cloudLinkedAccounts: [
+        {
+          provider: 'google',
+          providerAccountId: 'g-user-1',
+          email: 'g@example.com',
+          linkedAt: Date.now() - 5000,
+        },
+        {
+          provider: 'microsoft',
+          providerAccountId: 'ms-user-1',
+          email: 'ms@example.com',
+          linkedAt: Date.now() - 5000,
+        },
+      ],
+      cloudConfigUpdatedAt: Date.now() - 10_000,
+      cloudConfigLastSyncedAt: Date.now() - 10_000,
+    });
+
+    window.localStorage.setItem('marginalia:provider-sync-preferences', JSON.stringify({
+      google: {
+        syncSettings: false,
+        syncFiles: true,
+        selectedTargets: [
+          {
+            id: 'g-chicken',
+            kind: 'folder',
+            name: 'Chicken',
+            path: 'Google Drive/Egg/Chicken',
+          },
+        ],
+      },
+      microsoft: {
+        syncSettings: false,
+        syncFiles: true,
+        selectedTargets: [
+          {
+            id: 'ms-documents',
+            kind: 'folder',
+            name: 'Documents',
+            path: 'OneDrive/Documents',
+          },
+        ],
+      },
+    }));
+
+    mockGetStoredSessions.mockReturnValue({ google: googleSession, microsoft: msSession });
+    mockGetFreshSessions.mockResolvedValue({ google: googleSession, microsoft: msSession });
+    mockComputeSupportedFolderSizeForSession.mockResolvedValue(0);
+
+    await renderAccountControl();
+    openAccountModal();
+    expandProvider('Google');
+
+    const rightPanel = within(document.querySelector('.cloud-folder-picker-right') as HTMLElement);
+
+    await waitFor(() => {
+      expect(rightPanel.getByText('Google Drive/Egg/Chicken')).toBeInTheDocument();
+      expect(rightPanel.getByText('OneDrive/Documents')).toBeInTheDocument();
+    });
+
+    // Neither the left-panel root, nor any intermediate folder, was ever expanded.
+    expect(screen.queryByLabelText('Google Drive/Egg')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('OneDrive/Documents')).not.toBeInTheDocument();
   });
 
   it('always shows both provider roots in file sync panel', async () => {
@@ -753,7 +1245,6 @@ describe('AccountControl', () => {
 
     mockGetStoredSessions.mockReturnValue({ microsoft: msSession });
     mockGetFreshSessions.mockResolvedValue({ microsoft: msSession });
-    mockReadFolderRootSizeForSession.mockResolvedValue(0);
 
     await renderAccountControl();
     openAccountModal();
@@ -766,7 +1257,7 @@ describe('AccountControl', () => {
     });
   });
 
-  it('shows a helpful message when root loading fails', async () => {
+  it('shows a helpful message when folder loading fails', async () => {
     mockReadState.mockReturnValue({
       lastTranslationId: 'KJV',
       lastTranslationIds: ['KJV'],
@@ -797,18 +1288,20 @@ describe('AccountControl', () => {
 
     mockGetStoredSessions.mockReturnValue({ microsoft: msSession });
     mockGetFreshSessions.mockResolvedValue({ microsoft: msSession });
-    mockReadFolderRootSizeForSession.mockRejectedValue(new Error('Graph unavailable'));
+    mockListFolderChildrenForSession.mockRejectedValue(new Error('Graph unavailable'));
 
     await renderAccountControl();
     openAccountModal();
     expandProvider('Microsoft');
 
     await waitFor(() => {
-      expect(screen.getByText('File Sync')).toBeInTheDocument();
+      expect(screen.getByText('OneDrive')).toBeInTheDocument();
     });
 
+    fireEvent.click(screen.getByLabelText('Expand OneDrive'));
+
     await waitFor(() => {
-      expect(screen.getByText(/Unable to initialize folder picker: Graph unavailable/i)).toBeInTheDocument();
+      expect(screen.getByText(/Unable to load folders: Graph unavailable/i)).toBeInTheDocument();
     });
   });
 });

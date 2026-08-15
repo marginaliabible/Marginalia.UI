@@ -1,5 +1,6 @@
 import type { FederatedProvider, LinkedCloudAccount, MarginaliaState } from '../models/bible';
 import type { FederatedSession } from './federatedAuthService';
+import { isSupportedMarkupFileName } from '../utils/supportedMarkupFileTypes';
 
 const GOOGLE_APPDATA_FILENAME = 'marginalia-config.json';
 const MICROSOFT_CONFIG_PATH = 'marginalia-config.json';
@@ -13,6 +14,7 @@ export interface CloudSyncTargetOption {
 export interface CloudFolderEntry {
   id: string;
   name: string;
+  kind: 'file' | 'folder';
   sizeBytes: number;
   hasChildren: boolean;
 }
@@ -31,6 +33,8 @@ export interface SyncedCloudFolderSelection {
   path?: string;
   sizeBytes?: number;
   sizeKnown?: boolean;
+  // Cloud item IDs (folders or files, any depth) explicitly excluded from sync within this selection.
+  excludedItemIds?: string[];
 }
 
 export interface SyncedCloudConfig {
@@ -48,6 +52,7 @@ export interface SyncedCloudConfig {
     | 'sourceUrls'
     | 'resourceHiddenTags'
     | 'theme'
+    | 'userId'
   > & {
     providerFolderSelections?: Partial<Record<FederatedProvider, SyncedCloudFolderSelection[]>>;
   };
@@ -311,8 +316,8 @@ async function listGoogleFolderChildren(
 
   do {
     const params = new URLSearchParams({
-      q: `'${parentId}' in parents and trashed=false and mimeType='application/vnd.google-apps.folder'`,
-      fields: 'files(id,name,quotaBytesUsed),nextPageToken',
+      q: `'${parentId}' in parents and trashed=false`,
+      fields: 'files(id,name,mimeType,quotaBytesUsed,size),nextPageToken',
       pageSize: '200',
       supportsAllDrives: 'true',
       includeItemsFromAllDrives: 'true',
@@ -337,24 +342,29 @@ async function listGoogleFolderChildren(
       files?: Array<{
         id?: string;
         name?: string;
+        mimeType?: string;
         quotaBytesUsed?: string;
+        size?: string;
       }>;
       nextPageToken?: string;
     };
 
-    const folders = Array.isArray(payload.files) ? payload.files : [];
-    for (const folder of folders) {
-      if (typeof folder.id !== 'string' || folder.id.trim().length === 0) {
+    const entries = Array.isArray(payload.files) ? payload.files : [];
+    for (const entry of entries) {
+      if (typeof entry.id !== 'string' || entry.id.trim().length === 0) {
         continue;
       }
 
+      const isFolder = entry.mimeType === 'application/vnd.google-apps.folder';
+
       allFolders.push({
-        id: folder.id,
-        name: typeof folder.name === 'string' && folder.name.trim().length > 0 ? folder.name : 'Untitled folder',
-        sizeBytes: Number(folder.quotaBytesUsed || 0) || 0,
+        id: entry.id,
+        name: typeof entry.name === 'string' && entry.name.trim().length > 0 ? entry.name : 'Untitled',
+        kind: isFolder ? 'folder' : 'file',
+        sizeBytes: isFolder ? Number(entry.quotaBytesUsed || 0) || 0 : Number(entry.size || 0) || 0,
         // Drive v3 does not return child-count metadata in this listing shape.
         // Assume expandable initially; once loaded, downstream UI collapses empty folders.
-        hasChildren: true,
+        hasChildren: isFolder,
       });
     }
 
@@ -372,8 +382,8 @@ async function listMicrosoftFolderChildren(
 ): Promise<CloudFolderEntry[]> {
   const seenById = new Set<string>();
   let nextUrl = parentId === 'root'
-    ? 'https://graph.microsoft.com/v1.0/me/drive/root/children?$select=id,name,folder,size,remoteItem'
-    : `https://graph.microsoft.com/v1.0/me/drive/items/${encodeURIComponent(parentId)}/children?$select=id,name,folder,size,remoteItem`;
+    ? 'https://graph.microsoft.com/v1.0/me/drive/root/children?$select=id,name,folder,file,size,remoteItem'
+    : `https://graph.microsoft.com/v1.0/me/drive/items/${encodeURIComponent(parentId)}/children?$select=id,name,folder,file,size,remoteItem`;
   const allFolders: CloudFolderEntry[] = [];
 
   while (nextUrl) {
@@ -394,11 +404,13 @@ async function listMicrosoftFolderChildren(
         name?: string;
         size?: number;
         folder?: { childCount?: number };
+        file?: unknown;
         remoteItem?: {
           id?: string;
           name?: string;
           size?: number;
           folder?: { childCount?: number };
+          file?: unknown;
         };
       }>;
       '@odata.nextLink'?: string;
@@ -407,25 +419,27 @@ async function listMicrosoftFolderChildren(
     const items = Array.isArray(payload.value) ? payload.value : [];
     for (const item of items) {
       const folderFacet = item.folder ?? item.remoteItem?.folder;
-      const folderId = item.id ?? item.remoteItem?.id;
-      const folderName = item.name ?? item.remoteItem?.name;
-      const folderSize = item.size ?? item.remoteItem?.size;
+      const fileFacet = item.file ?? item.remoteItem?.file;
+      const itemId = item.id ?? item.remoteItem?.id;
+      const itemName = item.name ?? item.remoteItem?.name;
+      const itemSize = item.size ?? item.remoteItem?.size;
 
-      if (!folderFacet || typeof folderId !== 'string' || folderId.trim().length === 0) {
+      if ((!folderFacet && !fileFacet) || typeof itemId !== 'string' || itemId.trim().length === 0) {
         continue;
       }
 
-      if (seenById.has(folderId)) {
+      if (seenById.has(itemId)) {
         continue;
       }
 
-      seenById.add(folderId);
+      seenById.add(itemId);
 
       allFolders.push({
-        id: folderId,
-        name: typeof folderName === 'string' && folderName.trim().length > 0 ? folderName : 'Untitled folder',
-        sizeBytes: typeof folderSize === 'number' && Number.isFinite(folderSize) ? folderSize : 0,
-        hasChildren: Number(folderFacet.childCount || 0) > 0,
+        id: itemId,
+        name: typeof itemName === 'string' && itemName.trim().length > 0 ? itemName : 'Untitled',
+        kind: folderFacet ? 'folder' : 'file',
+        sizeBytes: typeof itemSize === 'number' && Number.isFinite(itemSize) ? itemSize : 0,
+        hasChildren: folderFacet ? Number(folderFacet.childCount || 0) > 0 : false,
       });
     }
 
@@ -434,7 +448,7 @@ async function listMicrosoftFolderChildren(
       : '';
   }
 
-  if (parentId === 'root' && !allFolders.some((entry) => entry.name.trim().toLowerCase() === 'documents')) {
+  if (parentId === 'root' && !allFolders.some((entry) => entry.kind === 'folder' && entry.name.trim().toLowerCase() === 'documents')) {
     const specialDocumentsResponse = await fetch('https://graph.microsoft.com/v1.0/me/drive/special/documents?$select=id,name,folder,size', {
       headers: {
         Authorization: `Bearer ${session.accessToken}`,
@@ -460,6 +474,7 @@ async function listMicrosoftFolderChildren(
           name: typeof specialDocuments.name === 'string' && specialDocuments.name.trim().length > 0
             ? specialDocuments.name
             : 'Documents',
+          kind: 'folder',
           sizeBytes: typeof specialDocuments.size === 'number' && Number.isFinite(specialDocuments.size)
             ? specialDocuments.size
             : 0,
@@ -470,130 +485,6 @@ async function listMicrosoftFolderChildren(
   }
 
   return allFolders;
-}
-
-async function readGoogleDriveUsage(accessToken: string): Promise<number> {
-  const response = await fetch('https://www.googleapis.com/drive/v3/about?fields=storageQuota(usage)', {
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-    },
-  });
-
-  if (!response.ok) {
-    return 0;
-  }
-
-  const payload = (await response.json()) as {
-    storageQuota?: { usage?: string };
-  };
-
-  return Number(payload.storageQuota?.usage || 0) || 0;
-}
-
-async function readGoogleFolderSize(session: FederatedSession, folderId: string): Promise<number> {
-  const visitedFolderIds = new Set<string>();
-  const queue: string[] = [folderId];
-  let totalBytes = 0;
-
-  while (queue.length > 0) {
-    const currentFolderId = queue.shift() as string;
-    if (visitedFolderIds.has(currentFolderId)) {
-      continue;
-    }
-
-    visitedFolderIds.add(currentFolderId);
-    let pageToken: string | null = null;
-
-    do {
-      const params = new URLSearchParams({
-        q: `'${currentFolderId}' in parents and trashed=false`,
-        fields: 'files(id,mimeType,size),nextPageToken',
-        pageSize: '1000',
-        supportsAllDrives: 'true',
-        includeItemsFromAllDrives: 'true',
-      });
-
-      if (pageToken) {
-        params.set('pageToken', pageToken);
-      }
-
-      const response = await fetch(`https://www.googleapis.com/drive/v3/files?${params.toString()}`, {
-        headers: {
-          Authorization: `Bearer ${session.accessToken}`,
-        },
-      });
-
-      if (!response.ok) {
-        const text = await response.text();
-        throw new Error(`Google folder size read failed (${response.status}): ${text}`);
-      }
-
-      const payload = (await response.json()) as {
-        files?: Array<{
-          id?: string;
-          mimeType?: string;
-          size?: string;
-        }>;
-        nextPageToken?: string;
-      };
-
-      const entries = Array.isArray(payload.files) ? payload.files : [];
-      for (const entry of entries) {
-        if (entry.mimeType === 'application/vnd.google-apps.folder') {
-          if (typeof entry.id === 'string' && entry.id.trim().length > 0 && !visitedFolderIds.has(entry.id)) {
-            queue.push(entry.id);
-          }
-
-          continue;
-        }
-
-        totalBytes += Number(entry.size || 0) || 0;
-      }
-
-      pageToken = typeof payload.nextPageToken === 'string' && payload.nextPageToken.trim().length > 0
-        ? payload.nextPageToken
-        : null;
-    } while (pageToken);
-  }
-
-  return totalBytes;
-}
-
-async function readMicrosoftDriveUsage(accessToken: string): Promise<number> {
-  const response = await fetch('https://graph.microsoft.com/v1.0/me/drive?$select=quota', {
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-    },
-  });
-
-  if (!response.ok) {
-    return 0;
-  }
-
-  const payload = (await response.json()) as {
-    quota?: { used?: number };
-  };
-
-  return typeof payload.quota?.used === 'number' && Number.isFinite(payload.quota.used) ? payload.quota.used : 0;
-}
-
-async function readMicrosoftFolderSize(session: FederatedSession, folderId: string): Promise<number> {
-  const response = await fetch(
-    `https://graph.microsoft.com/v1.0/me/drive/items/${encodeURIComponent(folderId)}?$select=size`,
-    {
-      headers: {
-        Authorization: `Bearer ${session.accessToken}`,
-      },
-    }
-  );
-
-  if (!response.ok) {
-    const text = await response.text();
-    throw new Error(`Microsoft folder size read failed (${response.status}): ${text}`);
-  }
-
-  const payload = (await response.json()) as { size?: number };
-  return typeof payload.size === 'number' && Number.isFinite(payload.size) ? payload.size : 0;
 }
 
 async function readMicrosoftFolderLineage(
@@ -667,23 +558,42 @@ export async function listFolderChildrenForSession(
   return listMicrosoftFolderChildren(session, parentId);
 }
 
-export async function readFolderRootSizeForSession(session: FederatedSession): Promise<number> {
-  if (session.provider === 'google') {
-    return readGoogleDriveUsage(session.accessToken);
-  }
-
-  return readMicrosoftDriveUsage(session.accessToken);
-}
-
-export async function readFolderSizeForSession(
+export async function computeSupportedFolderSizeForSession(
   session: FederatedSession,
   folderId: string
 ): Promise<number> {
-  if (session.provider === 'google') {
-    return readGoogleFolderSize(session, folderId);
+  const visitedFolderIds = new Set<string>([folderId]);
+  let currentLevelIds: string[] = [folderId];
+  let totalBytes = 0;
+
+  // Fetch each BFS level concurrently instead of one folder at a time so large trees resolve quickly.
+  while (currentLevelIds.length > 0) {
+    const levelChildren = await Promise.all(
+      currentLevelIds.map((currentFolderId) => listFolderChildrenForSession(session, currentFolderId))
+    );
+
+    const nextLevelIds: string[] = [];
+    for (const children of levelChildren) {
+      for (const child of children) {
+        if (child.kind === 'folder') {
+          if (!visitedFolderIds.has(child.id)) {
+            visitedFolderIds.add(child.id);
+            nextLevelIds.push(child.id);
+          }
+
+          continue;
+        }
+
+        if (isSupportedMarkupFileName(child.name)) {
+          totalBytes += child.sizeBytes;
+        }
+      }
+    }
+
+    currentLevelIds = nextLevelIds;
   }
 
-  return readMicrosoftFolderSize(session, folderId);
+  return totalBytes;
 }
 
 export async function readFolderLineageForSession(

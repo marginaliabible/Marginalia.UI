@@ -21,6 +21,7 @@ interface SettingsModalProps {
   onAddSourceUrl: (url: string) => Promise<{ ok: boolean; message: string; suggestGitHubAuth?: boolean }>;
   onRemoveSourceUrl: (url: string) => void;
   closeSettingsModal: () => void;
+  userId?: string | null;
 }
 
 const SettingsModal: React.FC<SettingsModalProps> = ({
@@ -41,6 +42,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
   onAddSourceUrl,
   onRemoveSourceUrl,
   closeSettingsModal,
+  userId,
 }) => {
   const diagnosticsRef = useRef<HTMLDetailsElement | null>(null);
   const [sourceUrlInput, setSourceUrlInput] = useState('');
@@ -418,7 +420,12 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
               </details>
             </section>
           </div>
-          <div className="modal-footer">
+          <div className="modal-footer d-flex align-items-center">
+            {userId && (
+              <span className="text-body-secondary small font-monospace me-auto" title="Internal reference ID; share with support if asked.">
+                User ID: {userId}
+              </span>
+            )}
             <button
               type="button"
               className="btn btn-secondary"

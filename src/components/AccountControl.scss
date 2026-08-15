@@ -289,7 +289,7 @@ button.account-provider-modify-link {
 
 .cloud-folder-tree-row {
   display: grid;
-  grid-template-columns: auto auto 1fr auto;
+  grid-template-columns: auto auto 1fr;
   align-items: center;
   gap: 0.35rem;
   border: 1px solid transparent;
@@ -325,17 +325,74 @@ button.account-provider-modify-link {
   color: var(--bs-body-color);
 }
 
-.cloud-folder-tree-size {
-  color: var(--bs-secondary-color);
-  font-size: 0.78rem;
-}
-
 .cloud-folder-tree-loading {
   padding-left: 2rem;
 }
 
-.cloud-folder-selected-table .cloud-folder-selected-remove-col {
-  width: 2rem;
+.cloud-folder-selected-header {
+  display: grid;
+  grid-template-columns: auto 1fr auto auto;
+  gap: 0.35rem;
+  padding: 0.2rem 0.2rem;
+  font-size: 0.78rem;
+  color: var(--bs-secondary-color);
+}
+
+.cloud-folder-selected-header-size {
+  white-space: nowrap;
+}
+
+.cloud-folder-selected-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.cloud-folder-selected-row {
+  display: grid;
+  grid-template-columns: auto 1fr auto auto;
+  align-items: center;
+  gap: 0.35rem;
+  border-radius: 0.4rem;
+  padding: 0.2rem 0.2rem;
+}
+
+.cloud-folder-selected-row.is-clickable {
+  cursor: pointer;
+}
+
+.cloud-folder-selected-file-icon {
+  width: 1rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--bs-body-color);
+}
+
+.cloud-folder-selected-file-icon.is-unsupported {
+  color: var(--bs-secondary-color);
+}
+
+.cloud-folder-selected-name {
+  overflow-wrap: anywhere;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.cloud-folder-selected-name.is-unsupported {
+  color: var(--bs-secondary-color);
+}
+
+.cloud-folder-selected-size {
+  font-size: 0.78rem;
+}
+
+.cloud-folder-selected-action {
+  display: inline-flex;
+  justify-content: flex-end;
 }
 
 .cloud-folder-selected-remove {
@@ -343,9 +400,8 @@ button.account-provider-modify-link {
 }
 
 .cloud-folder-selected-remove > i,
-.cloud-folder-selected-remove > span {
+.btn.cloud-folder-selected-remove {
   font-size: 0.78rem;
-  transform: translateY(2px);
 }
 
 .cloud-folder-selected-reconnect {
@@ -354,10 +410,20 @@ button.account-provider-modify-link {
   line-height: 1.1;
 }
 
+.cloud-folder-selected-restore {
+  color: var(--bs-success);
+}
+
+.cloud-folder-selected-restore > i,
+.btn.cloud-folder-selected-restore {
+  font-size: 0.78rem;
+}
+
 .cloud-folder-selected-path {
   white-space: normal;
-  word-break: break-word;
   text-decoration: none;
+  font-size: inherit;
+  font-family: inherit;
 }
 
 .cloud-folder-selected-path.is-disabled {

@@ -80,6 +80,8 @@ export interface MarginaliaState {
   cloudLinkedAccounts?: LinkedCloudAccount[];
   cloudConfigUpdatedAt?: number;
   cloudConfigLastSyncedAt?: number;
+  // Email of the first cloud account ever connected; internal reference only, synced across devices.
+  userId?: string;
 }
 
 export type ThemePreference = 'light' | 'dark';

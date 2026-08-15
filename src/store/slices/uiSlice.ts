@@ -28,6 +28,8 @@ interface UiState {
   };
   theme: ThemePreference;
   ready: boolean;
+  // Email of the first cloud account ever connected; internal reference only.
+  userId: string | null;
 }
 
 const initialState: UiState = {
@@ -51,7 +53,8 @@ const initialState: UiState = {
     matchRaw: null,
   },
   theme: 'light',
-  ready: false
+  ready: false,
+  userId: null
 };
 
 const uiSlice = createSlice({
@@ -224,13 +227,21 @@ const uiSlice = createSlice({
     setTheme: (state, action: PayloadAction<ThemePreference>) => {
       state.theme = action.payload;
     },
+    setUserId: (state, action: PayloadAction<string>) => {
+      if (!state.userId) {
+        state.userId = action.payload;
+      }
+    },
     setReady: (state, action: PayloadAction<boolean>) => {
       state.ready = action.payload;
     },
     restoreState: (state, action: PayloadAction<Partial<UiState>>) => {
+      // A user ID, once established, must never be replaced by a restore (local or cloud-originated).
+      const nextUserId = state.userId || action.payload.userId || null;
       return {
         ...state,
-        ...action.payload
+        ...action.payload,
+        userId: nextUserId,
       };
     },
     setTranslationRecords: (state, action: PayloadAction<TranslationRecord[]>) => {
@@ -347,6 +358,7 @@ export const {
   removeSourceUrl,
   removeTranslationsByIds,
   setTheme,
+  setUserId,
   setReady,
   restoreState,
   setTranslationRecords,

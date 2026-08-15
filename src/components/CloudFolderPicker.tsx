@@ -3,9 +3,9 @@ import type { FederatedProvider } from '../models/bible';
 import type { FederatedSession } from '../services/federatedAuthService';
 import {
   listFolderChildrenForSession,
-  readFolderSizeForSession,
-  readFolderRootSizeForSession,
+  computeSupportedFolderSizeForSession,
 } from '../services/cloudConfigProviderService';
+import { getMarkupFileIcon } from '../utils/supportedMarkupFileTypes';
 import { useHorizontalSplit } from '../hooks/useHorizontalSplit';
 import WorkspaceDivider from './WorkspaceDivider';
 
@@ -14,6 +14,9 @@ const ROOT_LABEL: Record<FederatedProvider, string> = {
   microsoft: 'OneDrive',
 };
 
+// Group key for the right panel's top-level accordion (only one selected root expanded at a time).
+const RIGHT_PANEL_TOP_LEVEL_GROUP = '__root__';
+
 export interface FolderSelectionTarget {
   id: string;
   kind: 'folder';
@@ -21,6 +24,8 @@ export interface FolderSelectionTarget {
   path?: string;
   sizeBytes?: number;
   sizeKnown?: boolean;
+  // Cloud item IDs (folders or files, any depth) explicitly excluded from sync within this selection.
+  excludedItemIds?: string[];
 }
 
 interface CloudFolderPickerProps {
@@ -37,9 +42,11 @@ interface FolderTreeNode {
   key: string;
   provider: FederatedProvider;
   id: string;
+  kind: 'file' | 'folder';
   name: string;
   path: string;
   sizeBytes: number;
+  sizeKnown: boolean;
   hasChildren: boolean;
   parentKey: string | null;
   childKeys: string[];
@@ -54,13 +61,19 @@ interface SelectedFolder {
   id: string;
   name: string;
   path: string;
-  sizeBytes: number;
-  sizeKnown: boolean;
+  excludedItemIds: Set<string>;
 }
 
 interface VisibleNode {
   key: string;
   depth: number;
+}
+
+interface RightVisibleRow {
+  key: string;
+  depth: number;
+  isRootSelection: boolean;
+  rootSelectionKey: string;
 }
 
 function makeNodeKey(provider: FederatedProvider, id: string): string {
@@ -85,20 +98,12 @@ function summarizeChildNames(children: FolderTreeNode[], maxItems: number = 12):
   return `${names.join(', ')}${suffix}`;
 }
 
-function formatFolderSize(
-  sizeBytes: number,
-  options?: { provider?: FederatedProvider; isRoot?: boolean; sizeKnown?: boolean }
-): string {
-  if (options?.sizeKnown === false) {
+function formatFolderSize(sizeBytes: number, sizeKnown: boolean): string {
+  if (!sizeKnown) {
     return '';
   }
 
   const bytes = Number.isFinite(sizeBytes) ? Math.max(0, sizeBytes) : 0;
-
-  if (options?.provider === 'google' && !options?.isRoot && bytes === 0) {
-    return '';
-  }
-
   const kb = bytes / 1024;
 
   if (kb < 1024) {
@@ -114,20 +119,25 @@ function formatFolderSize(
   return `${gb.toFixed(1)} GB`;
 }
 
-function toSelectionPayload(selectedRows: SelectedFolder[]): Record<FederatedProvider, FolderSelectionTarget[]> {
+function toSelectionPayload(
+  selectedRows: SelectedFolder[],
+  nodes: Record<string, FolderTreeNode>
+): Record<FederatedProvider, FolderSelectionTarget[]> {
   const next: Record<FederatedProvider, FolderSelectionTarget[]> = {
     google: [],
     microsoft: [],
   };
 
   for (const row of selectedRows) {
+    const node = nodes[row.key];
     next[row.provider].push({
       id: row.id,
       kind: 'folder',
       name: row.name,
       path: row.path,
-      sizeBytes: row.sizeKnown ? row.sizeBytes : undefined,
-      sizeKnown: row.sizeKnown,
+      sizeBytes: node?.sizeKnown ? node.sizeBytes : undefined,
+      sizeKnown: node?.sizeKnown ?? false,
+      excludedItemIds: row.excludedItemIds.size > 0 ? Array.from(row.excludedItemIds).sort() : undefined,
     });
   }
 
@@ -138,15 +148,23 @@ function normalizeSelectionPayload(
   payload: Record<FederatedProvider, FolderSelectionTarget[]>
 ): Record<FederatedProvider, FolderSelectionTarget[]> {
   const normalizeProviderTargets = (targets: FolderSelectionTarget[]): FolderSelectionTarget[] => {
-    return [...targets].sort((left, right) => {
-      const leftPath = left.path || '';
-      const rightPath = right.path || '';
-      if (leftPath !== rightPath) {
-        return leftPath.localeCompare(rightPath);
-      }
+    return [...targets]
+      .map((target) => ({
+        id: target.id,
+        kind: target.kind,
+        name: target.name,
+        path: target.path,
+        excludedItemIds: [...(target.excludedItemIds || [])].sort(),
+      }))
+      .sort((left, right) => {
+        const leftPath = left.path || '';
+        const rightPath = right.path || '';
+        if (leftPath !== rightPath) {
+          return leftPath.localeCompare(rightPath);
+        }
 
-      return left.id.localeCompare(right.id);
-    });
+        return left.id.localeCompare(right.id);
+      });
   };
 
   return {
@@ -159,10 +177,13 @@ function areSelectionPayloadsEqual(
   left: Record<FederatedProvider, FolderSelectionTarget[]>,
   right: Record<FederatedProvider, FolderSelectionTarget[]>
 ): boolean {
+  // Size fields are recomputed live on every load and intentionally excluded from the dirty check
+  // (normalizeSelectionPayload strips them) so async size loads never flip the Apply/Cancel state.
   const normalizedLeft = normalizeSelectionPayload(left);
   const normalizedRight = normalizeSelectionPayload(right);
   return JSON.stringify(normalizedLeft) === JSON.stringify(normalizedRight);
 }
+
 
 function collectDescendantKeys(nodes: Record<string, FolderTreeNode>, startKey: string): string[] {
   const descendants: string[] = [];
@@ -199,6 +220,31 @@ function hasSelectedAncestor(
   return false;
 }
 
+// Walks from a descendant node up to (but not including) its selected root, checking whether
+// any ancestor along the way was explicitly excluded from sync.
+function hasExcludedAncestor(
+  nodeKey: string,
+  rootSelectionKey: string,
+  rootSelection: SelectedFolder,
+  nodes: Record<string, FolderTreeNode>
+): boolean {
+  let cursor = nodes[nodeKey]?.parentKey ?? null;
+  while (cursor && cursor !== rootSelectionKey) {
+    const ancestor = nodes[cursor];
+    if (!ancestor) {
+      return false;
+    }
+
+    if (rootSelection.excludedItemIds.has(ancestor.id)) {
+      return true;
+    }
+
+    cursor = ancestor.parentKey;
+  }
+
+  return false;
+}
+
 function buildSelectedMapFromPayload(
   payload: Record<FederatedProvider, FolderSelectionTarget[]>
 ): Record<string, SelectedFolder> {
@@ -218,8 +264,7 @@ function buildSelectedMapFromPayload(
         id: target.id,
         name: target.name || target.id,
         path: target.path || `${ROOT_LABEL[provider]}/${target.name || target.id}`,
-        sizeBytes: Number(target.sizeBytes || 0) || 0,
-        sizeKnown: !(provider === 'google' && target.id !== 'root' && (Number(target.sizeBytes || 0) || 0) === 0),
+        excludedItemIds: new Set(target.excludedItemIds || []),
       };
     }
   }
@@ -243,10 +288,11 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
   const [selected, setSelected] = useState<Record<string, SelectedFolder>>({});
   const [highlightNodeKey, setHighlightNodeKey] = useState<string | null>(null);
   const [highlightServiceProvider, setHighlightServiceProvider] = useState<FederatedProvider | null>(null);
+  const [rightExpandedKeyByParent, setRightExpandedKeyByParent] = useState<Record<string, string | null>>({});
   const layoutRef = useRef<HTMLDivElement | null>(null);
   const nodesRef = useRef<Record<string, FolderTreeNode>>({});
   const inFlightLoadsRef = useRef<Record<string, Promise<FolderTreeNode[]>>>({});
-  const inFlightSizeReadsRef = useRef<Partial<Record<string, Promise<void>>>>({});
+  const inFlightFolderSizeReadsRef = useRef<Partial<Record<string, Promise<void>>>>({});
   const nodeRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const rootRowRefs = useRef<Record<FederatedProvider, HTMLDivElement | null>>({ google: null, microsoft: null });
   const initialSelectionsRef = useRef(initialSelections);
@@ -305,7 +351,10 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
     };
   }, [focusRequest]);
 
-  const loadChildren = useCallback(async (nodeKey: string): Promise<FolderTreeNode[]> => {
+  const loadChildren = useCallback(async (
+    nodeKey: string,
+    options?: { checkSubfolders?: boolean }
+  ): Promise<FolderTreeNode[]> => {
     const node = nodesRef.current[nodeKey];
     if (!node) {
       return [];
@@ -342,9 +391,36 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
       },
     }));
 
+    const checkSubfolders = options?.checkSubfolders ?? false;
+
     const loadPromise = (async () => {
       try {
         const children = await listFolderChildrenForSession(session, node.id);
+        // Subfolders are listed before files within a folder.
+        const sortedChildren = [...children].sort((left, right) => {
+          if (left.kind === right.kind) {
+            return 0;
+          }
+
+          return left.kind === 'folder' ? -1 : 1;
+        });
+
+        // The left panel only ever navigates folders, so its chevron should only appear when a
+        // subfolder actually has its own subfolders (checked one level ahead), instead of guessing.
+        let subfolderPresenceById: Record<string, boolean> | null = null;
+        if (checkSubfolders) {
+          const folderChildren = sortedChildren.filter((child) => child.kind === 'folder');
+          const checks = await Promise.all(folderChildren.map(async (child) => {
+            try {
+              const grandchildren = await listFolderChildrenForSession(session, child.id);
+              return [child.id, grandchildren.some((entry) => entry.kind === 'folder')] as const;
+            } catch {
+              return [child.id, child.hasChildren] as const;
+            }
+          }));
+          subfolderPresenceById = Object.fromEntries(checks);
+        }
+
         const nextChildren: FolderTreeNode[] = [];
         updateNodes((current) => {
           const parent = current[nodeKey];
@@ -355,19 +431,25 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
           const next = { ...current };
           const childKeys: string[] = [];
 
-          for (const child of children) {
+          for (const child of sortedChildren) {
             const childKey = makeNodeKey(parent.provider, child.id);
             childKeys.push(childKey);
+
+            const hasChildren = child.kind === 'folder'
+              ? subfolderPresenceById?.[child.id] ?? child.hasChildren
+              : false;
 
             const existingChild = next[childKey];
             next[childKey] = {
               key: childKey,
               provider: parent.provider,
               id: child.id,
+              kind: child.kind,
               name: child.name,
               path: `${parent.path}/${child.name}`,
               sizeBytes: child.sizeBytes,
-              hasChildren: child.hasChildren,
+              sizeKnown: existingChild?.sizeKnown ?? child.kind === 'file',
+              hasChildren,
               parentKey: nodeKey,
               childKeys: existingChild?.childKeys || [],
               childrenLoaded: existingChild?.childrenLoaded || false,
@@ -421,18 +503,19 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
 
       const allProviders: FederatedProvider[] = ['google', 'microsoft'];
 
-      const rootEntries = await Promise.all(allProviders.map(async (provider) => {
-        const session = sessions[provider];
-        const sizeBytes = session ? await readFolderRootSizeForSession(session as FederatedSession) : 0;
+      const rootEntries = allProviders.map((provider) => {
         const key = makeNodeKey(provider, 'root');
 
         return {
           key,
           provider,
           id: 'root',
+          kind: 'folder',
           name: ROOT_LABEL[provider],
           path: ROOT_LABEL[provider],
-          sizeBytes,
+          sizeBytes: 0,
+          // Folder sizes are computed lazily (only once a folder row becomes visible in the right panel).
+          sizeKnown: false,
           hasChildren: true,
           parentKey: null,
           childKeys: [],
@@ -440,7 +523,7 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
           isExpanded: false,
           isLoading: false,
         } satisfies FolderTreeNode;
-      }));
+      });
 
       if (cancelled) {
         return;
@@ -454,6 +537,31 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
       }
 
       const initialSelected = buildSelectedMapFromPayload(initialSelectionsRef.current);
+
+      // Synthesize a placeholder node for each persisted selection so it renders in the right
+      // panel immediately, without requiring the left panel to be browsed down to that folder first.
+      for (const selection of Object.values(initialSelected)) {
+        if (nextNodes[selection.key]) {
+          continue;
+        }
+
+        nextNodes[selection.key] = {
+          key: selection.key,
+          provider: selection.provider,
+          id: selection.id,
+          kind: 'folder',
+          name: selection.name,
+          path: selection.path,
+          sizeBytes: 0,
+          sizeKnown: false,
+          hasChildren: true,
+          parentKey: null,
+          childKeys: [],
+          childrenLoaded: false,
+          isExpanded: false,
+          isLoading: false,
+        };
+      }
 
       nodesRef.current = nextNodes;
       setNodes(nextNodes);
@@ -483,7 +591,8 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
 
     const walk = (key: string, depth: number) => {
       const node = nodes[key];
-      if (!node) {
+      // The left panel only ever shows folders.
+      if (!node || node.kind !== 'folder') {
         return;
       }
 
@@ -523,7 +632,7 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
     }));
 
     if (!node.childrenLoaded) {
-      void loadChildren(key);
+      void loadChildren(key, { checkSubfolders: true });
     }
   }, [loadChildren, nodes, updateNodes]);
 
@@ -557,8 +666,7 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
         id: node.id,
         name: node.name,
         path: node.path,
-        sizeBytes: node.sizeBytes,
-        sizeKnown: !(node.provider === 'google' && node.id !== 'root' && node.sizeBytes === 0),
+        excludedItemIds: new Set<string>(),
       };
 
       return next;
@@ -570,22 +678,22 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
       return false;
     }
 
-    return !areSelectionPayloadsEqual(toSelectionPayload(selectedRows), initialSelections);
-  }, [initialSelections, selectedRows]);
+    return !areSelectionPayloadsEqual(toSelectionPayload(selectedRows, nodes), initialSelections);
+  }, [initialSelections, nodes, selectedRows]);
 
   useEffect(() => {
     onDirtyChange?.(isDirty);
   }, [isDirty, onDirtyChange]);
 
   const handleApply = useCallback(() => {
-    onSelectionsChange(toSelectionPayload(selectedRows));
-  }, [onSelectionsChange, selectedRows]);
+    onSelectionsChange(toSelectionPayload(selectedRows, nodes));
+  }, [nodes, onSelectionsChange, selectedRows]);
 
   const handleCancel = useCallback(() => {
     setSelected(buildSelectedMapFromPayload(initialSelectionsRef.current));
   }, []);
 
-  const revealPath = useCallback(async (row: SelectedFolder) => {
+  const revealPath = useCallback(async (row: { key: string; provider: FederatedProvider; path: string }) => {
     const trace: string[] = [];
 
     const waitForChildrenLoaded = async (nodeKey: string): Promise<FolderTreeNode[]> => {
@@ -598,7 +706,7 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
         }
 
         if (!node.childrenLoaded && !node.isLoading) {
-          await loadChildren(nodeKey);
+          await loadChildren(nodeKey, { checkSubfolders: true });
         }
 
         if (node.isLoading) {
@@ -672,7 +780,11 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
 
     setErrorMessage(null);
 
-    if (nodesRef.current[row.key]) {
+    // Only take the fast path for nodes whose ancestor chain is actually known (real root, or
+    // discovered via left-panel browsing). Selections restored from persisted config but never
+    // browsed to yet have no known parent chain, so fall through to path-based resolution below.
+    const existingNode = nodesRef.current[row.key];
+    if (existingNode && (existingNode.id === 'root' || existingNode.parentKey !== null)) {
       revealNode(row.key);
       return;
     }
@@ -751,7 +863,6 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
         console.warn('Folder reveal path resolution failed', {
           provider: row.provider,
           key: row.key,
-          id: row.id,
           path: row.path,
           failedSegment: segment,
           trace,
@@ -765,33 +876,110 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
     revealNode(currentKey);
   }, [loadChildren, rootKeys, updateNodes]);
 
+  const toggleRightExpanded = useCallback((groupKey: string, childKey: string) => {
+    setRightExpandedKeyByParent((current) => {
+      const next = { ...current };
+      if (current[groupKey] === childKey) {
+        delete next[groupKey];
+      } else {
+        next[groupKey] = childKey;
+      }
+
+      return next;
+    });
+
+    const node = nodesRef.current[childKey];
+    if (node && !node.childrenLoaded) {
+      void loadChildren(childKey);
+    }
+  }, [loadChildren]);
+
+  const toggleExcluded = useCallback((rootSelectionKey: string, itemId: string) => {
+    setSelected((current) => {
+      const existing = current[rootSelectionKey];
+      if (!existing) {
+        return current;
+      }
+
+      const nextExcluded = new Set(existing.excludedItemIds);
+      if (nextExcluded.has(itemId)) {
+        nextExcluded.delete(itemId);
+      } else {
+        nextExcluded.add(itemId);
+      }
+
+      return {
+        ...current,
+        [rootSelectionKey]: {
+          ...existing,
+          excludedItemIds: nextExcluded,
+        },
+      };
+    });
+  }, []);
+
+  const rightVisibleRows = useMemo<RightVisibleRow[]>(() => {
+    const rows: RightVisibleRow[] = [];
+
+    const walkChildren = (parentNode: FolderTreeNode, depth: number, rootSelectionKey: string) => {
+      const expandedChildKey = rightExpandedKeyByParent[parentNode.key] ?? null;
+      for (const childKey of parentNode.childKeys) {
+        const child = nodes[childKey];
+        if (!child) {
+          continue;
+        }
+
+        rows.push({ key: childKey, depth, isRootSelection: false, rootSelectionKey });
+        if (child.kind === 'folder' && expandedChildKey === childKey) {
+          walkChildren(child, depth + 1, rootSelectionKey);
+        }
+      }
+    };
+
+    const expandedRootKey = rightExpandedKeyByParent[RIGHT_PANEL_TOP_LEVEL_GROUP] ?? null;
+    for (const row of selectedRows) {
+      const node = nodes[row.key];
+      if (!node) {
+        continue;
+      }
+
+      rows.push({ key: row.key, depth: 0, isRootSelection: true, rootSelectionKey: row.key });
+      if (expandedRootKey === row.key) {
+        walkChildren(node, 1, row.key);
+      }
+    }
+
+    return rows;
+  }, [nodes, rightExpandedKeyByParent, selectedRows]);
+
   useEffect(() => {
-    for (const row of Object.values(selected)) {
-      if (row.provider !== 'google' || row.id === 'root' || row.sizeKnown) {
+    for (const visibleRow of rightVisibleRows) {
+      const node = nodesRef.current[visibleRow.key];
+      if (!node || node.kind !== 'folder' || node.sizeKnown) {
         continue;
       }
 
-      if (inFlightSizeReadsRef.current[row.key]) {
+      if (inFlightFolderSizeReadsRef.current[visibleRow.key]) {
         continue;
       }
 
-      const session = sessions.google;
+      const session = sessions[node.provider];
       if (!session) {
         continue;
       }
 
       const readPromise = (async () => {
         try {
-          const computedSize = await readFolderSizeForSession(session, row.id);
-          setSelected((current) => {
-            const existing = current[row.key];
+          const computedSize = await computeSupportedFolderSizeForSession(session, node.id);
+          updateNodes((current) => {
+            const existing = current[visibleRow.key];
             if (!existing) {
               return current;
             }
 
             return {
               ...current,
-              [row.key]: {
+              [visibleRow.key]: {
                 ...existing,
                 sizeBytes: Math.max(0, Math.floor(computedSize)),
                 sizeKnown: true,
@@ -801,13 +989,13 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
         } catch {
           // Keep unknown size blank if compute fails.
         } finally {
-          delete inFlightSizeReadsRef.current[row.key];
+          delete inFlightFolderSizeReadsRef.current[visibleRow.key];
         }
       })();
 
-      inFlightSizeReadsRef.current[row.key] = readPromise;
+      inFlightFolderSizeReadsRef.current[visibleRow.key] = readPromise;
     }
-  }, [selected, sessions]);
+  }, [rightVisibleRows, sessions, updateNodes]);
 
   return (
     <section className="cloud-folder-picker" aria-label="Cloud folder picker">
@@ -906,20 +1094,13 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
                           <button
                             type="button"
                             className="btn btn-link btn-sm cloud-folder-tree-connect-link"
+                            aria-label={`Connect ${ROOT_LABEL[node.provider]}`}
                             onClick={() => onConnectRequested(node.provider)}
                           >
                             Connect
                           </button>
                         )}
                       </div>
-
-                      <span className="cloud-folder-tree-size">
-                        {formatFolderSize(node.sizeBytes, {
-                          provider: node.provider,
-                          isRoot: node.id === 'root',
-                          sizeKnown: !(node.provider === 'google' && node.id !== 'root' && node.sizeBytes === 0),
-                        })}
-                      </span>
                     </div>
 
                     {node.isLoading && (
@@ -939,78 +1120,163 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
         />
 
         <div className="cloud-folder-picker-right" style={{ flexBasis: `${selectedPanePercent}%` }}>
-          <div className="table-responsive">
-            <table className="table table-sm align-middle mb-0 cloud-folder-selected-table">
-              <thead>
-                <tr>
-                  <th scope="col" className="cloud-folder-selected-remove-col"></th>
-                  <th scope="col">Folder</th>
-                  <th scope="col" className="text-end text-nowrap">Size</th>
-                </tr>
-              </thead>
-              <tbody>
-                {selectedRows.length === 0 && (
-                  <tr>
-                    <td colSpan={3} className="text-body-secondary">No folders selected yet.</td>
-                  </tr>
-                )}
-                {selectedRows.map((row) => (
-                  <tr key={row.key}>
-                    <td>
-                      {(!providerSyncFilesEnabled[row.provider] || !sessions[row.provider]) ? (
+          <div className="cloud-folder-selected-header">
+            <span className="cloud-folder-selected-header-name">Selected Files & Folders</span>
+            <span className="cloud-folder-selected-header-size text-end" title="Shows file sync size and status. Unsupported file types are excluded.">Synchronization</span>
+          </div>
+
+          {selectedRows.length === 0 && (
+            <p className="small text-body-secondary mb-0">No folders selected yet.</p>
+          )}
+
+          {selectedRows.length > 0 && (
+            <ul className="cloud-folder-selected-list">
+              {rightVisibleRows.map((visibleRow) => {
+                const node = nodes[visibleRow.key];
+                const rootSelection = selected[visibleRow.rootSelectionKey];
+                if (!node || !rootSelection) {
+                  return null;
+                }
+
+                const providerAvailable = providerSyncFilesEnabled[node.provider] && Boolean(sessions[node.provider]);
+                const isFolder = node.kind === 'folder';
+                // Once expanded, a folder that turned out to have no files/subfolders loses its chevron.
+                const isEmptyFolder = isFolder && node.childrenLoaded && node.childKeys.length === 0;
+                const showChevron = isFolder && !isEmptyFolder;
+                const groupKey = visibleRow.isRootSelection ? RIGHT_PANEL_TOP_LEVEL_GROUP : node.parentKey || RIGHT_PANEL_TOP_LEVEL_GROUP;
+                const isExpanded = rightExpandedKeyByParent[groupKey] === visibleRow.key;
+                const fileIcon = isFolder ? null : getMarkupFileIcon(node.name);
+                const isExcluded = !visibleRow.isRootSelection && rootSelection.excludedItemIds.has(node.id);
+                const isCoveredByExcludedAncestor = !visibleRow.isRootSelection
+                  && hasExcludedAncestor(visibleRow.key, visibleRow.rootSelectionKey, rootSelection, nodes);
+                const canToggleSync = isFolder || Boolean(fileIcon?.supported);
+                const displayLabel = (visibleRow.isRootSelection ? rootSelection.path : node.name).replace(/\//g, '/\u200B');
+                const canActivateName = visibleRow.isRootSelection && showChevron;
+
+                const handleNameActivate = () => {
+                  if (!canActivateName) {
+                    return;
+                  }
+
+                  toggleRightExpanded(groupKey, visibleRow.key);
+                  void revealPath(rootSelection);
+                };
+
+                return (
+                  <li key={visibleRow.key}>
+                    <div
+                      className={`cloud-folder-selected-row${canActivateName ? ' is-clickable' : ''}`}
+                      style={{ paddingLeft: `${visibleRow.depth * 0.55}rem` }}
+                      onClick={canActivateName ? handleNameActivate : undefined}
+                    >
+                      {showChevron ? (
                         <button
                           type="button"
-                          className="btn btn-link btn-sm p-0 cloud-folder-selected-reconnect"
-                          aria-label={`Reconnect ${row.provider === 'google' ? 'Google' : 'Microsoft'} for ${row.path}`}
-                          onClick={() => onConnectRequested(row.provider)}
-                        >
-                          Reconnect
-                        </button>
-                      ) : (
-                        <button
-                          type="button"
-                          className="btn btn-link btn-sm p-0 cloud-folder-selected-remove"
-                          title="Stop syncing folder"
-                          aria-label={`Stop syncing ${row.path}`}
-                          onClick={() => {
-                            setSelected((current) => {
-                              const next = { ...current };
-                              delete next[row.key];
-                              return next;
-                            });
+                          className="cloud-folder-tree-chevron"
+                          aria-label={isExpanded ? `Collapse ${node.name}` : `Expand ${node.name}`}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            toggleRightExpanded(groupKey, visibleRow.key);
                           }}
                         >
-                          <span className="fa-stack fa-lg">
-                            <i className="fa-solid fa-arrows-rotate fa-stack-1x"></i>
-                            <i className="fa-solid fa-slash fa-stack-1x"></i>
-                          </span>
+                          <i className={`fa-solid ${isExpanded ? 'fa-chevron-down' : 'fa-chevron-right'}`} aria-hidden="true"></i>
                         </button>
+                      ) : isFolder ? (
+                        <span className="cloud-folder-tree-chevron-spacer" aria-hidden="true"></span>
+                      ) : (
+                        <span className={`cloud-folder-selected-file-icon${fileIcon?.supported ? '' : ' is-unsupported'}`} aria-hidden="true">
+                          <i className={`fa-solid ${fileIcon?.icon}`}></i>
+                        </span>
                       )}
-                    </td>
-                    <td>
-                      <button
-                        type="button"
-                        className={`btn btn-link btn-sm p-0 text-start cloud-folder-selected-path${(!providerSyncFilesEnabled[row.provider] || !sessions[row.provider]) ? ' is-disabled' : ''}`}
-                        disabled={!providerSyncFilesEnabled[row.provider] || !sessions[row.provider]}
-                        onClick={() => {
-                          void revealPath(row);
-                        }}
-                      >
-                        {row.path}
-                      </button>
-                    </td>
-                    <td className="text-end text-nowrap text-body-secondary">
-                      {formatFolderSize(row.sizeBytes, {
-                        provider: row.provider,
-                        isRoot: row.id === 'root',
-                        sizeKnown: row.sizeKnown,
-                      })}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+
+                      {visibleRow.isRootSelection && (!providerSyncFilesEnabled[node.provider] || !sessions[node.provider]) ? (
+                        <button
+                          type="button"
+                          className="btn btn-link btn-sm p-0 text-start cloud-folder-selected-path is-disabled"
+                          disabled
+                        >
+                          {displayLabel}
+                        </button>
+                      ) : canActivateName ? (
+                        <button
+                          type="button"
+                          className="btn btn-link btn-sm p-0 text-start cloud-folder-selected-path"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            handleNameActivate();
+                          }}
+                        >
+                          {displayLabel}
+                        </button>
+                      ) : (
+                        <span className={`cloud-folder-selected-name${!isFolder && !fileIcon?.supported ? ' is-unsupported' : ''}`}>
+                          {displayLabel}
+                        </span>
+                      )}
+
+                      <span className="cloud-folder-selected-size text-end text-nowrap text-body-secondary">
+                        {isFolder || fileIcon?.supported ? formatFolderSize(node.sizeBytes, node.sizeKnown) : ''}
+                      </span>
+
+                      <span className="cloud-folder-selected-action">
+                        {visibleRow.isRootSelection && (!providerSyncFilesEnabled[node.provider] || !sessions[node.provider]) ? (
+                          <button
+                            type="button"
+                            className="btn btn-link btn-sm p-0 cloud-folder-selected-reconnect"
+                            aria-label={`Reconnect ${node.provider === 'google' ? 'Google' : 'Microsoft'} for ${node.path}`}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              onConnectRequested(node.provider);
+                            }}
+                          >
+                            Reconnect
+                          </button>
+                        ) : visibleRow.isRootSelection ? (
+                          <button
+                            type="button"
+                            className="btn btn-link btn-sm text-info p-0 cloud-folder-selected-remove"
+                            title="Sync enabled. Click to stop syncing."
+                            aria-label={`Stop syncing ${node.path}`}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              setSelected((current) => {
+                                const next = { ...current };
+                                delete next[visibleRow.key];
+                                return next;
+                              });
+                            }}
+                          >
+                            <i className="fa-solid fa-arrows-rotate"></i>
+                          </button>
+                        ) : canToggleSync && providerAvailable ? (
+                          <button
+                            type="button"
+                            className={`btn btn-link btn-sm p-0 ${isExcluded ? 'cloud-folder-selected-restore text-warning' : 'cloud-folder-selected-remove text-info'}`}
+                            style={isCoveredByExcludedAncestor ? { visibility: 'hidden' } : undefined}
+                            title={isExcluded ? 'Sync disabled. Click to resume syncing' : 'Sync enabled. Click to exclude from syncing.'}
+                            aria-label={isExcluded ? `Resume syncing ${node.path}` : `Exclude ${node.path} from sync`}
+                            aria-hidden={isCoveredByExcludedAncestor}
+                            disabled={isCoveredByExcludedAncestor}
+                            tabIndex={isCoveredByExcludedAncestor ? -1 : undefined}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              toggleExcluded(visibleRow.rootSelectionKey, node.id);
+                            }}
+                          >
+                            <i className={`fa-solid ${isExcluded ? 'fa-upload' : 'fa-arrows-rotate'}`}></i>
+                          </button>
+                        ) : null}
+                      </span>
+                    </div>
+
+                    {node.isLoading && (
+                      <div className="small text-body-secondary cloud-folder-tree-loading">Loading...</div>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          )}
         </div>
       </div>
 

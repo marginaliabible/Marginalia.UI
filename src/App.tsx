@@ -144,6 +144,7 @@ function App() {
     pdfViewer,
     theme,
     ready,
+    userId,
   } = useAppSelector((state) => state.ui);
 
   const safeAvailableTranslations = Array.isArray(availableTranslations) ? availableTranslations : [];
@@ -413,6 +414,7 @@ function App() {
         selectedLanguages: finalLanguages,
         sourceUrls: Array.isArray(savedState?.sourceUrls) ? savedState.sourceUrls : [],
         resourceHiddenTags: Array.isArray(savedState?.resourceHiddenTags) ? savedState.resourceHiddenTags : [],
+        userId: typeof savedState?.userId === 'string' && savedState.userId.trim().length > 0 ? savedState.userId : null,
       }));
 
       await dispatch(loadTranslation(nextTranslationId));
@@ -439,6 +441,7 @@ function App() {
       languages: safeSelectedLanguages,
       sourceUrls,
       resourceHiddenTags,
+      userId: userId ?? undefined,
     });
   }, [
     selectedTranslationId,
@@ -450,6 +453,7 @@ function App() {
     safeSelectedLanguages,
     sourceUrls,
     resourceHiddenTags,
+    userId,
     ready,
   ]);
 
@@ -943,6 +947,7 @@ function App() {
           onAddSourceUrl={handleAddSourceUrl}
           onRemoveSourceUrl={handleRemoveSourceUrl}
           closeSettingsModal={closeSettingsModal}
+          userId={userId}
         />
 
         <GitHubAuthPromptModal

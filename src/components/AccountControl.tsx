@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAppDispatch, useAppSelector } from '../store/hooks';
-import { restoreState } from '../store/slices/uiSlice';
+import { restoreState, setUserId } from '../store/slices/uiSlice';
 import { loadTranslation, setCurrentBibleFromId } from '../store/slices/bibleSlice';
 import { bibleService } from '../services/bibleService';
 import {
@@ -52,6 +52,7 @@ interface ProviderSyncTarget {
   path?: string;
   sizeBytes?: number;
   sizeKnown?: boolean;
+  excludedItemIds?: string[];
 }
 
 type ProviderSyncPreferenceMap = Record<FederatedProvider, ProviderSyncPreferences>;
@@ -83,6 +84,7 @@ function isProviderSyncTarget(value: unknown): value is ProviderSyncTarget {
     && (typeof candidate.path === 'undefined' || typeof candidate.path === 'string')
     && (typeof candidate.sizeBytes === 'undefined' || typeof candidate.sizeBytes === 'number')
     && (typeof candidate.sizeKnown === 'undefined' || typeof candidate.sizeKnown === 'boolean')
+    && (typeof candidate.excludedItemIds === 'undefined' || Array.isArray(candidate.excludedItemIds))
   );
 }
 
@@ -247,6 +249,7 @@ const AccountControl: React.FC = () => {
     resourceHiddenTags,
     theme,
     ready,
+    userId,
   } = useAppSelector((state) => state.ui);
 
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -292,6 +295,7 @@ const AccountControl: React.FC = () => {
       sourceUrls,
       resourceHiddenTags,
       theme,
+      userId,
       providerFolderSelections: {
         google: providerSyncPreferences.google.selectedTargets,
         microsoft: providerSyncPreferences.microsoft.selectedTargets,
@@ -307,6 +311,7 @@ const AccountControl: React.FC = () => {
     sourceUrls,
     resourceHiddenTags,
     theme,
+    userId,
     providerSyncPreferences,
   ]);
 
@@ -321,6 +326,7 @@ const AccountControl: React.FC = () => {
       sourceUrls,
       resourceHiddenTags,
       theme,
+      userId: userId ?? undefined,
       providerFolderSelections: {
         google: providerSyncPreferences.google.selectedTargets,
         microsoft: providerSyncPreferences.microsoft.selectedTargets,
@@ -336,6 +342,7 @@ const AccountControl: React.FC = () => {
     sourceUrls,
     resourceHiddenTags,
     theme,
+    userId,
     providerSyncPreferences,
   ]);
 
@@ -450,6 +457,11 @@ const AccountControl: React.FC = () => {
       });
     }
 
+    // setUserId is a no-op locally if a user ID was already established on this device.
+    if (typeof remote.userId === 'string' && remote.userId.trim().length > 0) {
+      dispatch(setUserId(remote.userId));
+    }
+
     if (remote.lastTranslationId) {
       await dispatch(loadTranslation(remote.lastTranslationId));
       dispatch(setCurrentBibleFromId(remote.lastTranslationId));
@@ -523,6 +535,11 @@ const AccountControl: React.FC = () => {
     const localSessions = await getFreshFederatedSessions();
     setSessions(localSessions);
 
+    // The first cloud account ever connected becomes the internal User ID reference; no-op once set.
+    if (session.profile.email) {
+      dispatch(setUserId(session.profile.email));
+    }
+
     const persistedState = bibleService.readState() as MarginaliaState;
     const persistedLinked = normalizeLinkedAccounts(persistedState.cloudLinkedAccounts);
     const baseLinked = mergeLinkedAccounts(linkedAccountsRef.current, persistedLinked);
@@ -576,7 +593,7 @@ const AccountControl: React.FC = () => {
 
     // New linkage should always publish to currently signed-in providers.
     setHasPendingSync(true);
-  }, [applyRemoteConfig, configUpdatedAt, persistCloudState, providerSyncPreferences]);
+  }, [applyRemoteConfig, configUpdatedAt, dispatch, persistCloudState, providerSyncPreferences]);
 
   useEffect(() => {
     if (hasBootstrappedAuthRef.current) {
@@ -952,6 +969,7 @@ const AccountControl: React.FC = () => {
           path: target.path,
           sizeBytes: target.sizeBytes,
           sizeKnown: target.sizeKnown,
+          excludedItemIds: target.excludedItemIds,
         })),
       },
       microsoft: {
@@ -963,6 +981,7 @@ const AccountControl: React.FC = () => {
           path: target.path,
           sizeBytes: target.sizeBytes,
           sizeKnown: target.sizeKnown,
+          excludedItemIds: target.excludedItemIds,
         })),
       },
     }));
@@ -1094,22 +1113,6 @@ const AccountControl: React.FC = () => {
                     </div>
                   )}
 
-                  <CloudFolderPicker
-                    sessions={providerSessionByType}
-                    initialSelections={{
-                      google: providerSyncPreferences.google.selectedTargets,
-                      microsoft: providerSyncPreferences.microsoft.selectedTargets,
-                    }}
-                    providerSyncFilesEnabled={{
-                      google: providerSyncPreferences.google.syncFiles,
-                      microsoft: providerSyncPreferences.microsoft.syncFiles,
-                    }}
-                    focusRequest={fileSyncFocusRequest}
-                    onSelectionsChange={handleApplyFolderSelections}
-                    onConnectRequested={handleConnectRequestedFromPicker}
-                    onDirtyChange={setHasUnsavedFileSyncChanges}
-                  />
-
                   <section className="account-provider-stack">
                     {PROVIDERS.map((provider) => {
                       const connected = isProviderConnected(provider);
@@ -1230,6 +1233,23 @@ const AccountControl: React.FC = () => {
                       );
                     })}
                   </section>
+                  
+                  <CloudFolderPicker
+                    sessions={providerSessionByType}
+                    initialSelections={{
+                      google: providerSyncPreferences.google.selectedTargets,
+                      microsoft: providerSyncPreferences.microsoft.selectedTargets,
+                    }}
+                    providerSyncFilesEnabled={{
+                      google: providerSyncPreferences.google.syncFiles,
+                      microsoft: providerSyncPreferences.microsoft.syncFiles,
+                    }}
+                    focusRequest={fileSyncFocusRequest}
+                    onSelectionsChange={handleApplyFolderSelections}
+                    onConnectRequested={handleConnectRequestedFromPicker}
+                    onDirtyChange={setHasUnsavedFileSyncChanges}
+                  />
+
 
                   {(lastSyncedAt || syncState === 'syncing') && (
                     <p className="small text-body-secondary mb-0 d-flex align-items-center gap-2">

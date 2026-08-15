@@ -1188,6 +1188,10 @@ class BibleService {
 
     const current = this.readState();
     const next: MarginaliaState = { ...current, ...update };
+    // A user ID, once established, must never change - guard here so no call site (present or future) can override it.
+    if (current.userId) {
+      next.userId = current.userId;
+    }
     if (!next.lastTranslationIds || next.lastTranslationIds.length === 0) {
       next.lastTranslationIds = [next.lastTranslationId || LOCAL_TRANSLATION_ID];
     }

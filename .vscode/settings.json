@@ -3,6 +3,8 @@
         "Scrollmapper"
     ],
     "chat.tools.terminal.autoApprove": {
-        "npm install": true
+        "npm install": true,
+        "/^npx jest\\b/": true,
+        "/^Remove-Item\\s+.*jest-output.*\\.txt(\\s|$)/": true
     }
 }

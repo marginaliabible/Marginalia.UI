@@ -11,9 +11,32 @@ interface ResourcesPanelProps {
 
 const TAG_COLOR_STORAGE_KEY = 'marginalia:resource-tag-colors';
 const TAG_COLOR_PALETTE = [
-  '#0aa7a0', '#f1c40f', '#e84393', '#16a085', '#2ecc71', '#f39c12', '#e67e22', '#2980b9',
-  '#1abc9c', '#c0392b', '#27ae60', '#8e44ad', '#d35400', '#3498db', '#7f8c8d', '#9b59b6',
-  '#00b894', '#fdcb6e', '#0984e3', '#6c5ce7', '#e17055', '#00cec9', '#55efc4', '#fab1a0',
+  '#0aa7a0', 
+  '#f1c40f', 
+  '#e84393', 
+  '#16a085', 
+  '#f39c12', 
+  '#6c5ce7', 
+  '#c0392b', 
+  '#2ecc71', 
+  '#383f3f', 
+  '#e67e22', 
+  '#8e44ad', 
+  '#2980b9',
+  '#55efc4', 
+  '#d35400', 
+  '#7f8c8d', 
+  '#9b59b6',
+  '#27ae60', 
+  '#fdcb6e', 
+  '#3498db', 
+  '#e17055', 
+  '#ffffff', 
+  '#1abc9c', 
+  '#fab1a0',
+  '#00b894', 
+  '#0984e3', 
+  '#00cec9', 
 ];
 
 const ResourcesPanel: React.FC<ResourcesPanelProps> = ({ tab }) => {
