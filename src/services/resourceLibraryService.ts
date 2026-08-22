@@ -1,6 +1,7 @@
 import type { DBSchema, IDBPDatabase } from 'idb';
 import type { BibleTranslationMeta, ArtifactType, RepositoryType } from '../models/bible';
 import { BOOK_ALIAS_CONFIG, normalizeBookName } from '../utils/book-aliases';
+import { buildDocumentPageUrl, isPlainObject, readResourceLibraryConnection, readString } from '../utils/resourceLibraryConfig';
 
 interface ResourceLibraryDB extends DBSchema {
   resourceShards: {
@@ -407,13 +408,7 @@ export class ResourceLibraryService {
     }
 
     const config = configPayload as ResourceLibraryConfigFile;
-    const sourceConfig = isPlainObject(config.source) ? config.source as ResourceSourceConfig : undefined;
-    const configFolderUrl = new URL('.', configUrl).toString();
-    const baseUrl = normalizeBaseUrl(readString(sourceConfig?.baseUrl) ?? readString(config.baseUrl), configFolderUrl);
-    const documentUrlTemplate =
-      readString(sourceConfig?.documentUrlTemplate)
-      ?? readString(config.documentUrlTemplate)
-      ?? '{baseUrl}/documents/{documentId}?page={page}';
+    const { baseUrl, documentUrlTemplate } = readResourceLibraryConnection(config, configUrl);
 
     const [documentsResponse, manifestResponse] = await Promise.all([
       fetch(new URL('documents.json', configUrl).toString(), { cache: 'no-store' }),
@@ -938,47 +933,6 @@ function parseManifestShards(payload: unknown): ExportManifestShard[] {
   return shards;
 }
 
-function buildDocumentPageUrl(template: string, baseUrl: string, documentId: string, page: number): string {
-  const replacements: Array<[string, string]> = [
-    ['{baseUrl}', baseUrl],
-    ['{{baseUrl}}', baseUrl],
-    ['{documentId}', documentId],
-    ['{{documentId}}', documentId],
-    ['{page}', String(page)],
-    ['{{page}}', String(page)],
-    ['{pageNumber}', String(page)],
-    ['{{pageNumber}}', String(page)],
-  ];
-
-  let output = template;
-  for (const [token, value] of replacements) {
-    output = output.split(token).join(value);
-  }
-
-  try {
-    return new URL(output, `${baseUrl}/`).toString();
-  } catch {
-    return output;
-  }
-}
-
-function normalizeBaseUrl(value: string | undefined, fallbackFromConfigUrl: string): string {
-  const fromValue = readString(value);
-  if (fromValue) {
-    try {
-      return new URL(fromValue).toString().replace(/\/$/, '');
-    } catch {
-      try {
-        return new URL(fromValue, fallbackFromConfigUrl).toString().replace(/\/$/, '');
-      } catch {
-        // Fall back below.
-      }
-    }
-  }
-
-  return fallbackFromConfigUrl.replace(/\/$/, '');
-}
-
 function buildResourceShardDbKey(library: ResolvedResourceLibrary, shardFile: string): string {
   const sourceHash = hashText(`${library.id}|${library.configUrl}`);
   return `${sourceHash}:${shardFile}`;
@@ -1038,14 +992,6 @@ function normalizeRepositoryType(
   }
 
   return 'hosted';
-}
-
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-function readString(value: unknown): string | undefined {
-  return typeof value === 'string' && value.trim().length > 0 ? value.trim() : undefined;
 }
 
 function hashText(value: string): string {

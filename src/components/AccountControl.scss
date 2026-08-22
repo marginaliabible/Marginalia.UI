@@ -419,6 +419,47 @@ button.account-provider-modify-link {
   font-size: 0.78rem;
 }
 
+.cloud-folder-selected-name-wrap {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  column-gap: 0.35rem;
+  row-gap: 0.15rem;
+  min-width: 0;
+}
+
+.btn.cloud-folder-tag-add-btn,
+.btn.cloud-folder-tag-chip {
+  font-size: 14px;
+  line-height: 1.1;
+  padding: 0.25rem 0.4rem;
+  white-space: nowrap;
+}
+
+.cloud-folder-tag-chip {
+  border: 1px solid var(--resource-tag-color);
+  border-radius: 0.35rem;
+  background: color-mix(in srgb, var(--resource-tag-color) 18%, transparent);
+  color: var(--bs-body-color);
+}
+
+.cloud-folder-tag-chip:hover,
+.cloud-folder-tag-chip:focus-visible {
+  background: color-mix(in srgb, var(--resource-tag-color) 30%, transparent);
+}
+
+.cloud-folder-tag-chip.is-inherited {
+  border-style: dashed;
+  background: transparent;
+  opacity: 0.75;
+}
+
+.cloud-folder-tag-chip.is-inherited:hover,
+.cloud-folder-tag-chip.is-inherited:focus-visible {
+  opacity: 1;
+  background: color-mix(in srgb, var(--resource-tag-color) 12%, transparent);
+}
+
 .cloud-folder-selected-path {
   white-space: normal;
   text-decoration: none;

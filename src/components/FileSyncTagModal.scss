@@ -1,0 +1,39 @@
+.file-sync-tag-modal-backdrop {
+  z-index: 1060;
+}
+
+.file-sync-tag-modal {
+  z-index: 1061;
+}
+
+.file-sync-tag-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.file-sync-tag-dot {
+  width: 0.7rem;
+  height: 0.7rem;
+  border-radius: 0.15rem;
+  display: inline-block;
+  flex: 0 0 auto;
+}
+
+.file-sync-tag-select .file-sync-tag-select__control {
+  min-height: auto;
+  font-size: 14px;
+}
+
+.file-sync-tag-select .file-sync-tag-select__value-container {
+  padding: 0.1rem 0.5rem;
+}
+
+.file-sync-tag-select .file-sync-tag-select__multi-value {
+  font-size: 14px;
+}
+
+.file-sync-tag-select .file-sync-tag-select__input-container {
+  margin: 0;
+  padding: 0;
+}

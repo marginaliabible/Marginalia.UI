@@ -53,6 +53,9 @@ interface ProviderSyncTarget {
   sizeBytes?: number;
   sizeKnown?: boolean;
   excludedItemIds?: string[];
+  tags?: string[];
+  itemTags?: Record<string, string[]>;
+  itemTagExclusions?: Record<string, string[]>;
 }
 
 type ProviderSyncPreferenceMap = Record<FederatedProvider, ProviderSyncPreferences>;
@@ -85,6 +88,9 @@ function isProviderSyncTarget(value: unknown): value is ProviderSyncTarget {
     && (typeof candidate.sizeBytes === 'undefined' || typeof candidate.sizeBytes === 'number')
     && (typeof candidate.sizeKnown === 'undefined' || typeof candidate.sizeKnown === 'boolean')
     && (typeof candidate.excludedItemIds === 'undefined' || Array.isArray(candidate.excludedItemIds))
+    && (typeof candidate.tags === 'undefined' || Array.isArray(candidate.tags))
+    && (typeof candidate.itemTags === 'undefined' || (typeof candidate.itemTags === 'object' && candidate.itemTags !== null))
+    && (typeof candidate.itemTagExclusions === 'undefined' || (typeof candidate.itemTagExclusions === 'object' && candidate.itemTagExclusions !== null))
   );
 }
 
@@ -703,6 +709,8 @@ const AccountControl: React.FC = () => {
 
     reconnectPromptSeenRef.current = reconnectKey;
     setIsModalOpen(true);
+    // Only one accordion can be open, so surface the first provider needing reconnect.
+    setExpandedProvider(missingProviderPrompts[0]);
     setStatusMessage('Reconnect required on this device to resume cloud synchronization.');
   }, [missingProviderPrompts]);
 
@@ -970,6 +978,9 @@ const AccountControl: React.FC = () => {
           sizeBytes: target.sizeBytes,
           sizeKnown: target.sizeKnown,
           excludedItemIds: target.excludedItemIds,
+          tags: target.tags,
+          itemTags: target.itemTags,
+          itemTagExclusions: target.itemTagExclusions,
         })),
       },
       microsoft: {
@@ -982,6 +993,9 @@ const AccountControl: React.FC = () => {
           sizeBytes: target.sizeBytes,
           sizeKnown: target.sizeKnown,
           excludedItemIds: target.excludedItemIds,
+          tags: target.tags,
+          itemTags: target.itemTags,
+          itemTagExclusions: target.itemTagExclusions,
         })),
       },
     }));
@@ -1215,10 +1229,10 @@ const AccountControl: React.FC = () => {
                                 </label>
                               </div>
 
-                              <div className="d-grid gap-2">
+                              <div className="d-flex flex-column flex-md-row justify-content-md-center">
                                 <button
                                   type="button"
-                                  className={`btn ${actionLabel === 'Disconnect' ? 'btn-danger' : 'btn-primary'} account-provider-connect-btn`}
+                                  className={`btn px-5 ${actionLabel === 'Disconnect' ? 'btn-danger' : 'btn-primary'} account-provider-connect-btn`}
                                   disabled={!connected && !canConnect}
                                   onClick={() => {
                                     handleProviderAction(provider);
@@ -1233,7 +1247,7 @@ const AccountControl: React.FC = () => {
                       );
                     })}
                   </section>
-                  
+
                   <CloudFolderPicker
                     sessions={providerSessionByType}
                     initialSelections={{

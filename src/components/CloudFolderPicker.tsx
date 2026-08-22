@@ -8,6 +8,8 @@ import {
 import { getMarkupFileIcon } from '../utils/supportedMarkupFileTypes';
 import { useHorizontalSplit } from '../hooks/useHorizontalSplit';
 import WorkspaceDivider from './WorkspaceDivider';
+import FileSyncTagModal from './FileSyncTagModal';
+import { getStoredResourceTagColors } from '../utils/resourceTagColors';
 
 const ROOT_LABEL: Record<FederatedProvider, string> = {
   google: 'Google Drive',
@@ -26,6 +28,12 @@ export interface FolderSelectionTarget {
   sizeKnown?: boolean;
   // Cloud item IDs (folders or files, any depth) explicitly excluded from sync within this selection.
   excludedItemIds?: string[];
+  // Tags assigned to this root selection item itself.
+  tags?: string[];
+  // Tags for nested items (any depth) within this selection, keyed by cloud item id.
+  itemTags?: Record<string, string[]>;
+  // Inherited tags explicitly cancelled for a nested item (any depth), keyed by cloud item id.
+  itemTagExclusions?: Record<string, string[]>;
 }
 
 interface CloudFolderPickerProps {
@@ -62,6 +70,9 @@ interface SelectedFolder {
   name: string;
   path: string;
   excludedItemIds: Set<string>;
+  tags: string[];
+  itemTags: Map<string, string[]>;
+  itemTagExclusions: Map<string, string[]>;
 }
 
 interface VisibleNode {
@@ -130,6 +141,13 @@ function toSelectionPayload(
 
   for (const row of selectedRows) {
     const node = nodes[row.key];
+    const itemTagsRecord = Array.from(row.itemTags.entries())
+      .filter(([, tags]) => tags.length > 0)
+      .sort(([leftId], [rightId]) => leftId.localeCompare(rightId));
+    const itemTagExclusionsRecord = Array.from(row.itemTagExclusions.entries())
+      .filter(([, tags]) => tags.length > 0)
+      .sort(([leftId], [rightId]) => leftId.localeCompare(rightId));
+
     next[row.provider].push({
       id: row.id,
       kind: 'folder',
@@ -138,6 +156,11 @@ function toSelectionPayload(
       sizeBytes: node?.sizeKnown ? node.sizeBytes : undefined,
       sizeKnown: node?.sizeKnown ?? false,
       excludedItemIds: row.excludedItemIds.size > 0 ? Array.from(row.excludedItemIds).sort() : undefined,
+      tags: row.tags.length > 0 ? [...row.tags].sort() : undefined,
+      itemTags: itemTagsRecord.length > 0 ? Object.fromEntries(itemTagsRecord.map(([id, tags]) => [id, [...tags].sort()])) : undefined,
+      itemTagExclusions: itemTagExclusionsRecord.length > 0
+        ? Object.fromEntries(itemTagExclusionsRecord.map(([id, tags]) => [id, [...tags].sort()]))
+        : undefined,
     });
   }
 
@@ -155,6 +178,17 @@ function normalizeSelectionPayload(
         name: target.name,
         path: target.path,
         excludedItemIds: [...(target.excludedItemIds || [])].sort(),
+        tags: [...(target.tags || [])].sort(),
+        itemTags: Object.fromEntries(
+          Object.entries(target.itemTags || {})
+            .map(([id, tags]) => [id, [...tags].sort()] as const)
+            .sort(([leftId], [rightId]) => leftId.localeCompare(rightId))
+        ),
+        itemTagExclusions: Object.fromEntries(
+          Object.entries(target.itemTagExclusions || {})
+            .map(([id, tags]) => [id, [...tags].sort()] as const)
+            .sort(([leftId], [rightId]) => leftId.localeCompare(rightId))
+        ),
       }))
       .sort((left, right) => {
         const leftPath = left.path || '';
@@ -245,6 +279,41 @@ function hasExcludedAncestor(
   return false;
 }
 
+// Computes the tags visible on a row: the root selection's own tags plus every ancestor's own
+// tags down to (and including) this item, minus any tag explicitly excluded along that chain.
+// Only the item that owns a tag (or an exclusion) actually persists it; everything else here is derived.
+function computeEffectiveTags(
+  nodeKey: string,
+  rootSelectionKey: string,
+  rootSelection: SelectedFolder,
+  nodes: Record<string, FolderTreeNode>,
+  isRootSelection: boolean
+): { effectiveTags: string[]; ownTags: string[] } {
+  if (isRootSelection) {
+    return { effectiveTags: [...rootSelection.tags], ownTags: [...rootSelection.tags] };
+  }
+
+  const chain: string[] = [];
+  let cursor: FolderTreeNode | undefined = nodes[nodeKey];
+  while (cursor && cursor.key !== rootSelectionKey) {
+    chain.unshift(cursor.id);
+    cursor = cursor.parentKey ? nodes[cursor.parentKey] : undefined;
+  }
+
+  const effective = new Set(rootSelection.tags);
+  for (const id of chain) {
+    for (const tag of rootSelection.itemTags.get(id) ?? []) {
+      effective.add(tag);
+    }
+    for (const tag of rootSelection.itemTagExclusions.get(id) ?? []) {
+      effective.delete(tag);
+    }
+  }
+
+  const targetId = nodes[nodeKey]?.id ?? '';
+  return { effectiveTags: Array.from(effective), ownTags: [...(rootSelection.itemTags.get(targetId) ?? [])] };
+}
+
 function buildSelectedMapFromPayload(
   payload: Record<FederatedProvider, FolderSelectionTarget[]>
 ): Record<string, SelectedFolder> {
@@ -265,12 +334,55 @@ function buildSelectedMapFromPayload(
         name: target.name || target.id,
         path: target.path || `${ROOT_LABEL[provider]}/${target.name || target.id}`,
         excludedItemIds: new Set(target.excludedItemIds || []),
+        tags: [...(target.tags || [])],
+        itemTags: new Map(Object.entries(target.itemTags || {}).map(([id, tags]) => [id, [...tags]])),
+        itemTagExclusions: new Map(Object.entries(target.itemTagExclusions || {}).map(([id, tags]) => [id, [...tags]])),
       };
     }
   }
 
   return nextSelected;
 }
+
+const FileSyncTagRowTags: React.FC<{
+  effectiveTags: string[];
+  ownTags: string[];
+  tagColors: Map<string, string>;
+  onAdd: (event: React.MouseEvent) => void;
+  onEditOwn: (event: React.MouseEvent) => void;
+}> = ({ effectiveTags, ownTags, tagColors, onAdd, onEditOwn }) => {
+  const ownTagSet = new Set(ownTags);
+
+  return (
+    <>
+      {effectiveTags.map((tag) => {
+        const color = tagColors.get(tag) ?? '#6c757d';
+        const isOwn = ownTagSet.has(tag);
+        const style = { ['--resource-tag-color' as '--resource-tag-color']: color } as React.CSSProperties;
+
+        return (
+          <button
+            key={tag}
+            type="button"
+            className={`cloud-folder-tag-chip${isOwn ? '' : ' is-inherited'}`}
+            style={style}
+            title={isOwn ? tag : `${tag} (inherited)`}
+            onClick={onEditOwn}
+          >
+            {tag}
+          </button>
+        );
+      })}
+      <button
+        type="button"
+        className="btn btn-outline-secondary btn-sm cloud-folder-tag-add-btn"
+        onClick={onAdd}
+      >
+        {effectiveTags.length === 0 ? '+ Tags' : '+'}
+      </button>
+    </>
+  );
+};
 
 const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
   sessions,
@@ -289,6 +401,14 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
   const [highlightNodeKey, setHighlightNodeKey] = useState<string | null>(null);
   const [highlightServiceProvider, setHighlightServiceProvider] = useState<FederatedProvider | null>(null);
   const [rightExpandedKeyByParent, setRightExpandedKeyByParent] = useState<Record<string, string | null>>({});
+  const [tagColors, setTagColors] = useState<Map<string, string>>(() => getStoredResourceTagColors());
+  const [tagModalTarget, setTagModalTarget] = useState<{
+    rootSelectionKey: string;
+    itemId: string | null;
+    itemLabel: string;
+    currentTags: string[];
+    ownTags: string[];
+  } | null>(null);
   const layoutRef = useRef<HTMLDivElement | null>(null);
   const nodesRef = useRef<Record<string, FolderTreeNode>>({});
   const inFlightLoadsRef = useRef<Record<string, Promise<FolderTreeNode[]>>>({});
@@ -667,6 +787,9 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
         name: node.name,
         path: node.path,
         excludedItemIds: new Set<string>(),
+        tags: [],
+        itemTags: new Map<string, string[]>(),
+        itemTagExclusions: new Map<string, string[]>(),
       };
 
       return next;
@@ -918,6 +1041,62 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
     });
   }, []);
 
+  const updateItemTags = useCallback((rootSelectionKey: string, itemId: string | null, nextTags: string[]) => {
+    setSelected((current) => {
+      const existing = current[rootSelectionKey];
+      if (!existing) {
+        return current;
+      }
+
+      if (itemId === null) {
+        return {
+          ...current,
+          [rootSelectionKey]: {
+            ...existing,
+            tags: nextTags,
+          },
+        };
+      }
+
+      const nextItemTags = new Map(existing.itemTags);
+      if (nextTags.length > 0) {
+        nextItemTags.set(itemId, nextTags);
+      } else {
+        nextItemTags.delete(itemId);
+      }
+
+      return {
+        ...current,
+        [rootSelectionKey]: {
+          ...existing,
+          itemTags: nextItemTags,
+        },
+      };
+    });
+  }, []);
+
+  const excludeInheritedTag = useCallback((rootSelectionKey: string, itemId: string, tag: string) => {
+    setSelected((current) => {
+      const existing = current[rootSelectionKey];
+      if (!existing) {
+        return current;
+      }
+
+      const nextExclusions = new Map(existing.itemTagExclusions);
+      const currentExclusions = new Set(nextExclusions.get(itemId) ?? []);
+      currentExclusions.add(tag);
+      nextExclusions.set(itemId, Array.from(currentExclusions));
+
+      return {
+        ...current,
+        [rootSelectionKey]: {
+          ...existing,
+          itemTagExclusions: nextExclusions,
+        },
+      };
+    });
+  }, []);
+
   const rightVisibleRows = useMemo<RightVisibleRow[]>(() => {
     const rows: RightVisibleRow[] = [];
 
@@ -1152,6 +1331,17 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
                 const canToggleSync = isFolder || Boolean(fileIcon?.supported);
                 const displayLabel = (visibleRow.isRootSelection ? rootSelection.path : node.name).replace(/\//g, '/\u200B');
                 const canActivateName = visibleRow.isRootSelection && showChevron;
+                const isTaggable = visibleRow.isRootSelection
+                  ? providerAvailable
+                  : !isExcluded && !isCoveredByExcludedAncestor && canToggleSync && providerAvailable;
+                const itemTagId = visibleRow.isRootSelection ? null : node.id;
+                const { effectiveTags: effectiveItemTags, ownTags: ownItemTags } = computeEffectiveTags(
+                  visibleRow.key,
+                  visibleRow.rootSelectionKey,
+                  rootSelection,
+                  nodes,
+                  visibleRow.isRootSelection
+                );
 
                 const handleNameActivate = () => {
                   if (!canActivateName) {
@@ -1160,6 +1350,17 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
 
                   toggleRightExpanded(groupKey, visibleRow.key);
                   void revealPath(rootSelection);
+                };
+
+                const handleOpenTagModal = (event: React.MouseEvent) => {
+                  event.stopPropagation();
+                  setTagModalTarget({
+                    rootSelectionKey: visibleRow.rootSelectionKey,
+                    itemId: itemTagId,
+                    itemLabel: node.name,
+                    currentTags: effectiveItemTags,
+                    ownTags: ownItemTags,
+                  });
                 };
 
                 return (
@@ -1190,28 +1391,46 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
                       )}
 
                       {visibleRow.isRootSelection && (!providerSyncFilesEnabled[node.provider] || !sessions[node.provider]) ? (
-                        <button
-                          type="button"
-                          className="btn btn-link btn-sm p-0 text-start cloud-folder-selected-path is-disabled"
-                          disabled
-                        >
-                          {displayLabel}
-                        </button>
+                        <div className="cloud-folder-selected-name-wrap">
+                          <button
+                            type="button"
+                            className="btn btn-link btn-sm p-0 text-start cloud-folder-selected-path is-disabled"
+                            disabled
+                          >
+                            {displayLabel}
+                          </button>
+                        </div>
                       ) : canActivateName ? (
-                        <button
-                          type="button"
-                          className="btn btn-link btn-sm p-0 text-start cloud-folder-selected-path"
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            handleNameActivate();
-                          }}
-                        >
-                          {displayLabel}
-                        </button>
+                        <div className="cloud-folder-selected-name-wrap">
+                          <button
+                            type="button"
+                            className="btn btn-link btn-sm p-0 text-start cloud-folder-selected-path"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              handleNameActivate();
+                            }}
+                          >
+                            {displayLabel}
+                          </button>
+                          {isTaggable && (
+                            <FileSyncTagRowTags
+                              effectiveTags={effectiveItemTags}
+                              ownTags={ownItemTags}
+                              tagColors={tagColors}
+                              onAdd={handleOpenTagModal}
+                              onEditOwn={handleOpenTagModal}
+                            />
+                          )}
+                        </div>
                       ) : (
-                        <span className={`cloud-folder-selected-name${!isFolder && !fileIcon?.supported ? ' is-unsupported' : ''}`}>
-                          {displayLabel}
-                        </span>
+                        <div className="cloud-folder-selected-name-wrap">
+                          <span className={`cloud-folder-selected-name${!isFolder && !fileIcon?.supported ? ' is-unsupported' : ''}`}>
+                            {displayLabel}
+                          </span>
+                          {isTaggable && (
+                            <FileSyncTagRowTags effectiveTags={effectiveItemTags} ownTags={ownItemTags} tagColors={tagColors} onAdd={handleOpenTagModal} onEditOwn={handleOpenTagModal} />
+                          )}
+                        </div>
                       )}
 
                       <span className="cloud-folder-selected-size text-end text-nowrap text-body-secondary">
@@ -1281,6 +1500,32 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
       </div>
 
       {errorMessage && <p className="small text-danger mb-0">{errorMessage}</p>}
+
+      {tagModalTarget && (
+        <FileSyncTagModal
+          itemLabel={tagModalTarget.itemLabel}
+          initialTags={tagModalTarget.currentTags}
+          onDone={(nextTags) => {
+            const { rootSelectionKey, itemId, currentTags, ownTags } = tagModalTarget;
+            // Tags shown only because an ancestor owns them; deselecting one of these adds an
+            // exclusion instead of trying to remove a tag this item never actually owned.
+            const inheritedOnlyTags = currentTags.filter((tag) => !ownTags.includes(tag));
+            const nextOwnTags = nextTags.filter((tag) => !inheritedOnlyTags.includes(tag));
+            updateItemTags(rootSelectionKey, itemId, nextOwnTags);
+
+            if (itemId) {
+              const removedInheritedTags = inheritedOnlyTags.filter((tag) => !nextTags.includes(tag));
+              for (const tag of removedInheritedTags) {
+                excludeInheritedTag(rootSelectionKey, itemId, tag);
+              }
+            }
+
+            setTagColors(getStoredResourceTagColors());
+            setTagModalTarget(null);
+          }}
+          onClose={() => setTagModalTarget(null)}
+        />
+      )}
     </section>
   );
 };

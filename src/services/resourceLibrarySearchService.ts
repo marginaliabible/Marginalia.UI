@@ -1,5 +1,6 @@
 import MiniSearch from 'minisearch';
 import { normalizeEnglishTerm } from './searchNormalizer';
+import { buildDocumentPageUrl, isPlainObject, readResourceLibraryConnection, readString } from '../utils/resourceLibraryConfig';
 
 const SEARCH_LIMIT = 5000;
 const DEFAULT_SETTINGS_PATH = 'data/bibles/_settings.json';
@@ -179,12 +180,7 @@ async function loadResourceLibraryDocuments(candidates: ResourceLibraryCandidate
     }
 
     const config = configPayload as ResourceLibraryConfigPayload;
-    const baseUrl = readString(config.source && isPlainObject(config.source) ? config.source['baseUrl'] : undefined)
-      ?? readString(config.baseUrl)
-      ?? new URL('.', candidate.configUrl).toString().replace(/\/$/, '');
-    const documentUrlTemplate = readString(config.source && isPlainObject(config.source) ? config.source['documentUrlTemplate'] : undefined)
-      ?? readString(config.documentUrlTemplate)
-      ?? '{baseUrl}/documents/{documentId}?page={page}';
+    const { baseUrl, documentUrlTemplate } = readResourceLibraryConnection(config, candidate.configUrl);
 
     const documentsResponse = await fetch(new URL('documents.json', candidate.configUrl).toString(), { cache: 'no-store' });
     if (!documentsResponse.ok) {
@@ -309,30 +305,6 @@ function resolveRelativeUrl(value: string, settingsUrl: string): string {
   }
 }
 
-function buildDocumentPageUrl(template: string, baseUrl: string, documentId: string, page: number): string {
-  const replacements: Array<[string, string]> = [
-    ['{baseUrl}', baseUrl],
-    ['{{baseUrl}}', baseUrl],
-    ['{documentId}', documentId],
-    ['{{documentId}}', documentId],
-    ['{page}', String(page)],
-    ['{{page}}', String(page)],
-    ['{pageNumber}', String(page)],
-    ['{{pageNumber}}', String(page)],
-  ];
-
-  let output = template;
-  for (const [token, value] of replacements) {
-    output = output.split(token).join(value);
-  }
-
-  try {
-    return new URL(output, `${baseUrl}/`).toString();
-  } catch {
-    return output;
-  }
-}
-
 function isResourceLibraryConfigPayload(value: unknown): value is ResourceLibraryConfigPayload {
   if (!isPlainObject(value)) {
     return false;
@@ -343,14 +315,6 @@ function isResourceLibraryConfigPayload(value: unknown): value is ResourceLibrar
     || Object.prototype.hasOwnProperty.call(value, 'baseUrl')
     || Object.prototype.hasOwnProperty.call(value, 'documentUrlTemplate')
   );
-}
-
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-function readString(value: unknown): string | undefined {
-  return typeof value === 'string' && value.trim().length > 0 ? value.trim() : undefined;
 }
 
 function prettifyLabel(value: string): string {

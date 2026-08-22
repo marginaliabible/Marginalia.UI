@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, getDefaultNormalizer, render, screen, waitFor, within } from '@testing-library/react';
 import AccountControl from './AccountControl';
 import { useAppDispatch, useAppSelector } from '../store/hooks';
 import { bibleService } from '../services/bibleService';
@@ -128,6 +128,11 @@ function linkedBothProviders() {
   ];
 }
 
+// The picker inserts zero-width spaces after slashes so long paths can wrap.
+const pathTextOptions = {
+  normalizer: (text: string) => getDefaultNormalizer()(text).replace(/\u200B/g, ''),
+};
+
 function openAccountModal() {
   fireEvent.click(screen.getByRole('button', { name: /open account controls/i }));
 }
@@ -201,7 +206,30 @@ describe('AccountControl', () => {
     });
   });
 
+  it('expands the accordion for the provider that requires reconnect', async () => {
+    mockReadState.mockReturnValue({
+      lastTranslationId: 'KJV',
+      lastTranslationIds: ['KJV'],
+      cloudLinkedAccounts: linkedBothProviders(),
+      cloudConfigUpdatedAt: Date.now() - 10_000,
+      cloudConfigLastSyncedAt: Date.now() - 10_000,
+    });
+
+    mockGetStoredSessions.mockReturnValue({ microsoft: msSession });
+    mockGetFreshSessions.mockResolvedValue({ microsoft: msSession });
+
+    await renderAccountControl();
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /Connected to Google/i })).toHaveAttribute('aria-expanded', 'true');
+    });
+
+    expect(screen.getByRole('button', { name: 'Reconnect' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Connected to Microsoft/i })).toHaveAttribute('aria-expanded', 'false');
+  });
+
   it('shows reconnect modal again after remount when a linked provider is still missing', async () => {
+
     mockReadState.mockReturnValue({
       lastTranslationId: 'KJV',
       lastTranslationIds: ['KJV'],
@@ -426,8 +454,7 @@ describe('AccountControl', () => {
       expect(screen.getByText(/Reconnect Google on this device/i)).toBeInTheDocument();
     });
 
-    expandProvider('Google');
-
+    // The reconnect flow auto-expands the affected provider's accordion.
     const syncSettingsCheckbox = getProviderCheckbox('google-sync-settings');
     const syncFilesCheckbox = getProviderCheckbox('google-sync-files');
 
@@ -570,7 +597,7 @@ describe('AccountControl', () => {
 
     // The right panel shows the full path for the root selection, not just the folder name.
     await waitFor(() => {
-      expect(screen.getByText('Google Drive/Bible Notes Folder')).toBeInTheDocument();
+      expect(screen.getByText('Google Drive/Bible Notes Folder', pathTextOptions)).toBeInTheDocument();
     });
 
     // Folder size in the right panel is computed lazily; wait for it before Apply so the
@@ -677,6 +704,178 @@ describe('AccountControl', () => {
       const persisted = JSON.parse(window.localStorage.getItem('marginalia:provider-sync-preferences') || '{}');
       expect(persisted.google.selectedTargets).toHaveLength(1);
       expect(persisted.google.selectedTargets[0].excludedItemIds).toEqual(['g-file-notes']);
+    });
+  });
+
+  it('assigns a seeded default tag to a selected folder via the tag modal and persists it on Apply', async () => {
+    mockReadState.mockReturnValue({
+      lastTranslationId: 'KJV',
+      lastTranslationIds: ['KJV'],
+      cloudLinkedAccounts: [
+        {
+          provider: 'google',
+          providerAccountId: 'g-user-1',
+          email: 'g@example.com',
+          linkedAt: Date.now() - 5000,
+        },
+      ],
+      cloudConfigUpdatedAt: Date.now() - 10_000,
+      cloudConfigLastSyncedAt: Date.now() - 10_000,
+    });
+
+    window.localStorage.setItem('marginalia:provider-sync-preferences', JSON.stringify({
+      google: {
+        syncSettings: false,
+        syncFiles: true,
+        selectedTargets: [],
+      },
+      microsoft: {
+        syncSettings: false,
+        syncFiles: false,
+        selectedTargets: [],
+      },
+    }));
+
+    mockGetStoredSessions.mockReturnValue({ google: googleSession });
+    mockGetFreshSessions.mockResolvedValue({ google: googleSession });
+    mockComputeSupportedFolderSizeForSession.mockResolvedValue(1024);
+    mockListFolderChildrenForSession.mockResolvedValue([
+      { id: 'g-folder-1', name: 'Bible Notes Folder', kind: 'folder', sizeBytes: 0, hasChildren: false },
+    ]);
+
+    await renderAccountControl();
+    openAccountModal();
+    expandProvider('Google');
+
+    await waitFor(() => {
+      expect(screen.getByText('Google Drive')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByLabelText('Expand Google Drive'));
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('Google Drive/Bible Notes Folder')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByLabelText('Google Drive/Bible Notes Folder'));
+
+    const rightPanel = within(document.querySelector('.cloud-folder-picker-right') as HTMLElement);
+
+    fireEvent.click(rightPanel.getByRole('button', { name: '+ Tags' }));
+
+    await waitFor(() => {
+      expect(screen.getByText('Tags for Bible Notes Folder')).toBeInTheDocument();
+    });
+
+    // "Teaching" is one of the seeded default tags shown when no tags exist yet.
+    const tagInput = document.getElementById('fileSyncTagInput') as HTMLInputElement;
+    fireEvent.change(tagInput, { target: { value: 'Teaching' } });
+    fireEvent.keyDown(tagInput, { key: 'Enter' });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Done' }));
+
+    // The "+ Tags" button is replaced by the assigned tag chip.
+    expect(rightPanel.getByRole('button', { name: 'Teaching' })).toBeInTheDocument();
+    expect(rightPanel.queryByRole('button', { name: '+ Tags' })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
+
+    await waitFor(() => {
+      const persisted = JSON.parse(window.localStorage.getItem('marginalia:provider-sync-preferences') || '{}');
+      expect(persisted.google.selectedTargets[0].tags).toEqual(['Teaching']);
+    });
+  });
+
+  it('shows a folder tag as inherited on its children and lets an inherited tag be excluded for one of them', async () => {
+    mockReadState.mockReturnValue({
+      lastTranslationId: 'KJV',
+      lastTranslationIds: ['KJV'],
+      cloudLinkedAccounts: [
+        {
+          provider: 'google',
+          providerAccountId: 'g-user-1',
+          email: 'g@example.com',
+          linkedAt: Date.now() - 5000,
+        },
+      ],
+      cloudConfigUpdatedAt: Date.now() - 10_000,
+      cloudConfigLastSyncedAt: Date.now() - 10_000,
+    });
+
+    window.localStorage.setItem('marginalia:provider-sync-preferences', JSON.stringify({
+      google: {
+        syncSettings: false,
+        syncFiles: true,
+        selectedTargets: [
+          {
+            id: 'g-folder-1',
+            kind: 'folder',
+            name: 'Bible Notes Folder',
+            path: 'Google Drive/Bible Notes Folder',
+            tags: ['Teaching'],
+          },
+        ],
+      },
+      microsoft: {
+        syncSettings: false,
+        syncFiles: false,
+        selectedTargets: [],
+      },
+    }));
+
+    mockGetStoredSessions.mockReturnValue({ google: googleSession });
+    mockGetFreshSessions.mockResolvedValue({ google: googleSession });
+    mockComputeSupportedFolderSizeForSession.mockResolvedValue(1024);
+    mockListFolderChildrenForSession.mockResolvedValue([
+      { id: 'g-file-notes', name: 'notes.txt', kind: 'file', sizeBytes: 1024, hasChildren: false },
+    ]);
+
+    await renderAccountControl();
+    openAccountModal();
+    expandProvider('Google');
+
+    const rightPanel = within(document.querySelector('.cloud-folder-picker-right') as HTMLElement);
+
+    await waitFor(() => {
+      expect(document.querySelector('.cloud-folder-selected-path')).toHaveTextContent('Bible Notes Folder');
+    });
+
+    // The seeded default tag color storage isn't populated for this pre-existing tag, so it renders as a fallback-colored chip.
+    expect(rightPanel.getByRole('button', { name: 'Teaching' })).toBeInTheDocument();
+
+    fireEvent.click(rightPanel.getByLabelText('Expand Bible Notes Folder'));
+
+    await waitFor(() => {
+      expect(rightPanel.getByText('notes.txt')).toBeInTheDocument();
+    });
+
+    // The child file shows the ancestor's tag as an inherited chip, distinguishable from an owned one.
+    const inheritedChip = rightPanel.getAllByRole('button', { name: 'Teaching' })[1];
+    expect(inheritedChip).toHaveClass('is-inherited');
+
+    fireEvent.click(inheritedChip);
+
+    await waitFor(() => {
+      expect(screen.getByText('Tags for notes.txt')).toBeInTheDocument();
+    });
+
+    // The modal shows the inherited tag alongside any owned ones; removing it here is what
+    // records the exclusion instead of trying to edit a tag this item never owned.
+    const removeInheritedTagButton = document.querySelector('.file-sync-tag-select__multi-value__remove');
+    expect(removeInheritedTagButton).not.toBeNull();
+    fireEvent.click(removeInheritedTagButton as Element);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Done' }));
+
+    // Excluding the inherited tag removes it from the child's display without touching the parent's own chip.
+    expect(rightPanel.getAllByRole('button', { name: 'Teaching' })).toHaveLength(1);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
+
+    await waitFor(() => {
+      const persisted = JSON.parse(window.localStorage.getItem('marginalia:provider-sync-preferences') || '{}');
+      expect(persisted.google.selectedTargets[0].tags).toEqual(['Teaching']);
+      expect(persisted.google.selectedTargets[0].itemTagExclusions).toEqual({ 'g-file-notes': ['Teaching'] });
     });
   });
 
@@ -1205,8 +1404,8 @@ describe('AccountControl', () => {
     const rightPanel = within(document.querySelector('.cloud-folder-picker-right') as HTMLElement);
 
     await waitFor(() => {
-      expect(rightPanel.getByText('Google Drive/Egg/Chicken')).toBeInTheDocument();
-      expect(rightPanel.getByText('OneDrive/Documents')).toBeInTheDocument();
+      expect(rightPanel.getByText('Google Drive/Egg/Chicken', pathTextOptions)).toBeInTheDocument();
+      expect(rightPanel.getByText('OneDrive/Documents', pathTextOptions)).toBeInTheDocument();
     });
 
     // Neither the left-panel root, nor any intermediate folder, was ever expanded.
