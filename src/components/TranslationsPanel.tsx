@@ -155,17 +155,17 @@ const TranslationsPanel: React.FC<TranslationsPanelProps> = ({
                               disabled={isLastStarred}
                               aria-label={
                                 isLastStarred
-                                  ? 'Cannot remove the last side-by-side translation'
+                                  ? 'Cannot remove the last translation'
                                   : record.starred
-                                    ? 'Remove from side-by-side translations'
-                                    : 'Include in side-by-side translations'
+                                    ? 'Remove from parallel translations'
+                                    : 'Include in parallel translations'
                               }
                               title={
                                 isLastStarred
                                   ? 'Cannot unstar the last starred translation'
                                   : record.starred
-                                    ? 'Remove from side-by-side translations'
-                                    : 'Include in side-by-side translations'
+                                    ? 'Remove from parallel translations'
+                                    : 'Include in parallel translations'
                               }
                             >
                               <i className={`fa-${record.starred ? 'solid' : 'regular'} fa-star`} aria-hidden="true"></i>

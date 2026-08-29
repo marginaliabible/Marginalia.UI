@@ -14,6 +14,8 @@ export interface HashRouteTarget {
   verse?: number;
 }
 
+const SEARCH_HASH_QUERY_PARAM = 'q';
+
 export const DESKTOP_BREAKPOINT = '(min-width: 992px)';
 
 export const normalizeLanguageSelection = (values: string[]): string[] => {
@@ -76,7 +78,8 @@ export const parseHashRoute = (hashValue: string): HashRouteTarget | null => {
   }
 
   const withoutHash = hashValue.startsWith('#') ? hashValue.slice(1) : hashValue;
-  const trimmed = withoutHash.startsWith('/') ? withoutHash.slice(1) : withoutHash;
+  const withoutQuery = withoutHash.split('?')[0];
+  const trimmed = withoutQuery.startsWith('/') ? withoutQuery.slice(1) : withoutQuery;
   const [bookSegment, chapterSegment, verseSegment] = trimmed.split('/');
 
   if (!bookSegment || !chapterSegment) {
@@ -99,6 +102,34 @@ export const parseHashRoute = (hashValue: string): HashRouteTarget | null => {
   }
 
   return { book, chapter, verse };
+};
+
+// Builds a hash route that layers a search query onto an optional chapter/verse reference,
+// e.g. "#/John/3/16?q=love" or "#/?q=love" when no reference is selected.
+export const buildSearchHashRoute = (search: string, reference?: HashRouteTarget | null): string => {
+  const trimmedSearch = search.trim();
+  const basePath = reference ? buildHashRoute(reference, true) : '#/';
+
+  if (!trimmedSearch) {
+    return basePath;
+  }
+
+  return `${basePath}?${SEARCH_HASH_QUERY_PARAM}=${encodeURIComponent(trimmedSearch)}`;
+};
+
+export const parseSearchFromHash = (hashValue: string): string | null => {
+  if (!hashValue) {
+    return null;
+  }
+
+  const queryIndex = hashValue.indexOf('?');
+  if (queryIndex === -1) {
+    return null;
+  }
+
+  const search = new URLSearchParams(hashValue.slice(queryIndex + 1)).get(SEARCH_HASH_QUERY_PARAM);
+  const trimmed = search?.trim();
+  return trimmed && trimmed.length > 0 ? trimmed : null;
 };
 
 export const getLanguageDisplayName = (code: string): string => {

@@ -11,6 +11,15 @@
   min-height: 0;
 }
 
+.resource-document {
+  transition: border-color 120ms ease, background-color 120ms ease;
+}
+
+.resource-document.is-selected {
+  background: color-mix(in srgb, var(--bs-primary-bg-subtle) 56%, transparent);
+  border-color: color-mix(in srgb, var(--bs-primary) 28%, var(--bs-border-color)) !important;
+}
+
 .resource-tag-dot {
   width: 0.9rem;
   height: 0.9rem;

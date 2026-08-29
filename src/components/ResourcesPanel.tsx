@@ -13,7 +13,7 @@ interface ResourcesPanelProps {
 const ResourcesPanel: React.FC<ResourcesPanelProps> = ({ tab }) => {
   const verseContext = tab.verseContext as VerseContext | undefined;
   const dispatch = useAppDispatch();
-  const { sourceUrls, resourceHiddenTags } = useAppSelector((state) => state.ui);
+  const { sourceUrls, resourceHiddenTags, pdfViewer } = useAppSelector((state) => state.ui);
   const { currentBible, isPanelDetached } = useAppSelector((state) => state.bible);
 
   const [isLoading, setIsLoading] = useState(false);
@@ -224,8 +224,15 @@ const ResourcesPanel: React.FC<ResourcesPanelProps> = ({ tab }) => {
                 <p className="text-body-secondary small mb-0">No resources matched this verse.</p>
               ) : (
                 <div className="d-flex flex-column gap-2">
-                  {groupedDocuments.map((document) => (
-                    <div key={document.documentId} className="border rounded p-2">
+                  {groupedDocuments.map((document) => {
+                    const isSelected = pdfViewer.isOpen
+                      && document.pageLinks.some((link) => link.url === pdfViewer.sourceUrl);
+
+                    return (
+                    <div
+                      key={document.documentId}
+                      className={`resource-document border rounded p-2 ${isSelected ? 'is-selected' : ''}`}
+                    >
                       <div className="d-flex align-items-center justify-content-between gap-2 flex-wrap">
                         <div className="d-flex align-items-center flex-wrap gap-2 flex-grow-1">
                           <span
@@ -267,7 +274,8 @@ const ResourcesPanel: React.FC<ResourcesPanelProps> = ({ tab }) => {
                         ))}
                       </div>
                     </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </>

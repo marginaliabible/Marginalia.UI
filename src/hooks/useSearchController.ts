@@ -8,6 +8,7 @@ import {
 } from '../store/slices/bibleSlice';
 import { setSearchTerm, clearVerseSelection } from '../store/slices/uiSlice';
 import { parseQuickJump } from '../utils/reference-parser';
+import { buildSearchHashRoute } from '../App';
 import type { QuickJumpTarget } from '../models/bible';
 import type { SearchHistoryEntry } from '../components/SearchActionDropdown';
 
@@ -64,7 +65,7 @@ export const useSearchController = ({
 }: UseSearchControllerOptions): SearchControllerApi => {
   const dispatch = useAppDispatch();
   const { tabs, activeTabId, currentBible } = useAppSelector((state) => state.bible);
-  const { searchTerm, ready } = useAppSelector((state) => state.ui);
+  const { searchTerm, ready, selectedBook, selectedChapter, selectedVerses } = useAppSelector((state) => state.ui);
 
   const [isSearchFocused, setIsSearchFocused] = useState(false);
   const [isSearchActionDropdownOpen, setIsSearchActionDropdownOpen] = useState(false);
@@ -186,11 +187,33 @@ export const useSearchController = ({
     }
   };
 
+  // Records the search alongside the current chapter/verse (if any) in the hash route/history.
+  const pushSearchHashRoute = (query: string) => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    const selectedVerse = selectedVerses.find((verse) => Number.isInteger(verse) && verse > 0);
+    const reference = selectedBook ? { book: selectedBook, chapter: selectedChapter, verse: selectedVerse } : null;
+    const nextHash = buildSearchHashRoute(query, reference);
+
+    if (window.location.hash === nextHash) {
+      return;
+    }
+
+    window.history.pushState(
+      window.history.state,
+      '',
+      `${window.location.pathname}${window.location.search}${nextHash}`
+    );
+  };
+
   const runSearchByAction = async (query: string, action: 'replace' | 'new') => {
     const normalized = query.trim();
     if (!normalized) return;
 
     updateSearchHistory(normalized, null);
+    pushSearchHashRoute(normalized);
 
     await dispatch(loadTranslations(starredTranslationIds));
 

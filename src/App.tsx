@@ -577,16 +577,14 @@ function App() {
       ? translationId
       : selectedTranslationId;
 
-    const loadResult = await dispatch(loadTranslation(nextActiveId));
-
+    // Only navigating without an explicit translation (e.g. quick jump) should switch the app's
+    // primary translation. Jumping to a specific match (e.g. a search result) must only highlight
+    // that verse in its own translation column, not permanently change the primary translation.
+    let activeBible = currentBible;
     if (nextActiveId !== selectedTranslationId) {
-      dispatch(setSelectedTranslationId(nextActiveId));
-      dispatch(setCurrentBibleFromId(nextActiveId));
+      const loadResult = await dispatch(loadTranslation(nextActiveId));
+      activeBible = loadTranslation.fulfilled.match(loadResult) ? loadResult.payload : currentBible;
     }
-
-    const activeBible = loadTranslation.fulfilled.match(loadResult)
-      ? loadResult.payload
-      : currentBible;
     if (!activeBible) return;
 
     if (!activeBible.books.some((book) => book.name === target.book)) {
