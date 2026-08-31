@@ -207,7 +207,8 @@ const ResourcesPanel: React.FC<ResourcesPanelProps> = ({ tab }) => {
                       <button
                         key={tag}
                         type="button"
-                        className={`btn btn-sm d-inline-flex align-items-center gap-1 resource-tag-button ${isOn ? 'is-active' : 'is-inactive'}`}
+                        className={`d-inline-flex align-items-center gap-1 resource-tag-button ${isOn ? 'is-active' : 'is-inactive'}`}
+                        aria-pressed={isOn}
                         onClick={() => toggleTag(tag)}
                         title={tag}
                         style={style}

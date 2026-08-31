@@ -13,6 +13,7 @@ import { useAppDispatch, useAppSelector } from './store/hooks';
 import {
   loadTranslation,
   refreshTranslations,
+  createDeferredSearchTab,
   setActiveTab,
   closeTab,
   updateActiveVerseTabContext,
@@ -56,6 +57,7 @@ import {
   getLanguageDisplayName,
   applyTheme,
   buildHashRoute,
+  parseSearchFromHash,
   detectPreferredTheme,
   scrollToVerse,
 } from './App';
@@ -155,7 +157,7 @@ function App() {
   const isDesktopLayout = useDesktopLayout();
   const isMobileLayout = !isDesktopLayout;
 
-  const activeWorkspacePanel: WorkspacePanelKey | null = activeTabId ? 'search' : null;
+  const activeWorkspacePanel: WorkspacePanelKey | null = tabs.length > 0 ? 'search' : null;
 
   const { popupContainer, focusDetachedPanel, focusMainWindow, handleToggleDetachPanel } = usePopupPanel({
     dispatch,
@@ -396,6 +398,9 @@ function App() {
       const nextTranslationRecords = hydratedTranslationRecords && hydratedTranslationRecords.length > 0
         ? hydratedTranslationRecords
         : [{ id: nextTranslationId, starred: true }];
+      const initialSearchTerm = typeof window !== 'undefined'
+        ? parseSearchFromHash(window.location.hash) ?? ''
+        : '';
       const hasSavedReference =
         hasPersistedState
         && typeof savedState?.lastBook === 'string'
@@ -414,10 +419,20 @@ function App() {
         selectedLanguages: finalLanguages,
         sourceUrls: Array.isArray(savedState?.sourceUrls) ? savedState.sourceUrls : [],
         resourceHiddenTags: Array.isArray(savedState?.resourceHiddenTags) ? savedState.resourceHiddenTags : [],
+        searchTerm: initialSearchTerm,
         userId: typeof savedState?.userId === 'string' && savedState.userId.trim().length > 0 ? savedState.userId : null,
       }));
 
       await dispatch(loadTranslation(nextTranslationId));
+      if (initialSearchTerm) {
+        const initialStarredTranslationIds = nextTranslationRecords
+          .filter((record) => record.starred)
+          .map((record) => record.id);
+        const searchTranslationIds = initialStarredTranslationIds.length > 0
+          ? initialStarredTranslationIds
+          : nextTranslationIds;
+        dispatch(createDeferredSearchTab({ query: initialSearchTerm, translationIds: searchTranslationIds }));
+      }
       void dispatch(refreshTranslations(false));
       dispatch(setReady(true));
     };

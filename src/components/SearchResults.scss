@@ -19,6 +19,28 @@
   font-size: 0.875rem;
 }
 
+.search-results-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.search-testament-toggle-group {
+  margin-left: auto;
+  flex: 0 0 auto;
+}
+
+.search-results-actions > .search-testament-toggle-group > .btn[aria-pressed='false'],
+.search-results-actions > .search-testament-toggle-group > .btn[aria-pressed='false']:hover,
+.search-results-actions > .search-testament-toggle-group > .btn[aria-pressed='false']:focus,
+.search-results-actions > .search-testament-toggle-group > .btn[aria-pressed='false']:active {
+  color: var(--bs-primary);
+  background-color: transparent;
+  border-color: var(--bs-primary);
+}
+
 .search-results-card {
   container-type: inline-size;
   container-name: search-results-card;

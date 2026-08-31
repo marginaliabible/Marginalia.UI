@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef } from 'react';
 import { setSelectedBook, setSelectedChapter, setVerseSelection, clearVerseSelection } from '../store/slices/uiSlice';
 import { useAppDispatch } from '../store/hooks';
 import type { BibleData } from '../models/bible';
-import { buildHashRoute, parseHashRoute, scrollToVerse } from '../App';
+import { buildSearchHashRoute, buildHashRoute, parseHashRoute, parseSearchFromHash, scrollToVerse } from '../App';
 
 interface UseHashRouteSyncOptions {
   currentBible: BibleData | null;
@@ -119,6 +119,13 @@ export const useHashRouteSync = ({
     const nextVerseHash = selectedVerse
       ? buildHashRoute({ book: selectedBook, chapter: selectedChapter, verse: selectedVerse }, true)
       : nextChapterHash;
+    const withCurrentSearch = (hashRoute: string): string => {
+      const search = parseSearchFromHash(window.location.hash);
+      const route = parseHashRoute(hashRoute);
+      return search && route ? buildSearchHashRoute(search, route) : hashRoute;
+    };
+    const nextChapterHashWithSearch = withCurrentSearch(nextChapterHash);
+    const nextVerseHashWithSearch = withCurrentSearch(nextVerseHash);
     const chapterKey = `${selectedBook}::${selectedChapter}`;
 
     const parsedCurrentHash = parseHashRoute(window.location.hash);
@@ -142,7 +149,7 @@ export const useHashRouteSync = ({
       window.history.replaceState(
         window.history.state,
         '',
-        `${window.location.pathname}${window.location.search}${nextVerseHash}`
+        `${window.location.pathname}${window.location.search}${nextVerseHashWithSearch}`
       );
       hasSyncedChapterHashRef.current = true;
       lastSelectedChapterKeyRef.current = chapterKey;
@@ -152,16 +159,16 @@ export const useHashRouteSync = ({
     const chapterChanged = lastSelectedChapterKeyRef.current !== chapterKey;
 
     if (chapterChanged) {
-      if (window.location.hash !== nextChapterHash) {
+      if (window.location.hash !== nextChapterHash && window.location.hash !== nextChapterHashWithSearch) {
         suppressNextHashApplyRef.current = true;
-        window.location.hash = nextChapterHash;
+        window.location.hash = nextChapterHashWithSearch;
       }
 
-      if (nextVerseHash !== nextChapterHash && window.location.hash !== nextVerseHash) {
+      if (nextVerseHash !== nextChapterHash && window.location.hash !== nextVerseHashWithSearch) {
         window.history.replaceState(
           window.history.state,
           '',
-          `${window.location.pathname}${window.location.search}${nextVerseHash}`
+          `${window.location.pathname}${window.location.search}${nextVerseHashWithSearch}`
         );
       }
 
@@ -172,7 +179,7 @@ export const useHashRouteSync = ({
     window.history.replaceState(
       window.history.state,
       '',
-      `${window.location.pathname}${window.location.search}${nextVerseHash}`
+      `${window.location.pathname}${window.location.search}${nextVerseHashWithSearch}`
     );
   }, [ready, selectedBook, selectedChapter, selectedVerses]);
 };

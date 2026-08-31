@@ -71,6 +71,15 @@ export const BOOK_ALIAS_CONFIG: AliasConfig = {
   'Revelation': ['revelation', 'rev', 're', 'revelations', 'apocalypse']
 };
 
+const CANONICAL_BOOK_ORDER = Object.keys(BOOK_ALIAS_CONFIG);
+const CANONICAL_BOOK_POSITION = new Map(
+  CANONICAL_BOOK_ORDER.map((book, index) => [book.toLowerCase(), index])
+);
+const CANONICAL_BOOK_BY_ALIAS = new Map(
+  CANONICAL_BOOK_ORDER.flatMap((book) => [book, ...BOOK_ALIAS_CONFIG[book]].map((alias) => [alias.toLowerCase(), book]))
+);
+const FIRST_NEW_TESTAMENT_BOOK_INDEX = CANONICAL_BOOK_ORDER.indexOf('Matthew');
+
 export interface BookAliasMatcher {
   readonly book: string;
   readonly regex: RegExp;
@@ -99,4 +108,25 @@ export const BOOK_ALIAS_MATCHERS: readonly BookAliasMatcher[] = aliasMatchers;
 
 export function normalizeBookName(name: string): string {
   return name.trim().toLowerCase();
+}
+
+export function getCanonicalBookPosition(book: string): number {
+  const canonicalBook = CANONICAL_BOOK_BY_ALIAS.get(normalizeBookName(book));
+  return canonicalBook
+    ? CANONICAL_BOOK_POSITION.get(canonicalBook.toLowerCase()) ?? Number.MAX_SAFE_INTEGER
+    : Number.MAX_SAFE_INTEGER;
+}
+
+export function compareBibleReferences(
+  left: { book: string; chapter: number; verse: number },
+  right: { book: string; chapter: number; verse: number }
+): number {
+  return getCanonicalBookPosition(left.book) - getCanonicalBookPosition(right.book)
+    || left.chapter - right.chapter
+    || left.verse - right.verse;
+}
+
+export function isNewTestamentBook(book: string): boolean {
+  const bookPosition = getCanonicalBookPosition(book);
+  return bookPosition >= FIRST_NEW_TESTAMENT_BOOK_INDEX && bookPosition < CANONICAL_BOOK_ORDER.length;
 }

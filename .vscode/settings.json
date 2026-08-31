@@ -5,6 +5,8 @@
     "chat.tools.terminal.autoApprove": {
         "npm install": true,
         "/^npx jest\\b/": true,
+        "/^npm test/": true,
+        "/^git diff/": true,
         "/^Remove-Item\\s+.*jest-output.*\\.txt(\\s|$)/": true
     }
 }

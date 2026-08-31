@@ -3,6 +3,7 @@ import type { BibleData, BibleTranslationMeta, SearchResultSet } from '../../mod
 import type { PanelTab } from '../../models/tab';
 import { bibleService } from '../../services/bibleService';
 import { searchIndexService } from '../../services/searchIndexService';
+import { compareBibleReferences } from '../../utils/book-aliases';
 
 interface BibleState {
   availableTranslations: BibleTranslationMeta[];
@@ -79,25 +80,28 @@ const buildSearchResults = (
       seenVerses.add(verseKey);
       total += 1;
 
-      if (matches.length < MAX_SEARCH_MATCHES) {
-        matches.push({
-          id: `${translationId}-${match.book}-${match.chapter}-${match.verse}`,
-          book: match.book,
-          chapter: match.chapter,
-          verse: match.verse,
-          text: match.text,
-          translationId,
-          translationLabel: label
-        });
-      }
+      matches.push({
+        id: `${translationId}-${match.book}-${match.chapter}-${match.verse}`,
+        book: match.book,
+        chapter: match.chapter,
+        verse: match.verse,
+        text: match.text,
+        translationId,
+        translationLabel: label
+      });
     }
   }
 
   return {
     query,
-    matches,
+    matches: matches
+      .sort((left, right) => (
+        compareBibleReferences(left, right)
+        || (left.translationId ?? '').localeCompare(right.translationId ?? '')
+      ))
+      .slice(0, MAX_SEARCH_MATCHES),
     total,
-    limited: matches.length < total
+    limited: total > MAX_SEARCH_MATCHES
   };
 };
 
@@ -109,6 +113,24 @@ const createSearchTab = (searchResults: SearchResultSet, translationIds: string[
     title: searchResults.query,
     iconClass: 'fa-solid fa-magnifying-glass',
     searchResults,
+    translationIds,
+    createdAt: now,
+    updatedAt: now
+  };
+};
+
+const createDeferredSearchPanelTab = (queryInput: string, translationIds: string[]): PanelTab | null => {
+  const query = queryInput.trim();
+  if (!query) {
+    return null;
+  }
+
+  const now = Date.now();
+  return {
+    id: `tab-${now}-${Math.random().toString(36).slice(2, 8)}`,
+    type: 'search',
+    title: query,
+    iconClass: 'fa-solid fa-magnifying-glass',
     translationIds,
     createdAt: now,
     updatedAt: now
@@ -263,6 +285,9 @@ const bibleSlice = createSlice({
       );
 
       if (duplicate) {
+        if (!duplicate.searchResults) {
+          Object.assign(duplicate, updateSearchTab(duplicate, searchResults, action.payload.translationIds));
+        }
         state.activeTabId = duplicate.id;
         return;
       }
@@ -270,6 +295,25 @@ const bibleSlice = createSlice({
       const searchTab = createSearchTab(searchResults, action.payload.translationIds);
       state.tabs.push(searchTab);
       state.activeTabId = searchTab.id;
+    },
+    createDeferredSearchTab: (state, action: PayloadAction<{ query: string; translationIds: string[] }>) => {
+      const deferredTab = createDeferredSearchPanelTab(action.payload.query, action.payload.translationIds);
+      if (!deferredTab) {
+        return;
+      }
+
+      const duplicate = state.tabs.find(
+        (tab) =>
+          tab.type === 'search' &&
+          tab.title.toLowerCase() === deferredTab.title.toLowerCase()
+      );
+
+      if (duplicate) {
+        duplicate.translationIds = action.payload.translationIds;
+        return;
+      }
+
+      state.tabs.push(deferredTab);
     },
     runSearchInTab: (state, action: PayloadAction<{ tabId: string; query: string; translationIds: string[] }>) => {
       const searchResults = buildSearchResults(state, action.payload.query, action.payload.translationIds);
@@ -427,6 +471,7 @@ export const {
   setError,
   runSearch,
   runSearchInNewTab,
+  createDeferredSearchTab,
   runSearchInTab,
   setActiveTab,
   closeTab,

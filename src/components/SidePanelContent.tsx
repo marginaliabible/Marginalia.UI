@@ -3,7 +3,8 @@ import PanelTabs from './PanelTabs';
 import SearchResults from './SearchResults';
 import TranslationsPanel from './TranslationsPanel';
 import ResourcesPanel from './ResourcesPanel';
-import { useAppSelector } from '../store/hooks';
+import { useAppDispatch, useAppSelector } from '../store/hooks';
+import { loadTranslations, runSearchInTab, setActiveTab } from '../store/slices/bibleSlice';
 import type { QuickJumpTarget, BibleTranslationMeta, TranslationRecord } from '../models/bible';
 import type { PanelTab } from '../models/tab';
 
@@ -46,8 +47,36 @@ const SidePanelContent: React.FC<SidePanelContentProps> = ({
   onToggleDetach,
   focusMainWindow,
 }) => {
+  const dispatch = useAppDispatch();
   const { tabs, activeTabId } = useAppSelector((state) => state.bible);
   const contentRef = useRef<HTMLDivElement | null>(null);
+  const isPanelVisible = !isMobileLayout || isMobilePanelOpen;
+
+  useEffect(() => {
+    if (!isPanelVisible || activeTabId || tabs.length !== 1 || tabs[0].type !== 'search') {
+      return;
+    }
+
+    dispatch(setActiveTab(tabs[0].id));
+  }, [activeTabId, dispatch, isPanelVisible, tabs]);
+
+  useEffect(() => {
+    const activeTab = tabs.find((tab) => tab.id === activeTabId);
+    if (!activeTab || activeTab.type !== 'search' || activeTab.searchResults) {
+      return;
+    }
+
+    const query = activeTab.title.trim();
+    const translationIds = activeTab.translationIds ?? [];
+    if (!query || translationIds.length === 0) {
+      return;
+    }
+
+    void (async () => {
+      await dispatch(loadTranslations(translationIds));
+      dispatch(runSearchInTab({ tabId: activeTab.id, query, translationIds }));
+    })();
+  }, [activeTabId, dispatch, tabs]);
 
   useEffect(() => {
     const content = contentRef.current;

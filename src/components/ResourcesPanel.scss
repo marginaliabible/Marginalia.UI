@@ -30,7 +30,13 @@
 }
 
 .resource-tag-button {
-  border-width: 1px;
+  appearance: none;
+  border: 1px solid;
+  border-radius: var(--bs-border-radius-sm);
+  font-size: 0.875rem;
+  font-weight: 400;
+  line-height: 1.5;
+  padding: 0.25rem 0.5rem;
   transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease, opacity 120ms ease;
 }
 
@@ -49,6 +55,11 @@
 .resource-tag-button:hover,
 .resource-tag-button:focus-visible {
   opacity: 0.95;
+}
+
+.resource-tag-button:focus-visible {
+  outline: 0;
+  box-shadow: 0 0 0 0.15rem color-mix(in srgb, var(--resource-tag-color) 35%, transparent);
 }
 
 .resource-page-link {

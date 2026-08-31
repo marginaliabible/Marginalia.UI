@@ -5,6 +5,7 @@ import { useAppDispatch, useAppSelector } from '../store/hooks';
 import { openPdfViewer } from '../store/slices/uiSlice';
 import { searchResourceDocumentTitles, type ResourceDocumentTitleSearchResultSet } from '../services/resourceLibrarySearchService';
 import { normalizeEnglishTerm } from '../services/searchNormalizer';
+import { isNewTestamentBook } from '../utils/book-aliases';
 
 const escapeRegex = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
@@ -83,6 +84,8 @@ const SearchResults: React.FC<SearchResultsProps> = ({ tab, goToReference, onBef
   const [documentResults, setDocumentResults] = React.useState<ResourceDocumentTitleSearchResultSet | null>(null);
   const [isDocumentSearchLoading, setIsDocumentSearchLoading] = React.useState(false);
   const [documentSearchError, setDocumentSearchError] = React.useState<string | null>(null);
+  const [showOldTestament, setShowOldTestament] = React.useState(true);
+  const [showNewTestament, setShowNewTestament] = React.useState(true);
   const sentinelRef = useRef<HTMLDivElement>(null);
 
   const searchQuery = searchResults?.query ?? '';
@@ -106,6 +109,8 @@ const SearchResults: React.FC<SearchResultsProps> = ({ tab, goToReference, onBef
     setDocumentResults(null);
     setDocumentSearchError(null);
     setIsDocumentSearchLoading(false);
+    setShowOldTestament(true);
+    setShowNewTestament(true);
   }, [tab.updatedAt]);
 
   useEffect(() => {
@@ -151,10 +156,13 @@ const SearchResults: React.FC<SearchResultsProps> = ({ tab, goToReference, onBef
     return null;
   }
 
-  const displayedVerseMatches = searchResults.matches.slice(0, displayedCount);
+  const verseMatchList = searchResults.matches.filter((match) => (
+    isNewTestamentBook(match.book) ? showNewTestament : showOldTestament
+  ));
+  const displayedVerseMatches = verseMatchList.slice(0, displayedCount);
   const documentMatchList = documentResults?.matches ?? [];
   const displayedDocumentMatches = documentMatchList.slice(0, displayedCount);
-  const activeMatchCount = searchView === 'documents' ? documentMatchList.length : searchResults.matches.length;
+  const activeMatchCount = searchView === 'documents' ? documentMatchList.length : verseMatchList.length;
   const hasMore = displayedCount < activeMatchCount;
 
   const handleOpenDocument = (match: NonNullable<typeof displayedDocumentMatches>[number]) => {
@@ -207,13 +215,41 @@ const SearchResults: React.FC<SearchResultsProps> = ({ tab, goToReference, onBef
               <h3 className="h6 text-uppercase mb-1">Search Results</h3>
               <div className="d-flex flex-column gap-1">
                 <p className="text-body-secondary results-summary mb-0">{summaryText}</p>
-                <button
-                  type="button"
-                  className="btn btn-link p-0 align-self-start small text-decoration-none"
-                  onClick={() => setSearchView((mode) => (mode === 'scripture' ? 'documents' : 'scripture'))}
-                >
-                  {searchView === 'scripture' ? 'Search document titles' : 'Search in scriptures'}
-                </button>
+                <div className="search-results-actions">
+                  <button
+                    type="button"
+                    className="btn btn-link p-0 small text-decoration-none"
+                    onClick={() => setSearchView((mode) => (mode === 'scripture' ? 'documents' : 'scripture'))}
+                  >
+                    {searchView === 'scripture' ? 'Search document titles' : 'Search in scriptures'}
+                  </button>
+                  <div className="btn-group search-testament-toggle-group" role="group" aria-label="Scripture testament filters">
+                    <button
+                      type="button"
+                      className={`btn btn-sm ${showOldTestament ? 'btn-primary' : 'btn-outline-primary'}`}
+                      aria-pressed={showOldTestament}
+                      title="Toggle Old Testament"
+                      aria-label="Toggle Old Testament"
+                      onClick={() => {
+                        setShowOldTestament((show) => !show);
+                      }}
+                    >
+                      OT
+                    </button>
+                    <button
+                      type="button"
+                      className={`btn btn-sm ${showNewTestament ? 'btn-primary' : 'btn-outline-primary'}`}
+                      aria-pressed={showNewTestament}
+                      title="Toggle New Testament"
+                      aria-label="Toggle New Testament"
+                      onClick={() => {
+                        setShowNewTestament((show) => !show);
+                      }}
+                    >
+                      NT
+                    </button>
+                  </div>
+                </div>
               </div>
             </div>
             {searchView === 'documents' ? (
@@ -274,7 +310,7 @@ const SearchResults: React.FC<SearchResultsProps> = ({ tab, goToReference, onBef
             ) : (
               <>
                 <div className="results-grid flex-grow-1 overflow-auto" role="list">
-                  {displayedVerseMatches.map((match: any) => (
+                  {displayedVerseMatches.map((match) => (
                     <div key={match.id} className="results-grid-item" role="listitem">
                       <button
                         type="button"
@@ -320,9 +356,9 @@ const SearchResults: React.FC<SearchResultsProps> = ({ tab, goToReference, onBef
                   <button
                     type="button"
                     className="btn btn-sm btn-outline-primary w-100"
-                    onClick={() => setDisplayedCount((count) => Math.min(count + PAGE_SIZE, searchResults.matches.length))}
+                    onClick={() => setDisplayedCount((count) => Math.min(count + PAGE_SIZE, verseMatchList.length))}
                   >
-                    Load more results ({displayedCount} of {searchResults.matches.length})
+                    Load more results ({displayedCount} of {verseMatchList.length})
                   </button>
                 )}
               </>
