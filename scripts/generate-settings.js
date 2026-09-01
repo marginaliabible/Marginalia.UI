@@ -1,17 +1,19 @@
 #!/usr/bin/env node
 /**
- * Generates public/data/bibles/_settings.json from Scrollmapper listings plus local overrides.
+ * Generates public/data/library.json and public/data/translations.json from Scrollmapper listings plus local overrides.
  * - Pulls the JSON file list from the GitHub API (falls back to local caches if offline).
  * - Parses README to capture language codes and human-readable names.
- * - Overlays any local files in public/data/bibles (excluding _settings.json) so local copies win.
+ * - Overlays any local Bible payload files in public/data/bibles so local copies win.
  * Run by executing `node scripts/generate-settings.js`
  */
 const fs = require('fs');
 const path = require('path');
 
 const ROOT = path.resolve(__dirname, '..');
+const DATA_DIR = path.join(ROOT, 'public', 'data');
 const BIBLES_DIR = path.join(ROOT, 'public', 'data', 'bibles');
-const SETTINGS_PATH = path.join(BIBLES_DIR, '_settings.json');
+const LIBRARY_PATH = path.join(DATA_DIR, 'library.json');
+const TRANSLATIONS_PATH = path.join(DATA_DIR, 'translations.json');
 const REMOTE_LIST_URL =
   'https://api.github.com/repos/scrollmapper/bible_databases/contents/formats/json?ref=master';
 const RAW_BASE =
@@ -21,9 +23,36 @@ const README_URL =
 const LOCAL_INDEX_CACHE = path.join(ROOT, 'scrollmapper.json');
 const LOCAL_README_CACHE = path.join(ROOT, 'scrollmapper_readme.md');
 const OFFLINE = process.argv.includes('--offline');
+const EXTRA_LANGUAGE_LABELS = {
+  bea: 'Beaver Indian',
+  ceb: 'Cebuano',
+  chr: 'Cherokee',
+  'cop-sa': 'Coptic (Sahidic)',
+  cu: 'Church Slavonic',
+  enm: 'Middle English',
+  eo: 'Esperanto',
+  got: 'Gothic',
+  grc: 'Ancient Greek',
+  gv: 'Manx',
+  hbo: 'Biblical Hebrew',
+  ht: 'Haitian Creole',
+  la: 'Latin',
+  lzh: 'Literary Chinese',
+  mg: 'Malagasy',
+  mi: 'Māori',
+  mlf: 'Minangkabau',
+  pon: 'Pohnpeian',
+  sml: 'Samali',
+  syr: 'Syriac',
+  tl: 'Tagalog',
+  tlh: 'Klingon',
+  tpi: 'Tok Pisin',
+  tsg: 'Tsogo'
+};
 
 async function main() {
   const [indexEntries, readmeText] = await Promise.all([loadIndex(), loadReadme()]);
+  const modifiedOn = new Date().toISOString();
 
   const languageMap = buildLanguageMap(readmeText);
   const remoteEntries = indexEntries
@@ -35,21 +64,30 @@ async function main() {
         id,
         label: langInfo.label || prettifyId(id),
         language: langInfo.language || '',
-        location: item.download_url || `${RAW_BASE}${item.name}`
+        address: item.download_url || `${RAW_BASE}${item.name}`
       };
     });
 
   const merged = overlayLocal(remoteEntries);
   merged.sort((a, b) => a.label.localeCompare(b.label));
 
-  const existingSettings = loadExistingSettings();
-  const nextSettings = {
-    ...existingSettings,
-    translations: merged
+  const translations = {
+    modifiedOn,
+    translations: merged,
+    extraLanguages: loadExtraLanguages()
   };
 
-  fs.writeFileSync(SETTINGS_PATH, JSON.stringify(nextSettings, null, 2));
-  console.log(`Wrote ${merged.length} entries to translations in ${path.relative(ROOT, SETTINGS_PATH)}`);
+  const library = {
+    name: 'Built-In',
+    modifiedOn,
+    source: 'translations.json'
+  };
+
+  ensureDir(DATA_DIR);
+  fs.writeFileSync(LIBRARY_PATH, JSON.stringify(library, null, 2));
+  fs.writeFileSync(TRANSLATIONS_PATH, JSON.stringify(translations, null, 2));
+  console.log(`Wrote built-in library to ${path.relative(ROOT, LIBRARY_PATH)}`);
+  console.log(`Wrote ${merged.length} entries to translations in ${path.relative(ROOT, TRANSLATIONS_PATH)}`);
 }
 
 async function loadIndex() {
@@ -132,7 +170,6 @@ function overlayLocal(remoteEntries) {
   const locals = fs
     .readdirSync(BIBLES_DIR, { withFileTypes: true })
     .filter((entry) => entry.isFile() && entry.name.toLowerCase().endsWith('.json'))
-    .filter((entry) => entry.name.toLowerCase() !== '_settings.json')
     .map((entry) => entry.name.replace(/\.json$/i, ''));
 
   const remoteMap = new Map(remoteEntries.map((entry) => [entry.id, entry]));
@@ -141,11 +178,17 @@ function overlayLocal(remoteEntries) {
     const existing = remote ?? { id, label: prettifyId(id), language: '' };
     remoteMap.set(id, {
       ...existing,
-      location: `data/bibles/${id}.json`
+      address: `bibles/${id}.json`
     });
   }
 
   return Array.from(remoteMap.values());
+}
+
+function loadExtraLanguages() {
+  return Object.entries(EXTRA_LANGUAGE_LABELS)
+    .map(([code, label]) => ({ code, label }))
+    .sort((a, b) => a.code.localeCompare(b.code));
 }
 
 function prettifyId(id) {
@@ -167,24 +210,6 @@ function ensureDir(dir) {
 
 function escapeRegex(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
-function loadExistingSettings() {
-  if (!fs.existsSync(SETTINGS_PATH)) {
-    return {};
-  }
-
-  try {
-    const raw = fs.readFileSync(SETTINGS_PATH, 'utf8');
-    const parsed = JSON.parse(raw);
-    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-      return parsed;
-    }
-  } catch (error) {
-    console.warn(`Unable to reuse existing settings: ${error.message}`);
-  }
-
-  return {};
 }
 
 main().catch((err) => {

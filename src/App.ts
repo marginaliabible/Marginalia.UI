@@ -1,5 +1,4 @@
-import type { QuickJumpTarget, ThemePreference, BibleTranslationMeta } from './models/bible';
-import languageOverrides from './data/languageOverrides.json';
+import type { QuickJumpTarget, ThemePreference, BibleTranslationMeta, ExtraLanguageMeta } from './models/bible';
 
 export interface TranslationSelectOption {
   value: string;
@@ -132,10 +131,11 @@ export const parseSearchFromHash = (hashValue: string): string | null => {
   return trimmed && trimmed.length > 0 ? trimmed : null;
 };
 
-export const getLanguageDisplayName = (code: string): string => {
-  const overrides = languageOverrides as Record<string, string>;
-  if (overrides[code]) {
-    return overrides[code];
+export const getLanguageDisplayName = (code: string, extraLanguages: ExtraLanguageMeta[] = []): string => {
+  const normalizedCode = code.trim().toLowerCase();
+  const extraLanguage = extraLanguages.find((entry) => entry.code.toLowerCase() === normalizedCode);
+  if (extraLanguage) {
+    return extraLanguage.label;
   }
 
   if (typeof Intl === 'undefined' || typeof Intl.DisplayNames === 'undefined') {

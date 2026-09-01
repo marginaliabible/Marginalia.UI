@@ -1,4 +1,13 @@
-import { applyUrlTemplate, buildDocumentPageUrl } from './resourceLibraryConfig';
+import {
+  applyUrlTemplate,
+  buildDocumentPageUrl,
+  buildDocumentStorePageUrl,
+  buildFetchUrlCandidates,
+  inferSourceFileKindFromPayload,
+  inferSourceFileKindFromUrl,
+  readLibrarySourceAddresses,
+  validateDocumentsFile,
+} from './resourceLibraryConfig';
 
 describe('applyUrlTemplate', () => {
   it('substitutes plain placeholders', () => {
@@ -45,5 +54,61 @@ describe('buildDocumentPageUrl', () => {
     );
 
     expect(result).toBe('https://example.com/work/documents/ab/c1/abc123/pages/');
+  });
+});
+
+describe('library source helpers', () => {
+  it('rejects library files that define both source and sources', () => {
+    expect(() => readLibrarySourceAddresses({ source: 'resources.json', sources: ['translations.json'] }))
+      .toThrow(/source or sources/);
+  });
+
+  it('infers source file kind by filename', () => {
+    expect(inferSourceFileKindFromUrl('https://example.com/data/resources.json')).toBe('resources');
+    expect(inferSourceFileKindFromUrl('data/translations.json')).toBe('translations');
+  });
+
+  it('infers source file kind by strict root properties', () => {
+    expect(inferSourceFileKindFromPayload({ modifiedOn: '2026-09-01', shards: [] })).toBe('resources');
+    expect(inferSourceFileKindFromPayload({ modifiedOn: '2026-09-01', translations: [] })).toBe('translations');
+    expect(inferSourceFileKindFromPayload({ documents: [] })).toBe('documents');
+  });
+});
+
+describe('address helpers', () => {
+  it('builds document store URLs from a library-level template with an absolute address', () => {
+    const result = buildDocumentStorePageUrl(
+      'https://paperless.example.com/api/documents/{documentId}/preview/#page={pageNumber}',
+      'https://example.com/resources.json',
+      'abc123',
+      4
+    );
+
+    expect(result).toBe('https://paperless.example.com/api/documents/abc123/preview/#page=4');
+  });
+
+  it('builds document store URLs relative to the source file', () => {
+    const result = buildDocumentStorePageUrl('documents/{documentId}?page={pageNumber}', 'data/library.json', 'abc123', 3);
+
+    expect(result).toBe('data/documents/abc123?page=3');
+  });
+
+  it('prefers CDN candidates for raw GitHub URLs', () => {
+    const candidates = buildFetchUrlCandidates('https://raw.githubusercontent.com/owner/repo/main/data/library.json');
+
+    expect(candidates[0]).toBe('https://cdn.jsdelivr.net/gh/owner/repo@main/data/library.json');
+    expect(candidates).toContain('https://raw.githubusercontent.com/owner/repo/main/data/library.json');
+  });
+
+  it('normalizes GitHub blob URLs before building CDN candidates', () => {
+    const candidates = buildFetchUrlCandidates('https://github.com/owner/repo/blob/main/data/library.json');
+
+    expect(candidates[0]).toBe('https://cdn.jsdelivr.net/gh/owner/repo@main/data/library.json');
+  });
+});
+
+describe('documents validation', () => {
+  it('rejects legacy root-array documents payloads', () => {
+    expect(() => validateDocumentsFile([{ documentId: 'doc-1' }], 'documents.json')).toThrow(/payload is invalid/);
   });
 });

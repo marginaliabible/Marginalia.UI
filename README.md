@@ -153,7 +153,7 @@ src/
 
 - Place additional bundled translations in `public/data/bibles/` to ship them with the app.
 - Remote translations must be accessible via raw JSON URLs. Add them to the Marginalia dropdown by uploading to GitHub (or any CORS-enabled host) following the same structure as the Scrollmapper data set.
-- Update `public/data/bibles/_settings.json` to register new translations.
+- Update `public/data/library.json` and `public/data/translations.json` to register built-in sources. `public/data/bibles/KJV.json` remains a local Bible payload file referenced from `public/data/translations.json`.
 
 ## License Notes
 

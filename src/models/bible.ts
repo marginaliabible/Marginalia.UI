@@ -40,6 +40,15 @@ export interface BibleTranslationMeta {
   requiredPermissions?: string[];
   authHint?: string;
   orgName?: string;
+  documentStoreAddress?: string;
+  documentManifestAddress?: string;
+  referencesAddress?: string;
+  modifiedOn?: string;
+}
+
+export interface ExtraLanguageMeta {
+  code: string;
+  label: string;
 }
 
 export interface QuickJumpTarget {

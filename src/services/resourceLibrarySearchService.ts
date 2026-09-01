@@ -1,9 +1,25 @@
 import MiniSearch from 'minisearch';
 import { normalizeEnglishTerm } from './searchNormalizer';
-import { buildDocumentPageUrl, isPlainObject, readResourceLibraryConnection, readString } from '../utils/resourceLibraryConfig';
+import {
+  DEFAULT_DOCUMENT_STORE_ADDRESS,
+  buildDocumentStorePageUrl,
+  buildFetchUrlCandidates,
+  inferSourceFileKindFromPayload,
+  inferSourceFileKindFromUrl,
+  isPlainObject,
+  readLibrarySourceAddresses,
+  readString,
+  resolveAddress,
+  validateDocumentsFile,
+  validateLibraryFile,
+  validateResourcesFile,
+  type LibraryFileLike,
+  type ResourcesFileLike,
+} from '../utils/resourceLibraryConfig';
 
 const SEARCH_LIMIT = 5000;
-const DEFAULT_SETTINGS_PATH = 'data/bibles/_settings.json';
+const DEFAULT_LIBRARY_PATH = 'data/library.json';
+const SEARCH_SNAPSHOT_STORAGE_PREFIX = 'marginalia:resource-library-search:';
 
 export interface ResourceDocumentTitleSearchMatch {
   id: string;
@@ -25,15 +41,10 @@ export interface ResourceDocumentTitleSearchResultSet {
 interface ResourceLibraryCandidate {
   id: string;
   label: string;
-  configUrl: string;
-}
-
-interface ResourceLibraryConfigPayload {
-  source?: unknown;
-  baseUrl?: unknown;
-  documentUrlTemplate?: unknown;
-  label?: unknown;
-  id?: unknown;
+  resourcesUrl: string;
+  documentManifestAddress: string;
+  documentStoreAddress: string;
+  documents?: ResourceLibraryIndexDoc[];
 }
 
 interface ResourceLibraryDocumentEntry {
@@ -49,9 +60,16 @@ interface ResourceLibraryIndexDoc {
   libraryId: string;
   libraryLabel: string;
   tags: string[];
-  baseUrl: string;
-  documentUrlTemplate: string;
+  resourcesUrl: string;
+  documentStoreAddress: string;
 }
+
+interface ResourceLibrarySearchSnapshot {
+  modifiedOn: string;
+  candidates: ResourceLibraryCandidate[];
+}
+
+const librarySearchSnapshots = new Map<string, ResourceLibrarySearchSnapshot>();
 
 export async function searchResourceDocumentTitles(
   queryInput: string,
@@ -84,7 +102,7 @@ export async function searchResourceDocumentTitles(
 
   const index = new MiniSearch<ResourceLibraryIndexDoc>({
     fields: ['title'],
-    storeFields: ['title', 'documentId', 'libraryId', 'libraryLabel', 'tags', 'baseUrl', 'documentUrlTemplate'],
+    storeFields: ['title', 'documentId', 'libraryId', 'libraryLabel', 'tags', 'resourcesUrl', 'documentStoreAddress'],
     processTerm: (term: string) => normalizeEnglishTerm(term),
   });
 
@@ -114,8 +132,8 @@ export async function searchResourceDocumentTitles(
     const tags = Array.isArray(result['tags'])
       ? result['tags'].filter((tag): tag is string => typeof tag === 'string' && tag.trim().length > 0)
       : [];
-    const baseUrl = result['baseUrl'] as string;
-    const documentUrlTemplate = result['documentUrlTemplate'] as string;
+    const resourcesUrl = result['resourcesUrl'] as string;
+    const documentStoreAddress = result['documentStoreAddress'] as string;
 
     return {
       id: `${libraryId}-${documentId}`,
@@ -124,7 +142,7 @@ export async function searchResourceDocumentTitles(
       documentId,
       title,
       tags,
-      url: buildDocumentPageUrl(documentUrlTemplate, baseUrl, documentId, 1),
+      url: buildDocumentStorePageUrl(documentStoreAddress, resourcesUrl, documentId, 1),
     };
   });
 
@@ -137,19 +155,14 @@ export async function searchResourceDocumentTitles(
 }
 
 async function loadResourceLibraryCandidates(sourceUrls: string[]): Promise<ResourceLibraryCandidate[]> {
-  const settingsUrls = Array.from(new Set([
-    DEFAULT_SETTINGS_PATH,
+  const libraryUrls = Array.from(new Set([
+    DEFAULT_LIBRARY_PATH,
     ...sourceUrls.map((entry) => entry.trim()).filter((entry) => entry.length > 0),
   ])).sort();
 
-  const settled = await Promise.allSettled(settingsUrls.map(async (settingsUrl) => {
-    const response = await fetch(settingsUrl, { cache: 'no-store' });
-    if (!response.ok) {
-      return [] as ResourceLibraryCandidate[];
-    }
-
-    const payload = await response.json() as unknown;
-    return extractResourceLibraryCandidates(payload, settingsUrl);
+  const settled = await Promise.allSettled(libraryUrls.map(async (libraryUrl) => {
+    const payload = await fetchJsonPayload(libraryUrl);
+    return await extractResourceLibraryCandidates(payload, libraryUrl);
   }));
 
   const candidates = new Map<string, ResourceLibraryCandidate>();
@@ -160,7 +173,7 @@ async function loadResourceLibraryCandidates(sourceUrls: string[]): Promise<Reso
     }
 
     for (const candidate of result.value) {
-      candidates.set(candidate.configUrl, candidate);
+      candidates.set(candidate.resourcesUrl, candidate);
     }
   }
 
@@ -169,58 +182,11 @@ async function loadResourceLibraryCandidates(sourceUrls: string[]): Promise<Reso
 
 async function loadResourceLibraryDocuments(candidates: ResourceLibraryCandidate[]): Promise<ResourceLibraryIndexDoc[]> {
   const settled = await Promise.allSettled(candidates.map(async (candidate) => {
-    const configResponse = await fetch(candidate.configUrl, { cache: 'no-store' });
-    if (!configResponse.ok) {
-      return [] as ResourceLibraryIndexDoc[];
+    if (candidate.documents) {
+      return candidate.documents;
     }
 
-    const configPayload = await configResponse.json() as unknown;
-    if (!isPlainObject(configPayload)) {
-      return [] as ResourceLibraryIndexDoc[];
-    }
-
-    const config = configPayload as ResourceLibraryConfigPayload;
-    const { baseUrl, documentUrlTemplate } = readResourceLibraryConnection(config, candidate.configUrl);
-
-    const documentsResponse = await fetch(new URL('documents.json', candidate.configUrl).toString(), { cache: 'no-store' });
-    if (!documentsResponse.ok) {
-      return [] as ResourceLibraryIndexDoc[];
-    }
-
-    const documentsPayload = await documentsResponse.json() as unknown;
-    if (!Array.isArray(documentsPayload)) {
-      return [] as ResourceLibraryIndexDoc[];
-    }
-
-    const documents: ResourceLibraryIndexDoc[] = [];
-    for (const item of documentsPayload) {
-      if (!isPlainObject(item)) {
-        continue;
-      }
-
-      const entry = item as ResourceLibraryDocumentEntry;
-      const documentId = readString(entry.documentId);
-      if (!documentId) {
-        continue;
-      }
-
-      const tags = Array.isArray(entry.tags)
-        ? entry.tags.filter((tag): tag is string => typeof tag === 'string' && tag.trim().length > 0)
-        : [];
-
-      documents.push({
-        id: `${candidate.id}\x00${documentId}`,
-        title: readString(entry.title) ?? documentId,
-        documentId,
-        libraryId: candidate.id,
-        libraryLabel: candidate.label,
-        tags: Array.from(new Set(tags)),
-        baseUrl,
-        documentUrlTemplate,
-      });
-    }
-
-    return documents;
+    return await loadCandidateDocuments(candidate);
   }));
 
   const documents: ResourceLibraryIndexDoc[] = [];
@@ -233,88 +199,166 @@ async function loadResourceLibraryDocuments(candidates: ResourceLibraryCandidate
   return documents;
 }
 
-function extractResourceLibraryCandidates(payload: unknown, settingsUrl: string): ResourceLibraryCandidate[] {
-  if (!isPlainObject(payload)) {
+async function extractResourceLibraryCandidates(payload: unknown, sourceUrl: string): Promise<ResourceLibraryCandidate[]> {
+  const filenameKind = inferSourceFileKindFromUrl(sourceUrl);
+  const kind = filenameKind ?? inferSourceFileKindFromPayload(payload);
+
+  if (kind === 'resources') {
+    const resources = validateResourcesFile(payload, sourceUrl);
+    return [buildCandidate(sourceUrl, resources, undefined)];
+  }
+
+  if (kind !== 'library') {
     return [];
   }
 
-  const directConfig = isResourceLibraryConfigPayload(payload);
-  if (directConfig) {
-    return [buildCandidate(settingsUrl, settingsUrl, payload)];
+  const library = validateLibraryFile(payload, sourceUrl);
+  const modifiedOn = readString(library.modifiedOn);
+  const cached = modifiedOn
+    ? librarySearchSnapshots.get(sourceUrl) ?? readLibrarySearchSnapshot(sourceUrl)
+    : undefined;
+  if (cached && cached.modifiedOn === modifiedOn) {
+    librarySearchSnapshots.set(sourceUrl, cached);
+    return cached.candidates;
   }
+
+  const explicitSources = readLibrarySourceAddresses(library);
+  const sourceAddresses = explicitSources.length > 0 ? explicitSources : ['resources.json', 'translations.json'];
 
   const candidates: ResourceLibraryCandidate[] = [];
-  for (const entry of collectEntryObjects(payload['resourceLibraries'])) {
-    candidates.push(...buildCandidatesFromEntry(entry, settingsUrl));
+  for (const address of sourceAddresses) {
+    const childUrl = resolveAddress(address, sourceUrl);
+    const childPayload = await fetchJsonPayload(childUrl).catch(() => null);
+    if (childPayload === null) {
+      continue;
+    }
+
+    const childKind = inferSourceFileKindFromUrl(childUrl) ?? inferSourceFileKindFromPayload(childPayload);
+    if (childKind !== 'resources') {
+      continue;
+    }
+
+    candidates.push(buildCandidate(childUrl, validateResourcesFile(childPayload, childUrl), library));
   }
 
-  for (const entry of collectEntryObjects(payload['artifacts'])) {
-    candidates.push(...buildCandidatesFromEntry(entry, settingsUrl));
+  const candidatesWithDocuments = await Promise.all(candidates.map(async (candidate) => ({
+    ...candidate,
+    documents: await loadCandidateDocuments(candidate),
+  })));
+
+  if (modifiedOn) {
+    const snapshot = { modifiedOn, candidates: candidatesWithDocuments };
+    librarySearchSnapshots.set(sourceUrl, snapshot);
+    writeLibrarySearchSnapshot(sourceUrl, snapshot);
   }
 
-  return candidates;
+  return candidatesWithDocuments;
 }
 
-function buildCandidatesFromEntry(entry: Record<string, unknown>, settingsUrl: string): ResourceLibraryCandidate[] {
-  const artifactType = readString(entry['artifactType'])?.toLowerCase();
-  if (artifactType && artifactType !== 'resource-library') {
-    return [];
+function readLibrarySearchSnapshot(sourceUrl: string): ResourceLibrarySearchSnapshot | null {
+  if (typeof window === 'undefined') {
+    return null;
   }
 
-  const sourceUrl = readString(entry['location']) ?? readString(entry['source']) ?? readString(entry['url']);
-  if (!sourceUrl) {
-    return [];
-  }
+  try {
+    const raw = window.localStorage.getItem(buildLibrarySearchSnapshotKey(sourceUrl));
+    if (!raw) {
+      return null;
+    }
 
-  return [buildCandidate(readString(entry['id']) ?? sourceUrl, resolveRelativeUrl(sourceUrl, settingsUrl), entry)];
+    const parsed = JSON.parse(raw) as ResourceLibrarySearchSnapshot;
+    if (!parsed || typeof parsed.modifiedOn !== 'string' || !Array.isArray(parsed.candidates)) {
+      return null;
+    }
+
+    return parsed;
+  } catch {
+    return null;
+  }
 }
 
-function buildCandidate(idSeed: string, configUrl: string, entry: Record<string, unknown> | ResourceLibraryConfigPayload): ResourceLibraryCandidate {
-  const label = readString((entry as Record<string, unknown>)['label']) ?? prettifyLabel(idSeed) ?? 'Resource Library';
-  const id = readString(idSeed) ?? slugify(label) ?? hashText(configUrl).slice(0, 8);
-  return { id, label, configUrl };
+function writeLibrarySearchSnapshot(sourceUrl: string, snapshot: ResourceLibrarySearchSnapshot): void {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  try {
+    window.localStorage.setItem(buildLibrarySearchSnapshotKey(sourceUrl), JSON.stringify(snapshot));
+  } catch {
+    // Search can still work without persisted title metadata.
+  }
 }
 
-function collectEntryObjects(entries: unknown): Array<Record<string, unknown>> {
-  if (!entries) {
-    return [];
-  }
+function buildLibrarySearchSnapshotKey(sourceUrl: string): string {
+  return `${SEARCH_SNAPSHOT_STORAGE_PREFIX}${hashText(sourceUrl)}`;
+}
 
-  if (Array.isArray(entries)) {
-    return entries.filter(isPlainObject);
-  }
+async function loadCandidateDocuments(candidate: ResourceLibraryCandidate): Promise<ResourceLibraryIndexDoc[]> {
+  const documentsPayload = await fetchJsonPayload(candidate.documentManifestAddress);
+  const documentsFile = validateDocumentsFile(documentsPayload, candidate.documentManifestAddress);
+  const documents: ResourceLibraryIndexDoc[] = [];
+  const documentEntries = Array.isArray(documentsFile.documents) ? documentsFile.documents : [];
 
-  if (isPlainObject(entries)) {
-    return Object.entries(entries).flatMap(([id, raw]) => {
-      if (!isPlainObject(raw)) {
-        return [];
-      }
+  for (const item of documentEntries) {
+    if (!isPlainObject(item)) {
+      continue;
+    }
 
-      return [{ id, ...raw } as Record<string, unknown>];
+    const entry = item as ResourceLibraryDocumentEntry;
+    const documentId = readString(entry.documentId);
+    if (!documentId) {
+      continue;
+    }
+
+    const tags = Array.isArray(entry.tags)
+      ? entry.tags.filter((tag): tag is string => typeof tag === 'string' && tag.trim().length > 0)
+      : [];
+
+    documents.push({
+      id: `${candidate.id}\x00${documentId}`,
+      title: readString(entry.title) ?? documentId,
+      documentId,
+      libraryId: candidate.id,
+      libraryLabel: candidate.label,
+      tags: Array.from(new Set(tags)),
+      resourcesUrl: candidate.resourcesUrl,
+      documentStoreAddress: candidate.documentStoreAddress,
     });
   }
 
-  return [];
+  return documents;
 }
 
-function resolveRelativeUrl(value: string, settingsUrl: string): string {
-  try {
-    return new URL(value, settingsUrl).toString();
-  } catch {
-    return value;
-  }
+function buildCandidate(resourcesUrl: string, resources: ResourcesFileLike, library: LibraryFileLike | undefined): ResourceLibraryCandidate {
+  const label = readString(resources.name) ?? readString(library?.name) ?? prettifyLabel(resourcesUrl) ?? 'Resource Library';
+  const id = slugify(`${label}-${hashText(resourcesUrl).slice(0, 8)}`) || hashText(resourcesUrl).slice(0, 8);
+  const documentManifestAddress = resolveAddress(readString(resources.documentManifestAddress) ?? 'documents.json', resourcesUrl);
+  const documentStoreAddress = readString(resources.documentStoreAddress)
+    ?? readString(library?.documentStoreAddress)
+    ?? DEFAULT_DOCUMENT_STORE_ADDRESS;
+
+  return { id, label, resourcesUrl, documentManifestAddress, documentStoreAddress };
 }
 
-function isResourceLibraryConfigPayload(value: unknown): value is ResourceLibraryConfigPayload {
-  if (!isPlainObject(value)) {
-    return false;
+async function fetchJsonPayload(sourceUrl: string): Promise<unknown> {
+  const failures: string[] = [];
+
+  for (const candidate of buildFetchUrlCandidates(sourceUrl)) {
+    try {
+      const response = await fetch(candidate, { cache: 'no-store' });
+      if (!response.ok) {
+        failures.push(`${candidate} -> ${response.status}`);
+        continue;
+      }
+
+      return (await response.json()) as unknown;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'unknown error';
+      failures.push(`${candidate} -> ${message}`);
+    }
   }
 
-  return (
-    Object.prototype.hasOwnProperty.call(value, 'source')
-    || Object.prototype.hasOwnProperty.call(value, 'baseUrl')
-    || Object.prototype.hasOwnProperty.call(value, 'documentUrlTemplate')
-  );
+  throw new Error(`Resource JSON unavailable at ${sourceUrl}: ${failures.join('; ')}`);
 }
 
 function prettifyLabel(value: string): string {

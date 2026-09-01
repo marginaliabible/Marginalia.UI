@@ -124,6 +124,7 @@ function App() {
   // Redux state
   const {
     availableTranslations,
+    extraLanguages,
     currentBible,
     isLoading,
     error,
@@ -150,6 +151,7 @@ function App() {
   } = useAppSelector((state) => state.ui);
 
   const safeAvailableTranslations = Array.isArray(availableTranslations) ? availableTranslations : [];
+  const safeExtraLanguages = Array.isArray(extraLanguages) ? extraLanguages : [];
   const safeTranslationRecords = Array.isArray(translationRecords) ? translationRecords : [];
   const safeSelectedTranslationIds = Array.isArray(selectedTranslationIds) ? selectedTranslationIds : [];
   const safeSelectedLanguages = Array.isArray(selectedLanguages) ? selectedLanguages : [];
@@ -517,6 +519,11 @@ function App() {
     [safeAvailableTranslations]
   );
 
+  const getLoadedLanguageDisplayName = useCallback(
+    (code: string) => getLanguageDisplayName(code, safeExtraLanguages),
+    [safeExtraLanguages]
+  );
+
   const languageOptions = useMemo(() => {
     const langMap = new Map<string, { code: string; count: number }>();
     for (const translation of safeAvailableTranslations) {
@@ -533,11 +540,11 @@ function App() {
     }
     return Array.from(langMap.values())
       .sort((a, b) => {
-        const nameA = getLanguageDisplayName(a.code);
-        const nameB = getLanguageDisplayName(b.code);
+          const nameA = getLoadedLanguageDisplayName(a.code);
+          const nameB = getLoadedLanguageDisplayName(b.code);
         return nameA.localeCompare(nameB);
       });
-  }, [safeAvailableTranslations]);
+        }, [safeAvailableTranslations, getLoadedLanguageDisplayName]);
 
   const filteredTranslations = useMemo(() => {
     if (safeSelectedLanguages.length === 0) {
@@ -948,7 +955,7 @@ function App() {
           selectedLanguages={safeSelectedLanguages}
           handleLanguagesChange={handleLanguagesChange}
           languageOptions={languageOptions}
-          getLanguageDisplayName={getLanguageDisplayName}
+          getLanguageDisplayName={getLoadedLanguageDisplayName}
           sourceUrls={sourceUrls}
           sourceArtifactSummary={sourceArtifactSummary}
           sourceLibraries={sourceLibraries}

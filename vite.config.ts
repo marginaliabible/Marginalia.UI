@@ -24,7 +24,34 @@ export default defineConfig(({ mode }) => {
     },
     build: {
       outDir: 'dist',
-      sourcemap: true
+      sourcemap: true,
+      rolldownOptions: {
+        output: {
+          manualChunks(id) {
+            if (!id.includes('node_modules')) {
+              return undefined;
+            }
+
+            if (id.includes('pdfjs-dist')) {
+              return 'vendor-pdf';
+            }
+
+            if (id.includes('react-select') || id.includes('@emotion')) {
+              return 'vendor-select';
+            }
+
+            if (id.includes('minisearch') || id.includes('stemmer')) {
+              return 'vendor-search';
+            }
+
+            if (id.includes('react') || id.includes('@reduxjs') || id.includes('redux')) {
+              return 'vendor-react';
+            }
+
+            return 'vendor';
+          }
+        }
+      }
     },
     publicDir: 'public'
   };

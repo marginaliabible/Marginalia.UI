@@ -4,6 +4,7 @@ import type {
   BibleBook,
   BibleData,
   ArtifactType,
+  ExtraLanguageMeta,
   RepositoryType,
   BibleTranslationMeta,
   MarginaliaState,
@@ -22,6 +23,21 @@ import {
   resolveGitHubPrivateSourceVersion,
 } from './githubPrivateSourceService';
 import { ResourceLibraryService } from './resourceLibraryService';
+import {
+  buildFetchUrlCandidates,
+  inferSourceFileKindFromPayload,
+  inferSourceFileKindFromUrl,
+  readExtraLanguages,
+  readLibrarySourceAddresses,
+  resolveAddress,
+  validateLibraryFile,
+  validateResourcesFile,
+  validateTranslationsFile,
+  type LibraryFileLike,
+  type ResourcesFileLike,
+  type SourceFileKind,
+  type TranslationsFileLike,
+} from '../utils/resourceLibraryConfig';
 
 interface BibleDB extends DBSchema {
   translations: {
@@ -55,6 +71,11 @@ interface StoredSettingsSnapshot {
   sourceUrls: string[];
   artifacts: BibleTranslationMeta[];
   translationLibraryUrls: string[];
+  extraLanguages: ExtraLanguageMeta[];
+  settingsUrl?: string;
+  kind?: SourceFileKind;
+  rawEntries?: TranslationSettingsEntry[];
+  modifiedOn?: string;
   fetchedAt: number;
 }
 
@@ -81,20 +102,14 @@ interface StoredResourceLibrary {
 
 interface CachedTranslationMeta {
   items: BibleTranslationMeta[];
+  extraLanguages?: ExtraLanguageMeta[];
   cachedAt: number;
-}
-
-interface BibleSettingsFile {
-  translations?: unknown;
-  translationLibraries?: unknown;
-  resourceLibraries?: unknown;
-  artifacts?: unknown;
 }
 
 interface TranslationSettingsEntry {
   id?: string;
   label?: string;
-  location?: string;
+  address?: string;
   repositoryType?: RepositoryType | string;
   artifactType?: ArtifactType | string;
   language?: string | string[];
@@ -107,6 +122,10 @@ interface TranslationSettingsEntry {
   orgName?: string;
   publicUrl?: string;
   repoAlias?: string;
+  documentStoreAddress?: string;
+  documentManifestAddress?: string;
+  referencesAddress?: string;
+  modifiedOn?: string;
 }
 
 interface SettingsEntryWithSource {
@@ -116,19 +135,21 @@ interface SettingsEntryWithSource {
 
 interface ParsedSourcePayloadResult {
   settingsUrl: string;
-  kind: 'settings' | 'translation';
+  kind: SourceFileKind;
   entries: TranslationSettingsEntry[];
+  extraLanguages: ExtraLanguageMeta[];
 }
 
 interface FetchSettingsResult {
   artifacts: BibleTranslationMeta[];
   translationLibraryUrls: string[];
+  extraLanguages: ExtraLanguageMeta[];
 }
 
 export type SourceProbeResult =
   | {
       ok: true;
-      kind: 'settings' | 'translation';
+      kind: SourceFileKind;
       translationCount: number;
       message: string;
     }
@@ -140,7 +161,7 @@ export type SourceProbeResult =
 
 const LOCAL_TRANSLATION_ID = 'KJV';
 const BIBLE_DATA_PATH = 'data/bibles';
-const SETTINGS_PATH = `${BIBLE_DATA_PATH}/_settings.json`;
+const SETTINGS_PATH = 'data/library.json';
 const LOCAL_TRANSLATION_SOURCE = `${BIBLE_DATA_PATH}/${LOCAL_TRANSLATION_ID}.json`;
 const META_CACHE_KEY = 'marginalia:translation-meta';
 const STATE_CACHE_KEY = 'marginalia:state';
@@ -234,18 +255,6 @@ interface ExportManifestShard {
   file: string;
   scope: 'book' | 'chapter' | 'verse';
   refPrefix: string;
-}
-
-interface ResourceSourceConfig {
-  sourceType?: unknown;
-  baseUrl?: unknown;
-  documentUrlTemplate?: unknown;
-}
-
-interface ResourceLibraryConfigFile {
-  source?: ResourceSourceConfig;
-  baseUrl?: unknown;
-  documentUrlTemplate?: unknown;
 }
 
 interface ResourceVerseEntry {
@@ -402,6 +411,7 @@ class BibleService {
   private readonly verseCache = new Map<string, string>();
   private readonly resourceLibraryService: ResourceLibraryService;
   private fullTranslationCacheLimit = DEFAULT_FULL_TRANSLATIONS_IN_MEMORY;
+  private extraLanguages: ExtraLanguageMeta[] = [];
   private translationMetaById = new Map<string, BibleTranslationMeta>([
     [LOCAL_TRANSLATION_ID, DEFAULT_LOCAL_TRANSLATION]
   ]);
@@ -441,19 +451,25 @@ class BibleService {
 
     if (cachedMeta && !forceRefresh) {
       result = this.mergeTranslations(result, cachedMeta.items);
+      this.extraLanguages = cachedMeta.extraLanguages ?? [];
     }
 
     try {
       const fetched = await this.fetchSettings(sourceUrls, { forceRefresh });
       const translations = fetched.artifacts.filter((entry) => entry.artifactType === 'translation');
       result = this.mergeTranslations(result, translations);
-      this.writeCachedTranslationMeta(translations);
+      this.extraLanguages = fetched.extraLanguages;
+      this.writeCachedTranslationMeta(translations, fetched.extraLanguages);
     } catch (error) {
       console.error('Failed to refresh translations:', error);
     }
 
     this.cacheTranslationMeta(result);
     return result;
+  }
+
+  getExtraLanguages(): ExtraLanguageMeta[] {
+    return [...this.extraLanguages];
   }
 
   async getSourceArtifactSummary(sourceUrls: string[] = []): Promise<SourceArtifactSummary> {
@@ -532,14 +548,14 @@ class BibleService {
         };
       }
 
-      const parsed = this.parseSourcePayload(normalizedSourceUrl, payloadResult.payload);
+      const parsed = await this.parseSourcePayload(normalizedSourceUrl, payloadResult.payload);
 
-      if (parsed.kind === 'settings') {
+      if (parsed.kind === 'library' || parsed.kind === 'translations') {
         return {
           ok: true,
           kind: parsed.kind,
           translationCount: parsed.entries.length,
-          message: `Settings source accepted (${parsed.entries.length} entr${parsed.entries.length === 1 ? 'y' : 'ies'})`,
+          message: `${parsed.kind === 'library' ? 'Library' : 'Translations'} source accepted (${parsed.entries.length} entr${parsed.entries.length === 1 ? 'y' : 'ies'})`,
         };
       }
 
@@ -564,7 +580,7 @@ class BibleService {
         return {
           ok: false,
           code: 'invalid-payload',
-          message: 'Invalid payload format. Use a settings JSON, translation JSON, or resource config JSON.',
+          message: 'Invalid payload format. Use library.json, translations.json, resources.json, or a direct translation JSON.',
         };
       }
 
@@ -666,20 +682,11 @@ class BibleService {
     )).sort();
 
     const snapshotKey = buildSettingsSnapshotDbKey(normalizedSourceUrls);
-    if (!options?.forceRefresh) {
-      const cached = await this.readSettingsSnapshotFromDatabase(snapshotKey);
-      if (cached) {
-        return {
-          artifacts: cached.artifacts,
-          translationLibraryUrls: cached.translationLibraryUrls,
-        };
-      }
-    }
-
     const settingsUrls = this.buildSettingsUrlCandidates(normalizedSourceUrls);
-    const settled = await Promise.allSettled(settingsUrls.map((url) => this.fetchSettingsAtUrl(url)));
+    const settled = await Promise.allSettled(settingsUrls.map((url) => this.fetchSettingsAtUrl(url, options)));
     const allEntries: SettingsEntryWithSource[] = [];
     const translationLibraryUrls = new Set<string>();
+    const extraLanguages = new Map<string, ExtraLanguageMeta>();
 
     for (const result of settled) {
       if (result.status !== 'fulfilled') {
@@ -687,8 +694,12 @@ class BibleService {
         continue;
       }
 
-      if (result.value.kind === 'settings') {
+      if (result.value.kind === 'library' || result.value.kind === 'translations') {
         translationLibraryUrls.add(result.value.settingsUrl);
+      }
+
+      for (const language of result.value.extraLanguages) {
+        extraLanguages.set(language.code, language);
       }
 
       allEntries.push(
@@ -702,6 +713,7 @@ class BibleService {
     const next: FetchSettingsResult = {
       artifacts: this.normalizeTranslationEntries(allEntries),
       translationLibraryUrls: Array.from(translationLibraryUrls),
+      extraLanguages: Array.from(extraLanguages.values()).sort((a, b) => a.code.localeCompare(b.code)),
     };
 
     if (allEntries.length === 0) {
@@ -710,6 +722,7 @@ class BibleService {
         return {
           artifacts: cached.artifacts,
           translationLibraryUrls: cached.translationLibraryUrls,
+          extraLanguages: cached.extraLanguages ?? [],
         };
       }
     }
@@ -719,6 +732,7 @@ class BibleService {
       sourceUrls: normalizedSourceUrls,
       artifacts: next.artifacts,
       translationLibraryUrls: next.translationLibraryUrls,
+      extraLanguages: next.extraLanguages,
       fetchedAt: Date.now(),
     });
 
@@ -736,6 +750,41 @@ class BibleService {
     await db.put('settingsSnapshots', stored, stored.key);
   }
 
+  private async readParsedSourceSnapshot(
+    sourceUrl: string,
+    modifiedOn: string
+  ): Promise<{ kind: SourceFileKind; entries: TranslationSettingsEntry[]; extraLanguages: ExtraLanguageMeta[] } | null> {
+    const cached = await this.readSettingsSnapshotFromDatabase(buildSettingsSourceSnapshotDbKey(sourceUrl));
+    if (!cached?.kind || !cached.rawEntries || !isStoredModifiedOnCurrent(cached.modifiedOn, modifiedOn)) {
+      return null;
+    }
+
+    return {
+      kind: cached.kind,
+      entries: cached.rawEntries,
+      extraLanguages: cached.extraLanguages ?? [],
+    };
+  }
+
+  private async writeParsedSourceSnapshot(
+    sourceUrl: string,
+    modifiedOn: string,
+    parsed: { kind: SourceFileKind; entries: TranslationSettingsEntry[]; extraLanguages: ExtraLanguageMeta[] }
+  ): Promise<void> {
+    await this.writeSettingsSnapshotToDatabase({
+      key: buildSettingsSourceSnapshotDbKey(sourceUrl),
+      settingsUrl: sourceUrl,
+      sourceUrls: [sourceUrl],
+      kind: parsed.kind,
+      rawEntries: parsed.entries,
+      modifiedOn,
+      artifacts: [],
+      translationLibraryUrls: [],
+      extraLanguages: parsed.extraLanguages,
+      fetchedAt: Date.now(),
+    });
+  }
+
   private buildSettingsUrlCandidates(sourceUrls: string[]): string[] {
     const candidates = new Set<string>([SETTINGS_PATH]);
 
@@ -751,70 +800,81 @@ class BibleService {
     return Array.from(candidates);
   }
 
-  private async fetchSettingsAtUrl(settingsUrl: string): Promise<ParsedSourcePayloadResult> {
+  private async fetchSettingsAtUrl(
+    settingsUrl: string,
+    options?: { forceRefresh?: boolean }
+  ): Promise<ParsedSourcePayloadResult> {
     const payloadResult = await this.fetchSourcePayload(settingsUrl);
     if (!payloadResult.ok) {
       throw new Error(`${settingsUrl} responded with ${payloadResult.status}`);
     }
 
-    const parsed = this.parseSourcePayload(settingsUrl, payloadResult.payload);
-    return { settingsUrl, kind: parsed.kind, entries: parsed.entries };
+    const parsed = await this.parseSourcePayload(settingsUrl, payloadResult.payload, options);
+    return { settingsUrl, kind: parsed.kind, entries: parsed.entries, extraLanguages: parsed.extraLanguages };
   }
 
   private async fetchSourcePayload(sourceUrl: string): Promise<{ ok: true; payload: unknown } | { ok: false; status: number }> {
-    const response = await fetch(sourceUrl, { cache: 'no-store' });
-    if (response.ok) {
-      try {
-        return { ok: true, payload: (await response.json()) as unknown };
-      } catch {
+    let lastStatus = 0;
+
+    for (const candidate of buildFetchUrlCandidates(sourceUrl)) {
+      const response = await fetch(candidate, { cache: 'no-store' });
+      if (response.ok) {
+        try {
+          return { ok: true, payload: (await response.json()) as unknown };
+        } catch {
+          return { ok: false, status: 422 };
+        }
+      }
+
+      lastStatus = response.status;
+
+      const gitHubRaw = parseGitHubRawUrl(sourceUrl);
+      if (candidate !== sourceUrl || response.status !== 404 || !gitHubRaw) {
+        continue;
+      }
+
+      const contentsUrl = buildGitHubContentsUrl(gitHubRaw.owner, gitHubRaw.repo, gitHubRaw.ref, gitHubRaw.path);
+      const privateResponse = await fetch(contentsUrl, {
+        cache: 'no-store',
+        headers: createGitHubAuthHeaders(),
+      });
+
+      if (!privateResponse.ok) {
+        return { ok: false, status: privateResponse.status };
+      }
+
+      const payload = await privateResponse.json();
+      const decoded = decodeGitHubContentsPayload(payload);
+      if (decoded === null) {
         return { ok: false, status: 422 };
       }
+
+      return { ok: true, payload: decoded };
     }
 
-    const gitHubRaw = parseGitHubRawUrl(sourceUrl);
-    if (response.status !== 404 || !gitHubRaw) {
-      return { ok: false, status: response.status };
-    }
-
-    const contentsUrl = buildGitHubContentsUrl(gitHubRaw.owner, gitHubRaw.repo, gitHubRaw.ref, gitHubRaw.path);
-    const privateResponse = await fetch(contentsUrl, {
-      cache: 'no-store',
-      headers: createGitHubAuthHeaders(),
-    });
-
-    if (!privateResponse.ok) {
-      return { ok: false, status: privateResponse.status };
-    }
-
-    const payload = await privateResponse.json();
-    const decoded = decodeGitHubContentsPayload(payload);
-    if (decoded === null) {
-      return { ok: false, status: 422 };
-    }
-
-    return { ok: true, payload: decoded };
+    return { ok: false, status: lastStatus || 404 };
   }
 
-  private parseSourcePayload(
+  private async parseSourcePayload(
     sourceUrl: string,
-    payload: unknown
-  ): { kind: 'settings' | 'translation'; entries: TranslationSettingsEntry[] } {
-    if (isSettingsPayload(payload)) {
-      const entries = this.normalizeSettingsPayload(payload as BibleSettingsFile);
-      return { kind: 'settings', entries };
+    payload: unknown,
+    options?: { forceRefresh?: boolean }
+  ): Promise<{ kind: SourceFileKind; entries: TranslationSettingsEntry[]; extraLanguages: ExtraLanguageMeta[] }> {
+    const filenameKind = inferSourceFileKindFromUrl(sourceUrl);
+    if (filenameKind && filenameKind !== 'translation') {
+      return await this.parseKnownSourcePayload(sourceUrl, payload, filenameKind, options);
+    }
+
+    const inferredKind = inferSourceFileKindFromPayload(payload);
+    if (inferredKind) {
+      return await this.parseKnownSourcePayload(sourceUrl, payload, inferredKind, options);
     }
 
     if (isGitHubPrivateSourcePayload(payload)) {
       return {
         kind: 'translation',
         entries: [buildDirectGitHubPrivateEntry(sourceUrl, payload)],
-      };
-    }
-
-    if (isResourceLibraryConfigPayload(payload)) {
-      return {
-        kind: 'translation',
-        entries: [buildDirectResourceLibraryEntry(sourceUrl, payload)],
+        extraLanguages: [],
       };
     }
 
@@ -822,54 +882,153 @@ class BibleService {
       return {
         kind: 'translation',
         entries: [buildDirectTranslationEntry(sourceUrl, payload)],
+        extraLanguages: [],
       };
     }
 
     throw new Error(`${sourceUrl} is not a supported source payload`);
   }
 
-  private normalizeSettingsPayload(payload?: BibleSettingsFile): TranslationSettingsEntry[] {
-    if (!payload || typeof payload !== 'object') {
-      return [];
+  private async parseKnownSourcePayload(
+    sourceUrl: string,
+    payload: unknown,
+    kind: SourceFileKind,
+    options?: { forceRefresh?: boolean }
+  ): Promise<{ kind: SourceFileKind; entries: TranslationSettingsEntry[]; extraLanguages: ExtraLanguageMeta[] }> {
+    if (kind === 'library') {
+      const library = validateLibraryFile(payload, sourceUrl);
+      const modifiedOn = readString(library.modifiedOn);
+      const cached = modifiedOn && !options?.forceRefresh
+        ? await this.readParsedSourceSnapshot(sourceUrl, modifiedOn)
+        : null;
+      if (cached) {
+        return cached;
+      }
+
+      const parsed = await this.parseLibraryFile(sourceUrl, library, options);
+      if (modifiedOn) {
+        await this.writeParsedSourceSnapshot(sourceUrl, modifiedOn, parsed);
+      }
+      return parsed;
     }
 
-    const translations = this.normalizeSettingsEntries(payload.translations, 'translation');
-    const translationLibraries = this.normalizeSettingsEntries(payload.translationLibraries, 'translation-library');
-    const resourceLibraries = this.normalizeSettingsEntries(payload.resourceLibraries, 'resource-library');
-    const artifacts = this.normalizeSettingsEntries(payload.artifacts);
+    if (kind === 'resources') {
+      const resources = validateResourcesFile(payload, sourceUrl);
+      const modifiedOn = readString(resources.modifiedOn);
+      const cached = modifiedOn && !options?.forceRefresh
+        ? await this.readParsedSourceSnapshot(sourceUrl, modifiedOn)
+        : null;
+      if (cached) {
+        return cached;
+      }
 
-    return [
-      ...translations,
-      ...translationLibraries,
-      ...resourceLibraries,
-      ...artifacts,
-    ];
+      const parsed = {
+        kind,
+        entries: [buildDirectResourceLibraryEntry(sourceUrl, resources)],
+        extraLanguages: [],
+      };
+      if (modifiedOn) {
+        await this.writeParsedSourceSnapshot(sourceUrl, modifiedOn, parsed);
+      }
+      return parsed;
+    }
+
+    if (kind === 'translations') {
+      const translations = validateTranslationsFile(payload, sourceUrl);
+      const modifiedOn = readString(translations.modifiedOn);
+      const cached = modifiedOn && !options?.forceRefresh
+        ? await this.readParsedSourceSnapshot(sourceUrl, modifiedOn)
+        : null;
+      if (cached) {
+        return cached;
+      }
+
+      const parsed = {
+        kind,
+        entries: this.normalizeTranslationsFileEntries(translations, sourceUrl),
+        extraLanguages: readExtraLanguages(translations.extraLanguages),
+      };
+      if (modifiedOn) {
+        await this.writeParsedSourceSnapshot(sourceUrl, modifiedOn, parsed);
+      }
+      return parsed;
+    }
+
+    throw new Error(`${sourceUrl} is not a supported source payload`);
   }
 
-  private normalizeSettingsEntries(entries: unknown, defaultArtifactType?: ArtifactType): TranslationSettingsEntry[] {
-    if (!entries) {
+  private async parseLibraryFile(
+    sourceUrl: string,
+    library: LibraryFileLike,
+    options?: { forceRefresh?: boolean }
+  ): Promise<{ kind: SourceFileKind; entries: TranslationSettingsEntry[]; extraLanguages: ExtraLanguageMeta[] }> {
+    const explicitSources = readLibrarySourceAddresses(library);
+    const sourceAddresses = explicitSources.length > 0 ? explicitSources : ['resources.json', 'translations.json'];
+    const entries: TranslationSettingsEntry[] = [];
+    const extraLanguages = new Map<string, ExtraLanguageMeta>();
+
+    for (const address of sourceAddresses) {
+      const childUrl = resolveAddress(address, sourceUrl);
+      const payloadResult = await this.fetchSourcePayload(childUrl);
+      if (!payloadResult.ok) {
+        if (explicitSources.length > 0) {
+          throw new Error(`${childUrl} responded with ${payloadResult.status}`);
+        }
+        continue;
+      }
+
+      const parsed = await this.parseSourcePayload(childUrl, payloadResult.payload, options);
+      const parentDocumentStoreAddress = readString(library.documentStoreAddress);
+      entries.push(
+        ...parsed.entries.map((entry) => (
+          entry.artifactType === 'resource-library' && parentDocumentStoreAddress && !entry.documentStoreAddress
+            ? { ...entry, documentStoreAddress: parentDocumentStoreAddress }
+            : entry
+        ))
+      );
+      for (const language of parsed.extraLanguages) {
+        extraLanguages.set(language.code, language);
+      }
+    }
+
+    if (entries.length === 0) {
+      throw new Error(`${sourceUrl} did not provide any resources.json or translations.json sources`);
+    }
+
+    return {
+      kind: 'library',
+      entries,
+      extraLanguages: Array.from(extraLanguages.values()).sort((a, b) => a.code.localeCompare(b.code)),
+    };
+  }
+
+  private normalizeTranslationsFileEntries(payload: TranslationsFileLike, settingsUrl: string): TranslationSettingsEntry[] {
+    if (!Array.isArray(payload.translations)) {
       return [];
     }
 
-    if (Array.isArray(entries)) {
-      return entries.filter(isTranslationSettingsEntry).map((entry) => ({
-        ...entry,
-        artifactType: entry.artifactType ?? defaultArtifactType,
-      }));
-    }
+    return payload.translations.map((raw, index) => {
+      if (!isTranslationSettingsEntry(raw)) {
+        throw new Error(`translations.json entry ${index + 1} is invalid at ${settingsUrl}`);
+      }
 
-    if (isPlainObject(entries)) {
-      return Object.entries(entries).map(([id, raw]) => {
-        const entry = isTranslationSettingsEntry(raw) ? raw : {};
-        return {
-          ...entry,
-          id: entry.id ?? id,
-          artifactType: entry.artifactType ?? defaultArtifactType,
-        };
-      });
-    }
+      const id = readString(raw.id);
+      const label = readString(raw.label);
+      const language = readString(raw.language);
+      const address = readString(raw.address);
+      if (!id || !label || !language || !address) {
+        throw new Error(`translations.json entry ${index + 1} is missing a required field at ${settingsUrl}`);
+      }
 
-    return [];
+      return {
+        ...raw,
+        id,
+        label,
+        language,
+        address: resolveAddress(address, settingsUrl),
+        artifactType: 'translation',
+      };
+    });
   }
 
   private normalizeTranslationEntries(entries: SettingsEntryWithSource[]): BibleTranslationMeta[] {
@@ -902,6 +1061,10 @@ class BibleService {
         orgName: entry.orgName,
         publicUrl: entry.publicUrl,
         repoAlias: entry.repoAlias,
+        documentStoreAddress: entry.documentStoreAddress,
+        documentManifestAddress: entry.documentManifestAddress,
+        referencesAddress: entry.referencesAddress,
+        modifiedOn: entry.modifiedOn,
       };
 
       const mergeKey = getArtifactMergeKey(meta);
@@ -933,27 +1096,9 @@ class BibleService {
       }
     }
 
-    const location = entry.location;
-    if (location && /^https?:\/\//i.test(location)) {
-      return location;
-    }
-
-    if (location) {
-      const trimmed = location.trim();
-
-      if (settingsUrl && /^https?:\/\//i.test(settingsUrl)) {
-        try {
-          return new URL(trimmed, settingsUrl).toString();
-        } catch {
-          // Fall through to legacy local-path handling.
-        }
-      }
-
-      const localTrimmed = trimmed.replace(/^\//, '');
-      if (localTrimmed.startsWith(BIBLE_DATA_PATH)) {
-        return localTrimmed;
-      }
-      return `${BIBLE_DATA_PATH}/${localTrimmed}`;
+    const address = entry.address;
+    if (address) {
+      return settingsUrl ? resolveAddress(address, settingsUrl) : address.trim();
     }
 
     return this.buildLocalSource(id);
@@ -1309,13 +1454,14 @@ class BibleService {
     }
   }
 
-  private writeCachedTranslationMeta(remote: BibleTranslationMeta[]): void {
+  private writeCachedTranslationMeta(remote: BibleTranslationMeta[], extraLanguages: ExtraLanguageMeta[] = this.extraLanguages): void {
     if (typeof window === 'undefined') {
       return;
     }
 
     const payload: CachedTranslationMeta = {
       items: remote,
+      extraLanguages,
       cachedAt: Date.now()
     };
 
@@ -1667,19 +1813,6 @@ function isTranslationSettingsEntry(value: unknown): value is TranslationSetting
   return isPlainObject(value);
 }
 
-function isSettingsPayload(value: unknown): value is BibleSettingsFile {
-  if (!isPlainObject(value)) {
-    return false;
-  }
-
-  return (
-    Object.prototype.hasOwnProperty.call(value, 'translations')
-    || Object.prototype.hasOwnProperty.call(value, 'translationLibraries')
-    || Object.prototype.hasOwnProperty.call(value, 'resourceLibraries')
-    || Object.prototype.hasOwnProperty.call(value, 'artifacts')
-  );
-}
-
 function buildBookCanonicalAliasMap(): Map<string, string> {
   const map = new Map<string, string>();
 
@@ -1712,18 +1845,6 @@ function isBibleDataPayload(value: unknown): value is BibleData {
   return typeof value['translation'] === 'string' && Array.isArray(value['books']);
 }
 
-function isResourceLibraryConfigPayload(value: unknown): value is ResourceLibraryConfigFile {
-  if (!isPlainObject(value)) {
-    return false;
-  }
-
-  const source = isPlainObject(value['source']) ? value['source'] as ResourceSourceConfig : undefined;
-  const hasTemplate = typeof source?.documentUrlTemplate === 'string' || typeof value['documentUrlTemplate'] === 'string';
-  const hasBaseUrl = typeof source?.baseUrl === 'string' || typeof value['baseUrl'] === 'string';
-
-  return hasTemplate || hasBaseUrl;
-}
-
 function buildDirectTranslationEntry(sourceUrl: string, bibleData: BibleData): TranslationSettingsEntry {
   const label = bibleData.translation?.trim() || extractFilenameStem(sourceUrl) || 'Remote Translation';
   const slug = slugify(label) || 'translation';
@@ -1732,15 +1853,14 @@ function buildDirectTranslationEntry(sourceUrl: string, bibleData: BibleData): T
   return {
     id: `${slug}-${suffix}`,
     label,
-    location: sourceUrl,
+    address: sourceUrl,
     repositoryType: normalizeRepositoryType(undefined, sourceUrl),
     artifactType: 'translation',
   };
 }
 
-function buildDirectResourceLibraryEntry(sourceUrl: string, configPayload: ResourceLibraryConfigFile): TranslationSettingsEntry {
-  const sourceConfig = isPlainObject(configPayload.source) ? configPayload.source as ResourceSourceConfig : undefined;
-  const sourceType = readString(sourceConfig?.sourceType);
+function buildDirectResourceLibraryEntry(sourceUrl: string, resourcesPayload: ResourcesFileLike): TranslationSettingsEntry {
+  const sourceType = readString(resourcesPayload.name);
   const stem = extractFilenameStem(sourceUrl);
   const baseLabel = sourceType ?? (stem ? prettifyLibraryLabel(sourceUrl) : 'Resource Library');
   const label = /resource library/i.test(baseLabel) ? baseLabel : `${baseLabel} Resource Library`;
@@ -1750,9 +1870,13 @@ function buildDirectResourceLibraryEntry(sourceUrl: string, configPayload: Resou
   return {
     id: `${slugBase}-${suffix}`,
     label,
-    location: sourceUrl,
+    address: sourceUrl,
     repositoryType: normalizeRepositoryType(undefined, sourceUrl),
     artifactType: 'resource-library',
+    documentStoreAddress: readString(resourcesPayload.documentStoreAddress),
+    documentManifestAddress: readString(resourcesPayload.documentManifestAddress),
+    referencesAddress: readString(resourcesPayload.referencesAddress),
+    modifiedOn: readString(resourcesPayload.modifiedOn),
   };
 }
 
@@ -1768,7 +1892,7 @@ function buildDirectGitHubPrivateEntry(sourceUrl: string, configPayload: GitHubP
   return {
     id,
     label,
-    location: sourceUrl,
+    address: sourceUrl,
     repositoryType: 'github-private',
     artifactType: 'translation',
     owner,
@@ -1853,6 +1977,24 @@ function hashText(value: string): string {
 }
 function buildSettingsSnapshotDbKey(sourceUrls: string[]): string {
   return hashText(`settings|${sourceUrls.join('|')}`);
+}
+
+function buildSettingsSourceSnapshotDbKey(sourceUrl: string): string {
+  return hashText(`settings-source|${sourceUrl}`);
+}
+
+function isStoredModifiedOnCurrent(storedModifiedOn: string | undefined, nextModifiedOn: string): boolean {
+  if (!storedModifiedOn) {
+    return false;
+  }
+
+  const storedTime = Date.parse(storedModifiedOn);
+  const nextTime = Date.parse(nextModifiedOn);
+  if (Number.isFinite(storedTime) && Number.isFinite(nextTime)) {
+    return storedTime >= nextTime;
+  }
+
+  return storedModifiedOn === nextModifiedOn;
 }
 
 export const bibleService = new BibleService();

@@ -1,7 +1,16 @@
 import type { DBSchema, IDBPDatabase } from 'idb';
 import type { BibleTranslationMeta, ArtifactType, RepositoryType } from '../models/bible';
 import { BOOK_ALIAS_CONFIG, normalizeBookName } from '../utils/book-aliases';
-import { buildDocumentPageUrl, isPlainObject, readResourceLibraryConnection, readString } from '../utils/resourceLibraryConfig';
+import {
+  DEFAULT_DOCUMENT_STORE_ADDRESS,
+  buildDocumentStorePageUrl,
+  buildFetchUrlCandidates,
+  isPlainObject,
+  readString,
+  resolveAddress,
+  validateDocumentsFile,
+  validateResourcesFile,
+} from '../utils/resourceLibraryConfig';
 
 interface ResourceLibraryDB extends DBSchema {
   resourceShards: {
@@ -18,7 +27,8 @@ interface StoredResourceShard {
   key: string;
   libraryId: string;
   shardFile: string;
-  configUrl: string;
+  resourcesUrl: string;
+  modifiedOn?: string;
   entries: ResourceVerseEntry[];
   fetchedAt: number;
 }
@@ -27,11 +37,13 @@ interface StoredResourceLibrary {
   key: string;
   id: string;
   label: string;
-  configUrl: string;
-  baseUrl: string;
-  documentUrlTemplate: string;
+  resourcesUrl: string;
+  documentManifestAddress: string;
+  documentStoreAddress: string;
+  referencesAddress: string;
   documents: Array<{ documentId: string; title: string; tags: string[] }>;
-  manifest: ExportManifestShard[];
+  resources: ExportManifestShard[];
+  modifiedOn?: string;
   fetchedAt: number;
 }
 
@@ -114,23 +126,6 @@ interface ExportManifestShard {
   refPrefix: string;
 }
 
-interface ExportManifestFile {
-  generatedAt?: string;
-  shards?: ExportManifestShard[];
-}
-
-interface ResourceSourceConfig {
-  sourceType?: unknown;
-  baseUrl?: unknown;
-  documentUrlTemplate?: unknown;
-}
-
-interface ResourceLibraryConfigFile {
-  source?: ResourceSourceConfig;
-  baseUrl?: unknown;
-  documentUrlTemplate?: unknown;
-}
-
 interface ExportDocumentEntry {
   documentId?: unknown;
   title?: unknown;
@@ -152,11 +147,13 @@ interface ResourceVerseEntry {
 interface ResolvedResourceLibrary {
   id: string;
   label: string;
-  configUrl: string;
-  baseUrl: string;
-  documentUrlTemplate: string;
+  resourcesUrl: string;
+  documentManifestAddress: string;
+  documentStoreAddress: string;
+  referencesAddress: string;
+  modifiedOn?: string;
   documentsById: Map<string, { title: string; tags: string[] }>;
-  manifest: ExportManifestShard[];
+  resources: ExportManifestShard[];
   shardCache: Map<string, ResourceVerseEntry[]>;
 }
 
@@ -297,7 +294,7 @@ export class ResourceLibraryService {
           pages: nextPages,
           pageLinks: nextPages.map((page) => ({
             page,
-            url: buildDocumentPageUrl(library.documentUrlTemplate, library.baseUrl, match.documentId, page),
+            url: buildDocumentStorePageUrl(library.documentStoreAddress, library.resourcesUrl, match.documentId, page),
             raw: rawByPage.get(page),
           })),
         };
@@ -341,7 +338,7 @@ export class ResourceLibraryService {
         .filter((entry) => entry.artifactType === 'resource-library')
         .sort((a, b) => a.source.localeCompare(b.source));
 
-      const nextKey = resourceEntries.map((entry) => `${entry.id}:${entry.source}`).join('|');
+      const nextKey = resourceEntries.map((entry) => `${entry.id}:${entry.source}:${entry.modifiedOn ?? ''}`).join('|');
       if (this.resourceLibraryCacheKey === nextKey && this.resourceLibraries.length > 0) {
         this.resourceLibrarySourceKey = sourceKey;
         this.hasLoadedResourceLibraries = true;
@@ -381,77 +378,69 @@ export class ResourceLibraryService {
   }
 
   private async resolveResourceLibrary(meta: BibleTranslationMeta): Promise<ResolvedResourceLibrary> {
-    const configUrl = meta.source;
-    const dbKey = buildResourceLibraryDbKey(meta.id, configUrl);
+    const resourcesUrl = meta.source;
+    const dbKey = buildResourceLibraryDbKey(meta.id, resourcesUrl);
     const fromDb = await this.readResourceLibraryFromDatabase(dbKey);
-    if (fromDb) {
+    if (fromDb && isStoredModifiedOnCurrent(fromDb.modifiedOn, meta.modifiedOn)) {
       return {
         id: fromDb.id,
         label: fromDb.label,
-        configUrl: fromDb.configUrl,
-        baseUrl: fromDb.baseUrl,
-        documentUrlTemplate: fromDb.documentUrlTemplate,
+        resourcesUrl: fromDb.resourcesUrl,
+        documentManifestAddress: fromDb.documentManifestAddress,
+        documentStoreAddress: fromDb.documentStoreAddress,
+        referencesAddress: fromDb.referencesAddress,
+        modifiedOn: fromDb.modifiedOn,
         documentsById: new Map(fromDb.documents.map((entry) => [entry.documentId, { title: entry.title, tags: entry.tags }] as const)),
-        manifest: fromDb.manifest,
+        resources: fromDb.resources,
         shardCache: new Map<string, ResourceVerseEntry[]>(),
       };
     }
 
-    const configResponse = await fetch(configUrl, { cache: 'no-store' });
-    if (!configResponse.ok) {
-      throw new Error(`Resource config unavailable at ${configUrl} (${configResponse.status})`);
-    }
+    const resourcesPayload = await fetchJsonPayload(resourcesUrl);
+    const resourcesFile = validateResourcesFile(resourcesPayload, resourcesUrl);
 
-    const configPayload = (await configResponse.json()) as unknown;
-    if (!isPlainObject(configPayload)) {
-      throw new Error(`Resource config payload is invalid at ${configUrl}`);
-    }
+    const documentManifestAddress = resolveAddress(
+      readString(resourcesFile.documentManifestAddress) ?? meta.documentManifestAddress ?? 'documents.json',
+      resourcesUrl
+    );
+    const documentStoreAddress = readString(resourcesFile.documentStoreAddress)
+      ?? meta.documentStoreAddress
+      ?? DEFAULT_DOCUMENT_STORE_ADDRESS;
+    const referencesAddress = resolveAddress(readString(resourcesFile.referencesAddress) ?? meta.referencesAddress ?? 'references/', resourcesUrl);
 
-    const config = configPayload as ResourceLibraryConfigFile;
-    const { baseUrl, documentUrlTemplate } = readResourceLibraryConnection(config, configUrl);
-
-    const [documentsResponse, manifestResponse] = await Promise.all([
-      fetch(new URL('documents.json', configUrl).toString(), { cache: 'no-store' }),
-      fetch(new URL('manifest.json', configUrl).toString(), { cache: 'no-store' }),
-    ]);
-
-    if (!documentsResponse.ok) {
-      throw new Error(`documents.json unavailable for resource library ${meta.id}`);
-    }
-    if (!manifestResponse.ok) {
-      throw new Error(`manifest.json unavailable for resource library ${meta.id}`);
-    }
-
-    const documentsPayload = (await documentsResponse.json()) as unknown;
-    const manifestPayload = (await manifestResponse.json()) as unknown;
-
-    const documentsById = parseResourceDocuments(documentsPayload);
-    const manifest = parseManifestShards(manifestPayload);
+    const documentsPayload = await fetchJsonPayload(documentManifestAddress);
+    const documentsFile = validateDocumentsFile(documentsPayload, documentManifestAddress);
+    const documentsById = parseResourceDocuments(documentsFile.documents);
+    const resources = parseManifestShards(resourcesFile);
 
     await this.writeResourceLibraryToDatabase({
       key: dbKey,
       id: meta.id,
       label: meta.label,
-      configUrl,
-      baseUrl,
-      documentUrlTemplate,
+      resourcesUrl,
+      documentManifestAddress,
+      documentStoreAddress,
+      referencesAddress,
       documents: Array.from(documentsById.entries()).map(([documentId, entry]) => ({
         documentId,
         title: entry.title,
         tags: entry.tags,
       })),
-      manifest,
+      resources,
+      modifiedOn: meta.modifiedOn,
       fetchedAt: Date.now(),
     });
 
     return {
       id: meta.id,
       label: meta.label,
-      configUrl,
-      baseUrl,
-      documentUrlTemplate,
+      resourcesUrl,
+      documentManifestAddress,
+      documentStoreAddress,
+      referencesAddress,
+      modifiedOn: meta.modifiedOn,
       documentsById,
-      manifest,
+      resources,
       shardCache: new Map<string, ResourceVerseEntry[]>(),
     };
   }
@@ -475,7 +464,7 @@ export class ResourceLibraryService {
   ): Promise<ResourceOccurrence[]> {
     const bookTokens = buildReferenceBookCandidates(book);
 
-    const shard = findBestManifestShard(library.manifest, bookTokens, chapter, verse);
+    const shard = findBestManifestShard(library.resources, bookTokens, chapter, verse);
     if (!shard) {
       return [];
     }
@@ -519,13 +508,11 @@ export class ResourceLibraryService {
       return fromDb.entries;
     }
 
-    const shardUrl = new URL(`references/${shardFile}`, library.configUrl).toString();
-    const response = await fetch(shardUrl, { cache: 'no-store' });
-    if (!response.ok) {
-      throw new Error(`Resource shard unavailable: ${shardFile} (${response.status})`);
-    }
-
-    const payload = (await response.json()) as unknown;
+    const referencesBase = library.referencesAddress.endsWith('/')
+      ? library.referencesAddress
+      : `${library.referencesAddress}/`;
+    const shardUrl = resolveAddress(shardFile, referencesBase);
+    const payload = await fetchJsonPayload(shardUrl);
     const entries = Array.isArray(payload)
       ? payload.filter((entry) => isPlainObject(entry)) as ResourceVerseEntry[]
       : [];
@@ -535,7 +522,8 @@ export class ResourceLibraryService {
       key: dbKey,
       libraryId: library.id,
       shardFile,
-      configUrl: library.configUrl,
+      resourcesUrl: library.resourcesUrl,
+      modifiedOn: library.modifiedOn,
       entries,
       fetchedAt: Date.now(),
     });
@@ -552,6 +540,27 @@ export class ResourceLibraryService {
     const db = await this.getDatabase() as IDBPDatabase<ResourceLibraryDB>;
     await db.put('resourceShards', stored, stored.key);
   }
+}
+
+async function fetchJsonPayload(sourceUrl: string): Promise<unknown> {
+  const failures: string[] = [];
+
+  for (const candidate of buildFetchUrlCandidates(sourceUrl)) {
+    try {
+      const response = await fetch(candidate, { cache: 'no-store' });
+      if (!response.ok) {
+        failures.push(`${candidate} -> ${response.status}`);
+        continue;
+      }
+
+      return (await response.json()) as unknown;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'unknown error';
+      failures.push(`${candidate} -> ${message}`);
+    }
+  }
+
+  throw new Error(`Resource JSON unavailable at ${sourceUrl}: ${failures.join('; ')}`);
 }
 
 function summarizeArtifacts(
@@ -909,20 +918,19 @@ function parseManifestShards(payload: unknown): ExportManifestShard[] {
     return [];
   }
 
-  const manifest = payload as ExportManifestFile;
-  if (!Array.isArray(manifest.shards)) {
+  if (!Array.isArray(payload['shards'])) {
     return [];
   }
 
   const shards: ExportManifestShard[] = [];
-  for (const item of manifest.shards) {
+  for (const item of payload['shards']) {
     if (!isPlainObject(item)) {
       continue;
     }
 
-    const file = readString(item.file);
-    const scope = readString(item.scope);
-    const refPrefix = readString(item.refPrefix);
+    const file = readString(item['file']);
+    const scope = readString(item['scope']);
+    const refPrefix = readString(item['refPrefix']);
     if (!file || !refPrefix || (scope !== 'book' && scope !== 'chapter' && scope !== 'verse')) {
       continue;
     }
@@ -934,12 +942,26 @@ function parseManifestShards(payload: unknown): ExportManifestShard[] {
 }
 
 function buildResourceShardDbKey(library: ResolvedResourceLibrary, shardFile: string): string {
-  const sourceHash = hashText(`${library.id}|${library.configUrl}`);
+  const sourceHash = hashText(`${library.id}|${library.resourcesUrl}|${library.modifiedOn ?? ''}`);
   return `${sourceHash}:${shardFile}`;
 }
 
-function buildResourceLibraryDbKey(libraryId: string, configUrl: string): string {
-  return hashText(`${libraryId}|${configUrl}`);
+function buildResourceLibraryDbKey(libraryId: string, resourcesUrl: string): string {
+  return hashText(`${libraryId}|${resourcesUrl}`);
+}
+
+function isStoredModifiedOnCurrent(storedModifiedOn: string | undefined, nextModifiedOn: string | undefined): boolean {
+  if (!storedModifiedOn || !nextModifiedOn) {
+    return false;
+  }
+
+  const storedTime = Date.parse(storedModifiedOn);
+  const nextTime = Date.parse(nextModifiedOn);
+  if (Number.isFinite(storedTime) && Number.isFinite(nextTime)) {
+    return storedTime >= nextTime;
+  }
+
+  return storedModifiedOn === nextModifiedOn;
 }
 
 function buildBookCanonicalAliasMap(): Map<string, string> {

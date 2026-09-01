@@ -1,8 +1,42 @@
-// Shared helpers for parsing resource library config.json files and building document URLs.
-// Used by resourceLibraryService.ts (verse lookups) and resourceLibrarySearchService.ts (title search),
-// which otherwise resolve the same { source: { baseUrl, documentUrlTemplate } } config shape independently.
+// Shared helpers for parsing library/resource source files and building document URLs.
 
 export const DEFAULT_DOCUMENT_URL_TEMPLATE = '{baseUrl}/documents/{documentId}?page={page}';
+export const DEFAULT_DOCUMENT_STORE_ADDRESS = 'documents/{documentId}';
+
+export type SourceFileKind = 'library' | 'resources' | 'translations' | 'documents' | 'translation';
+
+export interface LibraryFileLike {
+  name?: unknown;
+  modifiedOn?: unknown;
+  documentStoreAddress?: unknown;
+  source?: unknown;
+  sources?: unknown;
+}
+
+export interface ResourcesFileLike {
+  modifiedOn?: unknown;
+  name?: unknown;
+  documentStoreAddress?: unknown;
+  documentManifestAddress?: unknown;
+  referencesAddress?: unknown;
+  shards?: unknown;
+}
+
+export interface DocumentsFileLike {
+  documents?: unknown;
+}
+
+export interface TranslationsFileLike {
+  modifiedOn?: unknown;
+  name?: unknown;
+  translations?: unknown;
+  extraLanguages?: unknown;
+}
+
+export interface ExtraLanguage {
+  code: string;
+  label: string;
+}
 
 export interface ResourceSourceConfigLike {
   baseUrl?: unknown;
@@ -21,6 +55,184 @@ export function isPlainObject(value: unknown): value is Record<string, unknown> 
 
 export function readString(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim().length > 0 ? value.trim() : undefined;
+}
+
+export function readStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .map((entry) => readString(entry))
+    .filter((entry): entry is string => Boolean(entry));
+}
+
+export function readLibrarySourceAddresses(library: LibraryFileLike): string[] {
+  const source = readString(library.source);
+  const sources = readStringArray(library.sources);
+
+  if (source && sources.length > 0) {
+    throw new Error('library.json may define source or sources, but not both.');
+  }
+
+  if (source) {
+    return [source];
+  }
+
+  return sources;
+}
+
+export function inferSourceFileKindFromUrl(urlText: string): SourceFileKind | null {
+  const filename = getFilename(urlText).toLowerCase();
+  if (filename === 'library.json') {
+    return 'library';
+  }
+  if (filename === 'resources.json') {
+    return 'resources';
+  }
+  if (filename === 'translations.json') {
+    return 'translations';
+  }
+  if (filename === 'documents.json') {
+    return 'documents';
+  }
+
+  return null;
+}
+
+export function inferSourceFileKindFromPayload(payload: unknown): SourceFileKind | null {
+  if (!isPlainObject(payload)) {
+    return null;
+  }
+
+  if (Array.isArray(payload['shards'])) {
+    return 'resources';
+  }
+  if (Array.isArray(payload['translations'])) {
+    return 'translations';
+  }
+  if (Array.isArray(payload['documents'])) {
+    return 'documents';
+  }
+  if (readString(payload['name']) && readString(payload['modifiedOn'])) {
+    return 'library';
+  }
+
+  return null;
+}
+
+export function resolveAddress(address: string, baseUrl: string): string {
+  const raw = address.trim();
+  const normalizedGitHub = normalizeGitHubUiUrlToRaw(raw);
+  if (normalizedGitHub) {
+    return normalizedGitHub;
+  }
+
+  if (isAbsoluteUrl(raw)) {
+    return raw;
+  }
+
+  const resolved = resolveRelativeAddress(raw, baseUrl);
+  return normalizeGitHubUiUrlToRaw(resolved) ?? resolved;
+}
+
+export function buildFetchUrlCandidates(address: string, baseUrl?: string): string[] {
+  const resolved = baseUrl ? resolveAddress(address, baseUrl) : (normalizeGitHubUiUrlToRaw(address) ?? address.trim());
+  const gitHubRaw = parseGitHubRawUrl(resolved);
+  if (!gitHubRaw) {
+    return [resolved];
+  }
+
+  const { owner, repo, ref, path } = gitHubRaw;
+  const cdnPath = `${owner}/${repo}@${ref}/${path}`;
+  return [
+    `https://cdn.jsdelivr.net/gh/${cdnPath}`,
+    `https://fastly.jsdelivr.net/gh/${cdnPath}`,
+    `https://cdn.statically.io/gh/${owner}/${repo}/${ref}/${path}`,
+    `https://rawcdn.githack.com/${owner}/${repo}/${ref}/${path}`,
+    resolved,
+  ];
+}
+
+export function validateLibraryFile(payload: unknown, sourceUrl: string): LibraryFileLike {
+  if (!isPlainObject(payload)) {
+    throw new Error(`library.json payload is invalid at ${sourceUrl}`);
+  }
+
+  if (!readString(payload['name'])) {
+    throw new Error(`library.json missing required name at ${sourceUrl}`);
+  }
+  if (!readString(payload['modifiedOn'])) {
+    throw new Error(`library.json missing required modifiedOn at ${sourceUrl}`);
+  }
+
+  readLibrarySourceAddresses(payload);
+  return payload;
+}
+
+export function validateResourcesFile(payload: unknown, sourceUrl: string): ResourcesFileLike {
+  if (!isPlainObject(payload)) {
+    throw new Error(`resources.json payload is invalid at ${sourceUrl}`);
+  }
+
+  if (!readString(payload['modifiedOn'])) {
+    throw new Error(`resources.json missing required modifiedOn at ${sourceUrl}`);
+  }
+  if (!Array.isArray(payload['shards'])) {
+    throw new Error(`resources.json missing required shards at ${sourceUrl}`);
+  }
+
+  return payload;
+}
+
+export function validateTranslationsFile(payload: unknown, sourceUrl: string): TranslationsFileLike {
+  if (!isPlainObject(payload)) {
+    throw new Error(`translations.json payload is invalid at ${sourceUrl}`);
+  }
+
+  if (!readString(payload['modifiedOn'])) {
+    throw new Error(`translations.json missing required modifiedOn at ${sourceUrl}`);
+  }
+  if (!Array.isArray(payload['translations'])) {
+    throw new Error(`translations.json missing required translations at ${sourceUrl}`);
+  }
+
+  return payload;
+}
+
+export function validateDocumentsFile(payload: unknown, sourceUrl: string): DocumentsFileLike {
+  if (!isPlainObject(payload)) {
+    throw new Error(`documents.json payload is invalid at ${sourceUrl}`);
+  }
+
+  if (!Array.isArray(payload['documents'])) {
+    throw new Error(`documents.json missing required documents at ${sourceUrl}`);
+  }
+
+  return payload;
+}
+
+export function readExtraLanguages(value: unknown): ExtraLanguage[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  const languages: ExtraLanguage[] = [];
+  for (const item of value) {
+    if (!isPlainObject(item)) {
+      continue;
+    }
+
+    const code = readString(item['code']);
+    const label = readString(item['label']);
+    if (!code || !label) {
+      continue;
+    }
+
+    languages.push({ code, label });
+  }
+
+  return languages;
 }
 
 export function normalizeBaseUrl(value: string | undefined, fallbackFromConfigUrl: string): string {
@@ -80,5 +292,108 @@ export function buildDocumentPageUrl(template: string, baseUrl: string, document
     return new URL(output, `${baseUrl}/`).toString();
   } catch {
     return output;
+  }
+}
+
+export function buildDocumentStorePageUrl(address: string, sourceUrl: string, documentId: string, page: number): string {
+  const output = applyUrlTemplate(address || DEFAULT_DOCUMENT_STORE_ADDRESS, {
+    documentId,
+    page: String(page),
+    pageNumber: String(page),
+  });
+
+  return resolveAddress(output, sourceUrl);
+}
+
+function isAbsoluteUrl(value: string): boolean {
+  return /^[a-z][a-z0-9+.-]*:\/\//i.test(value);
+}
+
+function getFilename(urlText: string): string {
+  try {
+    const parsed = new URL(urlText);
+    return parsed.pathname.split('/').filter(Boolean).pop() ?? '';
+  } catch {
+    return urlText.split(/[\\/]/).filter(Boolean).pop() ?? '';
+  }
+}
+
+function resolveRelativeAddress(address: string, baseUrl: string): string {
+  if (isAbsoluteUrl(baseUrl)) {
+    return new URL(address, baseUrl).toString();
+  }
+
+  if (baseUrl.startsWith('/')) {
+    return new URL(address, `https://marginalia.local${baseUrl}`).pathname.replace(/^\//, '');
+  }
+
+  const baseParts = baseUrl.split('/').filter((part) => part.length > 0);
+  if (baseParts.length > 0 && /\.[^/.]+$/.test(baseParts[baseParts.length - 1])) {
+    baseParts.pop();
+  }
+
+  for (const part of address.split('/')) {
+    if (!part || part === '.') {
+      continue;
+    }
+    if (part === '..') {
+      baseParts.pop();
+      continue;
+    }
+    baseParts.push(part);
+  }
+
+  return baseParts.join('/');
+}
+
+function normalizeGitHubUiUrlToRaw(value: string): string | null {
+  try {
+    const parsed = new URL(value);
+    if (parsed.hostname.toLowerCase() !== 'github.com') {
+      return null;
+    }
+
+    const parts = parsed.pathname.split('/').filter(Boolean);
+    if (parts.length < 5) {
+      return null;
+    }
+
+    const [owner, repo, marker, ref, ...pathParts] = parts;
+    if (marker !== 'blob' || !owner || !repo || !ref || pathParts.length === 0) {
+      return null;
+    }
+
+    const encodedPath = pathParts.map((part) => encodeURIComponent(decodeURIComponent(part))).join('/');
+    return `https://raw.githubusercontent.com/${owner}/${repo}/${ref}/${encodedPath}`;
+  } catch {
+    return null;
+  }
+}
+
+function parseGitHubRawUrl(value: string): { owner: string; repo: string; ref: string; path: string } | null {
+  try {
+    const parsed = new URL(value);
+    if (parsed.hostname.toLowerCase() !== 'raw.githubusercontent.com') {
+      return null;
+    }
+
+    const parts = parsed.pathname.split('/').filter(Boolean);
+    if (parts.length < 4) {
+      return null;
+    }
+
+    const [owner, repo, ref, ...pathParts] = parts;
+    if (!owner || !repo || !ref || pathParts.length === 0) {
+      return null;
+    }
+
+    return {
+      owner: decodeURIComponent(owner),
+      repo: decodeURIComponent(repo),
+      ref: decodeURIComponent(ref),
+      path: pathParts.map((part) => decodeURIComponent(part)).join('/'),
+    };
+  } catch {
+    return null;
   }
 }

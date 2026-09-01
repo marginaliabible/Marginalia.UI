@@ -1,5 +1,5 @@
 import { createSlice, createAsyncThunk, type PayloadAction } from '@reduxjs/toolkit';
-import type { BibleData, BibleTranslationMeta, SearchResultSet } from '../../models/bible';
+import type { BibleData, BibleTranslationMeta, ExtraLanguageMeta, SearchResultSet } from '../../models/bible';
 import type { PanelTab } from '../../models/tab';
 import { bibleService } from '../../services/bibleService';
 import { searchIndexService } from '../../services/searchIndexService';
@@ -7,6 +7,7 @@ import { compareBibleReferences } from '../../utils/book-aliases';
 
 interface BibleState {
   availableTranslations: BibleTranslationMeta[];
+  extraLanguages: ExtraLanguageMeta[];
   currentBible: BibleData | null;
   loadedTranslations: Record<string, BibleData>;
   isLoading: boolean;
@@ -28,6 +29,7 @@ const initialState: BibleState = {
     isLocal: true,
     language: 'en'
   }],
+  extraLanguages: [],
   currentBible: null,
   loadedTranslations: {},
   isLoading: false,
@@ -189,7 +191,11 @@ export const refreshTranslations = createAsyncThunk(
   async (forceRefresh: boolean = false, thunkApi) => {
     const state = thunkApi.getState() as { ui?: { sourceUrls?: string[] } };
     const sourceUrls = Array.isArray(state.ui?.sourceUrls) ? state.ui.sourceUrls : [];
-    return await bibleService.refreshAvailableTranslations(forceRefresh, sourceUrls);
+    const translations = await bibleService.refreshAvailableTranslations(forceRefresh, sourceUrls);
+    return {
+      translations,
+      extraLanguages: bibleService.getExtraLanguages(),
+    };
   }
 );
 
@@ -425,7 +431,8 @@ const bibleSlice = createSlice({
         state.error = null;
       })
       .addCase(refreshTranslations.fulfilled, (state, action) => {
-        state.availableTranslations = action.payload;
+        state.availableTranslations = action.payload.translations;
+        state.extraLanguages = action.payload.extraLanguages;
         state.isLoading = false;
       })
       .addCase(refreshTranslations.rejected, (state, action) => {
