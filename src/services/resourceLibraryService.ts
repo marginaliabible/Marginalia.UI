@@ -6,10 +6,12 @@ import {
   buildDocumentStorePageUrl,
   buildFetchUrlCandidates,
   isPlainObject,
+  readResourceDocumentEntry,
   readString,
   resolveAddress,
   validateDocumentsFile,
   validateResourcesFile,
+  type ResourceDocumentEntry,
 } from '../utils/resourceLibraryConfig';
 
 interface ResourceLibraryDB extends DBSchema {
@@ -41,7 +43,7 @@ interface StoredResourceLibrary {
   documentManifestAddress: string;
   documentStoreAddress: string;
   referencesAddress: string;
-  documents: Array<{ documentId: string; title: string; tags: string[] }>;
+  documents: ResourceDocumentEntry[];
   resources: ExportManifestShard[];
   modifiedOn?: string;
   fetchedAt: number;
@@ -126,12 +128,6 @@ interface ExportManifestShard {
   refPrefix: string;
 }
 
-interface ExportDocumentEntry {
-  documentId?: unknown;
-  title?: unknown;
-  tags?: unknown;
-}
-
 interface ResourceOccurrence {
   documentId: string;
   page: number;
@@ -152,7 +148,7 @@ interface ResolvedResourceLibrary {
   documentStoreAddress: string;
   referencesAddress: string;
   modifiedOn?: string;
-  documentsById: Map<string, { title: string; tags: string[] }>;
+  documentsById: Map<string, ResourceDocumentEntry>;
   resources: ExportManifestShard[];
   shardCache: Map<string, ResourceVerseEntry[]>;
 }
@@ -294,7 +290,7 @@ export class ResourceLibraryService {
           pages: nextPages,
           pageLinks: nextPages.map((page) => ({
             page,
-            url: buildDocumentStorePageUrl(library.documentStoreAddress, library.resourcesUrl, match.documentId, page),
+            url: buildDocumentStorePageUrl(library.documentStoreAddress, library.resourcesUrl, document, page),
             raw: rawByPage.get(page),
           })),
         };
@@ -390,7 +386,7 @@ export class ResourceLibraryService {
         documentStoreAddress: fromDb.documentStoreAddress,
         referencesAddress: fromDb.referencesAddress,
         modifiedOn: fromDb.modifiedOn,
-        documentsById: new Map(fromDb.documents.map((entry) => [entry.documentId, { title: entry.title, tags: entry.tags }] as const)),
+        documentsById: new Map(fromDb.documents.map((entry) => [entry.documentId, entry] as const)),
         resources: fromDb.resources,
         shardCache: new Map<string, ResourceVerseEntry[]>(),
       };
@@ -421,11 +417,7 @@ export class ResourceLibraryService {
       documentManifestAddress,
       documentStoreAddress,
       referencesAddress,
-      documents: Array.from(documentsById.entries()).map(([documentId, entry]) => ({
-        documentId,
-        title: entry.title,
-        tags: entry.tags,
-      })),
+      documents: Array.from(documentsById.values()),
       resources,
       modifiedOn: meta.modifiedOn,
       fetchedAt: Date.now(),
@@ -883,31 +875,19 @@ function parseOccurrences(value: unknown, rawText: string | null): ResourceOccur
   return occurrences;
 }
 
-function parseResourceDocuments(payload: unknown): Map<string, { title: string; tags: string[] }> {
-  const map = new Map<string, { title: string; tags: string[] }>();
+function parseResourceDocuments(payload: unknown): Map<string, ResourceDocumentEntry> {
+  const map = new Map<string, ResourceDocumentEntry>();
   if (!Array.isArray(payload)) {
     return map;
   }
 
   for (const item of payload) {
-    if (!isPlainObject(item)) {
+    const entry = readResourceDocumentEntry(item);
+    if (!entry) {
       continue;
     }
 
-    const entry = item as ExportDocumentEntry;
-    const id = readString(entry.documentId);
-    if (!id) {
-      continue;
-    }
-
-    const tags = Array.isArray(entry.tags)
-      ? entry.tags.filter((tag): tag is string => typeof tag === 'string' && tag.trim().length > 0)
-      : [];
-
-    map.set(id, {
-      title: readString(entry.title) ?? id,
-      tags: Array.from(new Set(tags)),
-    });
+    map.set(entry.documentId, entry);
   }
 
   return map;

@@ -6,14 +6,15 @@ import {
   buildFetchUrlCandidates,
   inferSourceFileKindFromPayload,
   inferSourceFileKindFromUrl,
-  isPlainObject,
   readLibrarySourceAddresses,
+  readResourceDocumentEntry,
   readString,
   resolveAddress,
   validateDocumentsFile,
   validateLibraryFile,
   validateResourcesFile,
   type LibraryFileLike,
+  type ResourceDocumentEntry,
   type ResourcesFileLike,
 } from '../utils/resourceLibraryConfig';
 
@@ -47,19 +48,10 @@ interface ResourceLibraryCandidate {
   documents?: ResourceLibraryIndexDoc[];
 }
 
-interface ResourceLibraryDocumentEntry {
-  documentId?: unknown;
-  title?: unknown;
-  tags?: unknown;
-}
-
-interface ResourceLibraryIndexDoc {
+interface ResourceLibraryIndexDoc extends ResourceDocumentEntry {
   id: string;
-  title: string;
-  documentId: string;
   libraryId: string;
   libraryLabel: string;
-  tags: string[];
   resourcesUrl: string;
   documentStoreAddress: string;
 }
@@ -102,7 +94,7 @@ export async function searchResourceDocumentTitles(
 
   const index = new MiniSearch<ResourceLibraryIndexDoc>({
     fields: ['title'],
-    storeFields: ['title', 'documentId', 'libraryId', 'libraryLabel', 'tags', 'resourcesUrl', 'documentStoreAddress'],
+    storeFields: ['title', 'documentId', 'libraryId', 'libraryLabel', 'tags', 'resourcesUrl', 'documentStoreAddress', 'hash'],
     processTerm: (term: string) => normalizeEnglishTerm(term),
   });
 
@@ -134,6 +126,7 @@ export async function searchResourceDocumentTitles(
       : [];
     const resourcesUrl = result['resourcesUrl'] as string;
     const documentStoreAddress = result['documentStoreAddress'] as string;
+    const hash = typeof result['hash'] === 'string' ? (result['hash'] as string) : undefined;
 
     return {
       id: `${libraryId}-${documentId}`,
@@ -142,7 +135,7 @@ export async function searchResourceDocumentTitles(
       documentId,
       title,
       tags,
-      url: buildDocumentStorePageUrl(documentStoreAddress, resourcesUrl, documentId, 1),
+      url: buildDocumentStorePageUrl(documentStoreAddress, resourcesUrl, { documentId, hash }, 1),
     };
   });
 
@@ -300,27 +293,16 @@ async function loadCandidateDocuments(candidate: ResourceLibraryCandidate): Prom
   const documentEntries = Array.isArray(documentsFile.documents) ? documentsFile.documents : [];
 
   for (const item of documentEntries) {
-    if (!isPlainObject(item)) {
+    const entry = readResourceDocumentEntry(item);
+    if (!entry) {
       continue;
     }
-
-    const entry = item as ResourceLibraryDocumentEntry;
-    const documentId = readString(entry.documentId);
-    if (!documentId) {
-      continue;
-    }
-
-    const tags = Array.isArray(entry.tags)
-      ? entry.tags.filter((tag): tag is string => typeof tag === 'string' && tag.trim().length > 0)
-      : [];
 
     documents.push({
-      id: `${candidate.id}\x00${documentId}`,
-      title: readString(entry.title) ?? documentId,
-      documentId,
+      ...entry,
+      id: `${candidate.id}\x00${entry.documentId}`,
       libraryId: candidate.id,
       libraryLabel: candidate.label,
-      tags: Array.from(new Set(tags)),
       resourcesUrl: candidate.resourcesUrl,
       documentStoreAddress: candidate.documentStoreAddress,
     });

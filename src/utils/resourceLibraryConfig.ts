@@ -26,6 +26,44 @@ export interface DocumentsFileLike {
   documents?: unknown;
 }
 
+// Canonical shape for a single documents.json entry, shared across parsing, caching, and URL building.
+export interface ResourceDocumentEntry {
+  documentId: string;
+  title: string;
+  tags: string[];
+  hash?: string;
+}
+
+export interface ResourceDocumentEntryLike {
+  documentId?: unknown;
+  title?: unknown;
+  tags?: unknown;
+  hash?: unknown;
+}
+
+export function readResourceDocumentEntry(item: unknown): ResourceDocumentEntry | null {
+  if (!isPlainObject(item)) {
+    return null;
+  }
+
+  const entry = item as ResourceDocumentEntryLike;
+  const documentId = readString(entry.documentId);
+  if (!documentId) {
+    return null;
+  }
+
+  const tags = Array.isArray(entry.tags)
+    ? entry.tags.filter((tag): tag is string => typeof tag === 'string' && tag.trim().length > 0)
+    : [];
+
+  return {
+    documentId,
+    title: readString(entry.title) ?? documentId,
+    tags: Array.from(new Set(tags)),
+    hash: readString(entry.hash),
+  };
+}
+
 export interface TranslationsFileLike {
   modifiedOn?: unknown;
   name?: unknown;
@@ -280,12 +318,13 @@ export function applyUrlTemplate(template: string, values: Record<string, string
   });
 }
 
-export function buildDocumentPageUrl(template: string, baseUrl: string, documentId: string, page: number): string {
+export function buildDocumentPageUrl(template: string, baseUrl: string, document: Pick<ResourceDocumentEntry, 'documentId' | 'hash'>, page: number): string {
   const output = applyUrlTemplate(template, {
     baseUrl,
-    documentId,
+    documentId: document.documentId,
     page: String(page),
     pageNumber: String(page),
+    ...(document.hash ? { hash: document.hash } : {}),
   });
 
   try {
@@ -295,11 +334,12 @@ export function buildDocumentPageUrl(template: string, baseUrl: string, document
   }
 }
 
-export function buildDocumentStorePageUrl(address: string, sourceUrl: string, documentId: string, page: number): string {
+export function buildDocumentStorePageUrl(address: string, sourceUrl: string, document: Pick<ResourceDocumentEntry, 'documentId' | 'hash'>, page: number): string {
   const output = applyUrlTemplate(address || DEFAULT_DOCUMENT_STORE_ADDRESS, {
-    documentId,
+    documentId: document.documentId,
     page: String(page),
     pageNumber: String(page),
+    ...(document.hash ? { hash: document.hash } : {}),
   });
 
   return resolveAddress(output, sourceUrl);

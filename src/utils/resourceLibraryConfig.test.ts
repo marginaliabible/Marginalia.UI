@@ -49,7 +49,7 @@ describe('buildDocumentPageUrl', () => {
     const result = buildDocumentPageUrl(
       '/work/documents/{documentId[0..1]}/{documentId[2..3]}/{documentId}/pages/',
       'https://example.com',
-      'abc123',
+      { documentId: 'abc123' },
       1
     );
 
@@ -80,7 +80,7 @@ describe('address helpers', () => {
     const result = buildDocumentStorePageUrl(
       'https://paperless.example.com/api/documents/{documentId}/preview/#page={pageNumber}',
       'https://example.com/resources.json',
-      'abc123',
+      { documentId: 'abc123' },
       4
     );
 
@@ -88,9 +88,20 @@ describe('address helpers', () => {
   });
 
   it('builds document store URLs relative to the source file', () => {
-    const result = buildDocumentStorePageUrl('documents/{documentId}?page={pageNumber}', 'data/library.json', 'abc123', 3);
+    const result = buildDocumentStorePageUrl('documents/{documentId}?page={pageNumber}', 'data/library.json', { documentId: 'abc123' }, 3);
 
     expect(result).toBe('data/documents/abc123?page=3');
+  });
+
+  it('builds document store URLs using a hash placeholder, including sliced segments', () => {
+    const result = buildDocumentStorePageUrl(
+      'documents/{hash[0..1]}/{hash[2..3]}/{hash}/pages/?page={pageNumber}',
+      'data/library.json',
+      { documentId: 'abc123', hash: 'deadbeef' },
+      3
+    );
+
+    expect(result).toBe('data/documents/de/ad/deadbeef/pages/?page=3');
   });
 
   it('prefers CDN candidates for raw GitHub URLs', () => {
