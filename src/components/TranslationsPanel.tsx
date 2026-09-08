@@ -71,7 +71,8 @@ const TranslationsPanel: React.FC<TranslationsPanelProps> = ({
     };
   }, [verseContext, translationRecords]);
 
-  const handleDragStart = (index: number) => {
+  const handleDragStart = (e: React.DragEvent<HTMLDivElement>, index: number) => {
+    e.dataTransfer.effectAllowed = 'move';
     setDraggedIndex(index);
   };
 
@@ -87,6 +88,10 @@ const TranslationsPanel: React.FC<TranslationsPanelProps> = ({
     }
 
     onReorder(draggedIndex, targetIndex);
+    setDraggedIndex(null);
+  };
+
+  const handleDragEnd = () => {
     setDraggedIndex(null);
   };
 
@@ -131,15 +136,18 @@ const TranslationsPanel: React.FC<TranslationsPanelProps> = ({
                   return (
                     <div key={record.id} className="translations-verse-grid-item">
                       <div
-                        draggable
-                        onDragStart={() => handleDragStart(index)}
                         onDragOver={handleDragOver}
                         onDrop={() => handleDrop(index)}
                         className={`card border p-2 translation-verse-card ${
                           draggedIndex === index ? 'opacity-50' : ''
                         }`}
                       >
-                        <div className="d-flex align-items-center justify-content-between mb-2">
+                        <div
+                          className="d-flex align-items-center justify-content-between mb-2 translation-verse-card-header"
+                          draggable
+                          onDragStart={(event) => handleDragStart(event, index)}
+                          onDragEnd={handleDragEnd}
+                        >
                           <div className="d-flex align-items-center gap-2 flex-grow-1">
                             <span className="text-muted translation-drag-handle" title="Drag to reorder">
                               ⋮
