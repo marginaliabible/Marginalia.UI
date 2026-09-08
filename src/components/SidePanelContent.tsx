@@ -3,6 +3,7 @@ import PanelTabs from './PanelTabs';
 import SearchResults from './SearchResults';
 import TranslationsPanel from './TranslationsPanel';
 import ResourcesPanel from './ResourcesPanel';
+import LinksPanel from './LinksPanel';
 import { useAppDispatch, useAppSelector } from '../store/hooks';
 import { loadTranslations, runSearchInTab, setActiveTab } from '../store/slices/bibleSlice';
 import type { QuickJumpTarget, BibleTranslationMeta, TranslationRecord } from '../models/bible';
@@ -134,6 +135,8 @@ const SidePanelContent: React.FC<SidePanelContentProps> = ({
               />
             ) : tab.type === 'resources' ? (
               <ResourcesPanel tab={tab} />
+            ) : tab.type === 'links' ? (
+              <LinksPanel tab={tab} isActive={tab.id === activeTabId} />
             ) : null}
             <div className="pb-4" aria-hidden="true"></div>
           </div>

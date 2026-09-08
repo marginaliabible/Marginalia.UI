@@ -71,6 +71,76 @@ export const BOOK_ALIAS_CONFIG: AliasConfig = {
   'Revelation': ['revelation', 'rev', 're', 'revelations', 'apocalypse']
 };
 
+// Blue Letter Bible style three-character book codes, used for {abbr_book} hyperlink tokens.
+export const BOOK_ABBREVIATIONS: { readonly [book: string]: string } = {
+  'Genesis': 'gen',
+  'Exodus': 'exo',
+  'Leviticus': 'lev',
+  'Numbers': 'num',
+  'Deuteronomy': 'deu',
+  'Joshua': 'jos',
+  'Judges': 'jdg',
+  'Ruth': 'rth',
+  'I Samuel': '1sa',
+  'II Samuel': '2sa',
+  'I Kings': '1ki',
+  'II Kings': '2ki',
+  'I Chronicles': '1ch',
+  'II Chronicles': '2ch',
+  'Ezra': 'ezr',
+  'Nehemiah': 'neh',
+  'Esther': 'est',
+  'Job': 'job',
+  'Psalms': 'psa',
+  'Proverbs': 'pro',
+  'Ecclesiastes': 'ecc',
+  'Song of Solomon': 'sng',
+  'Isaiah': 'isa',
+  'Jeremiah': 'jer',
+  'Lamentations': 'lam',
+  'Ezekiel': 'eze',
+  'Daniel': 'dan',
+  'Hosea': 'hos',
+  'Joel': 'joe',
+  'Amos': 'amo',
+  'Obadiah': 'oba',
+  'Jonah': 'jon',
+  'Micah': 'mic',
+  'Nahum': 'nah',
+  'Habakkuk': 'hab',
+  'Zephaniah': 'zep',
+  'Haggai': 'hag',
+  'Zechariah': 'zec',
+  'Malachi': 'mal',
+  'Matthew': 'mat',
+  'Mark': 'mar',
+  'Luke': 'luk',
+  'John': 'jhn',
+  'Acts': 'act',
+  'Romans': 'rom',
+  'I Corinthians': '1co',
+  'II Corinthians': '2co',
+  'Galatians': 'gal',
+  'Ephesians': 'eph',
+  'Philippians': 'phl',
+  'Colossians': 'col',
+  'I Thessalonians': '1th',
+  'II Thessalonians': '2th',
+  'I Timothy': '1ti',
+  'II Timothy': '2ti',
+  'Titus': 'tit',
+  'Philemon': 'phm',
+  'Hebrews': 'heb',
+  'James': 'jas',
+  'I Peter': '1pe',
+  'II Peter': '2pe',
+  'I John': '1jo',
+  'II John': '2jo',
+  'III John': '3jo',
+  'Jude': 'jde',
+  'Revelation': 'rev'
+};
+
 const CANONICAL_BOOK_ORDER = Object.keys(BOOK_ALIAS_CONFIG);
 const CANONICAL_BOOK_POSITION = new Map(
   CANONICAL_BOOK_ORDER.map((book, index) => [book.toLowerCase(), index])
@@ -115,6 +185,21 @@ export function getCanonicalBookPosition(book: string): number {
   return canonicalBook
     ? CANONICAL_BOOK_POSITION.get(canonicalBook.toLowerCase()) ?? Number.MAX_SAFE_INTEGER
     : Number.MAX_SAFE_INTEGER;
+}
+
+export function getCanonicalBookName(book: string): string | null {
+  return CANONICAL_BOOK_BY_ALIAS.get(normalizeBookName(book)) ?? null;
+}
+
+export function getBookAbbreviation(book: string): string {
+  const canonicalBook = getCanonicalBookName(book);
+  return (canonicalBook && BOOK_ABBREVIATIONS[canonicalBook]) || normalizeBookName(book);
+}
+
+// Arabic-numeral spelling used by external sites ("1 corinthians", not the canonical "I Corinthians").
+export function getBookUrlName(book: string): string {
+  const canonicalBook = getCanonicalBookName(book);
+  return canonicalBook ? BOOK_ALIAS_CONFIG[canonicalBook][0] : normalizeBookName(book);
 }
 
 export function compareBibleReferences(

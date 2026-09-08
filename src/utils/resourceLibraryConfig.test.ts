@@ -7,6 +7,7 @@ import {
   inferSourceFileKindFromUrl,
   readLibrarySourceAddresses,
   validateDocumentsFile,
+  validateHyperlinksFile,
 } from './resourceLibraryConfig';
 
 describe('applyUrlTemplate', () => {
@@ -121,5 +122,30 @@ describe('address helpers', () => {
 describe('documents validation', () => {
   it('rejects legacy root-array documents payloads', () => {
     expect(() => validateDocumentsFile([{ documentId: 'doc-1' }], 'documents.json')).toThrow(/payload is invalid/);
+  });
+});
+
+describe('hyperlinks sources', () => {
+  const payload = { hyperlinks: [{ label: 'Bible Hub', url: 'https://biblehub.com/{book}/{chapter}-{verse}.htm' }] };
+
+  it('detects the kind by filename', () => {
+    expect(inferSourceFileKindFromUrl('https://example.com/data/hyperlinks.json')).toBe('hyperlinks');
+  });
+
+  it('detects the kind by payload shape', () => {
+    expect(inferSourceFileKindFromPayload(payload)).toBe('hyperlinks');
+  });
+
+  it('accepts a valid hyperlinks payload', () => {
+    expect(validateHyperlinksFile(payload, 'hyperlinks.json')).toBe(payload);
+  });
+
+  it('rejects entries missing a label or url', () => {
+    expect(() => validateHyperlinksFile({ hyperlinks: [{ label: 'Bible Hub' }] }, 'hyperlinks.json'))
+      .toThrow(/entry 1 is missing a required label or url/);
+  });
+
+  it('rejects payloads without a hyperlinks array', () => {
+    expect(() => validateHyperlinksFile({}, 'hyperlinks.json')).toThrow(/missing required hyperlinks/);
   });
 });

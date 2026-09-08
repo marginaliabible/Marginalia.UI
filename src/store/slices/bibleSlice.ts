@@ -14,7 +14,7 @@ interface BibleState {
   error: string | null;
   tabs: PanelTab[];
   activeTabId: string | null;
-  lastVersePanelType: 'translations' | 'resources';
+  lastVersePanelType: 'translations' | 'resources' | 'links';
   isPanelDetached: boolean;
   detachedPanelName: string | null;
 }
@@ -156,13 +156,17 @@ const findActiveTabIndex = (state: BibleState): number => {
 
 const upsertVerseTab = (
   state: BibleState,
-  type: 'translations' | 'resources',
+  type: 'translations' | 'resources' | 'links',
   verseContext: { book: string; chapter: number; verse: number },
   now: number
 ): PanelTab => {
   const existing = state.tabs.find((tab) => tab.type === type);
-  const title = type === 'translations' ? 'Translations' : 'Resources';
-  const iconClass = type === 'translations' ? 'fa-solid fa-language' : 'fa-solid fa-book-open-reader';
+  const title = type === 'translations' ? 'Translations' : type === 'resources' ? 'Resources' : 'Links';
+  const iconClass = type === 'translations'
+    ? 'fa-solid fa-language'
+    : type === 'resources'
+      ? 'fa-solid fa-book-open-reader'
+      : 'fa-solid fa-link';
 
   if (existing) {
     existing.verseContext = verseContext;
@@ -349,7 +353,7 @@ const bibleSlice = createSlice({
         return;
       }
 
-      if (target.type === 'translations' || target.type === 'resources') {
+      if (target.type === 'translations' || target.type === 'resources' || target.type === 'links') {
         state.lastVersePanelType = target.type;
       }
 
@@ -375,7 +379,7 @@ const bibleSlice = createSlice({
       state.activeTabId = state.tabs[fallbackIndex].id;
 
       const fallbackTab = state.tabs[fallbackIndex];
-      if (fallbackTab.type === 'translations' || fallbackTab.type === 'resources') {
+      if (fallbackTab.type === 'translations' || fallbackTab.type === 'resources' || fallbackTab.type === 'links') {
         state.lastVersePanelType = fallbackTab.type;
       }
     },
@@ -395,7 +399,7 @@ const bibleSlice = createSlice({
       }
 
       const activeTab = state.tabs.find((tab) => tab.id === state.activeTabId);
-      if (!activeTab || (activeTab.type !== 'translations' && activeTab.type !== 'resources')) {
+      if (!activeTab || (activeTab.type !== 'translations' && activeTab.type !== 'resources' && activeTab.type !== 'links')) {
         return;
       }
 
@@ -416,9 +420,13 @@ const bibleSlice = createSlice({
         state.tabs = state.tabs.filter((tab) => tab.type !== 'resources');
       }
 
-      const preferredType = hasResources ? state.lastVersePanelType : 'translations';
+      const linksTab = upsertVerseTab(state, 'links', verseContext, now);
+
+      const preferredType = hasResources ? state.lastVersePanelType : state.lastVersePanelType === 'resources' ? 'translations' : state.lastVersePanelType;
       if (preferredType === 'resources' && resourcesTab) {
         state.activeTabId = resourcesTab.id;
+      } else if (preferredType === 'links') {
+        state.activeTabId = linksTab.id;
       } else {
         state.activeTabId = translationsTab.id;
       }

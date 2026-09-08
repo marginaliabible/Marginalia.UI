@@ -3,7 +3,7 @@
 export const DEFAULT_DOCUMENT_URL_TEMPLATE = '{baseUrl}/documents/{documentId}?page={page}';
 export const DEFAULT_DOCUMENT_STORE_ADDRESS = 'documents/{documentId}';
 
-export type SourceFileKind = 'library' | 'resources' | 'translations' | 'documents' | 'translation';
+export type SourceFileKind = 'library' | 'resources' | 'translations' | 'documents' | 'translation' | 'hyperlinks';
 
 export interface LibraryFileLike {
   name?: unknown;
@@ -11,6 +11,17 @@ export interface LibraryFileLike {
   documentStoreAddress?: unknown;
   source?: unknown;
   sources?: unknown;
+}
+
+export interface HyperlinksFileLike {
+  modifiedOn?: unknown;
+  name?: unknown;
+  hyperlinks?: unknown;
+}
+
+export interface HyperlinkEntryLike {
+  label?: unknown;
+  url?: unknown;
 }
 
 export interface ResourcesFileLike {
@@ -134,6 +145,9 @@ export function inferSourceFileKindFromUrl(urlText: string): SourceFileKind | nu
   if (filename === 'documents.json') {
     return 'documents';
   }
+  if (filename === 'hyperlinks.json') {
+    return 'hyperlinks';
+  }
 
   return null;
 }
@@ -151,6 +165,9 @@ export function inferSourceFileKindFromPayload(payload: unknown): SourceFileKind
   }
   if (Array.isArray(payload['documents'])) {
     return 'documents';
+  }
+  if (Array.isArray(payload['hyperlinks'])) {
+    return 'hyperlinks';
   }
   if (readString(payload['name']) && readString(payload['modifiedOn'])) {
     return 'library';
@@ -246,6 +263,26 @@ export function validateDocumentsFile(payload: unknown, sourceUrl: string): Docu
   if (!Array.isArray(payload['documents'])) {
     throw new Error(`documents.json missing required documents at ${sourceUrl}`);
   }
+
+  return payload;
+}
+
+export function validateHyperlinksFile(payload: unknown, sourceUrl: string): HyperlinksFileLike {
+  if (!isPlainObject(payload)) {
+    throw new Error(`hyperlinks.json payload is invalid at ${sourceUrl}`);
+  }
+
+  const hyperlinks = payload['hyperlinks'];
+  if (!Array.isArray(hyperlinks)) {
+    throw new Error(`hyperlinks.json missing required hyperlinks at ${sourceUrl}`);
+  }
+
+  hyperlinks.forEach((item, index) => {
+    const entry = isPlainObject(item) ? (item as HyperlinkEntryLike) : null;
+    if (!entry || !readString(entry.label) || !readString(entry.url)) {
+      throw new Error(`hyperlinks.json entry ${index + 1} is missing a required label or url at ${sourceUrl}`);
+    }
+  });
 
   return payload;
 }

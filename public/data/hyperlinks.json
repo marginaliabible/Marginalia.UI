@@ -1,0 +1,16 @@
+{
+    "hyperlinks": [
+        {
+            "label": "Blue Letter Bible",
+            "url": "https://www.blueletterbible.org/{abbr_book}/{chapter}/{verse}/"
+        },
+        {
+            "label": "Bible Hub",
+            "url": "https://biblehub.com/{book_}/{chapter}-{verse}.htm"
+        },
+        {
+            "label": "Bible Gateway",
+            "url": "https://www.biblegateway.com/passage/?search={Book}%20{chapter}%3A{verse}"
+        }
+    ]
+}

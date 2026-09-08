@@ -47,6 +47,7 @@ import {
   type SourceLibraryRecord,
   type SourceArtifactSummary,
 } from './services/bibleService';
+import { hyperlinkService } from './services/hyperlinkService';
 import { hasValidGitHubAuthSession } from './services/githubPrivateSourceService';
 import type { QuickJumpTarget } from './models/bible';
 import {
@@ -752,6 +753,7 @@ function App() {
     const nextSourceUrls = Array.from(new Set([...sourceUrls, normalizedUrl])).filter((entry) => entry.length > 0);
 
     dispatch(addSourceUrl(normalizedUrl));
+    hyperlinkService.invalidate();
     await dispatch(refreshTranslations(true));
     setSourceArtifactInventory(null);
     await refreshSourceArtifactSummary(nextSourceUrls);
@@ -769,6 +771,7 @@ function App() {
       .filter((id) => id !== 'KJV');
 
     dispatch(removeSourceUrl(normalizedUrl));
+    await hyperlinkService.purgeSource(normalizedUrl);
 
     if (affectedIds.length > 0) {
       await bibleService.purgeTranslations(affectedIds);

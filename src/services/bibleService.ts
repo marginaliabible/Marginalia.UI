@@ -33,6 +33,7 @@ import {
   validateLibraryFile,
   validateResourcesFile,
   validateTranslationsFile,
+  validateHyperlinksFile,
   type LibraryFileLike,
   type ResourcesFileLike,
   type SourceFileKind,
@@ -56,6 +57,17 @@ interface BibleDB extends DBSchema {
     key: string;
     value: StoredResourceLibrary;
   };
+  hyperlinkSets: {
+    key: string;
+    value: StoredHyperlinkSet;
+  };
+}
+
+interface StoredHyperlinkSet {
+  sourceUrl: string;
+  entries: Array<{ label: string; url: string }>;
+  modifiedOn?: string;
+  fetchedAt: number;
 }
 
 interface StoredBible {
@@ -476,6 +488,11 @@ class BibleService {
     return this.resourceLibraryService.getSourceArtifactSummary(sourceUrls);
   }
 
+  // Shared connection so sibling services do not race the version upgrade.
+  async openDatabase(): Promise<IDBPDatabase<any>> {
+    return this.getDatabase();
+  }
+
   async getSourceArtifactStatus(sourceUrls: string[] = []): Promise<SourceArtifactStatus> {
     return this.resourceLibraryService.getSourceArtifactStatus(sourceUrls);
   }
@@ -550,6 +567,16 @@ class BibleService {
 
       const parsed = await this.parseSourcePayload(normalizedSourceUrl, payloadResult.payload);
 
+      if (parsed.kind === 'hyperlinks') {
+        const hyperlinks = (payloadResult.payload as { hyperlinks?: unknown[] }).hyperlinks ?? [];
+        return {
+          ok: true,
+          kind: parsed.kind,
+          translationCount: 0,
+          message: `Hyperlinks source accepted (${hyperlinks.length} link template${hyperlinks.length === 1 ? '' : 's'})`,
+        };
+      }
+
       if (parsed.kind === 'library' || parsed.kind === 'translations') {
         return {
           ok: true,
@@ -580,7 +607,7 @@ class BibleService {
         return {
           ok: false,
           code: 'invalid-payload',
-          message: 'Invalid payload format. Use library.json, translations.json, resources.json, or a direct translation JSON.',
+          message: 'Invalid payload format. Use library.json, translations.json, resources.json, hyperlinks.json, or a direct translation JSON.',
         };
       }
 
@@ -954,6 +981,12 @@ class BibleService {
       return parsed;
     }
 
+    if (kind === 'hyperlinks') {
+      // Templates are cached by hyperlinkService; this path only validates and claims the kind.
+      validateHyperlinksFile(payload, sourceUrl);
+      return { kind, entries: [], extraLanguages: [] };
+    }
+
     throw new Error(`${sourceUrl} is not a supported source payload`);
   }
 
@@ -966,6 +999,7 @@ class BibleService {
     const sourceAddresses = explicitSources.length > 0 ? explicitSources : ['resources.json', 'translations.json'];
     const entries: TranslationSettingsEntry[] = [];
     const extraLanguages = new Map<string, ExtraLanguageMeta>();
+    let parsedChildCount = 0;
 
     for (const address of sourceAddresses) {
       const childUrl = resolveAddress(address, sourceUrl);
@@ -978,6 +1012,7 @@ class BibleService {
       }
 
       const parsed = await this.parseSourcePayload(childUrl, payloadResult.payload, options);
+      parsedChildCount += 1;
       const parentDocumentStoreAddress = readString(library.documentStoreAddress);
       entries.push(
         ...parsed.entries.map((entry) => (
@@ -991,7 +1026,7 @@ class BibleService {
       }
     }
 
-    if (entries.length === 0) {
+    if (entries.length === 0 && parsedChildCount === 0) {
       throw new Error(`${sourceUrl} did not provide any resources.json or translations.json sources`);
     }
 
@@ -1474,7 +1509,7 @@ class BibleService {
 
   private async getDatabase(): Promise<IDBPDatabase<BibleDB>> {
     if (!this.dbPromise) {
-      this.dbPromise = openDB<BibleDB>('marginalia-db', 4, {
+      this.dbPromise = openDB<BibleDB>('marginalia-db', 5, {
         upgrade(db) {
           if (!db.objectStoreNames.contains('translations')) {
             db.createObjectStore('translations');
@@ -1490,6 +1525,10 @@ class BibleService {
 
           if (!db.objectStoreNames.contains('resourceLibraries')) {
             db.createObjectStore('resourceLibraries');
+          }
+
+          if (!db.objectStoreNames.contains('hyperlinkSets')) {
+            db.createObjectStore('hyperlinkSets');
           }
         }
       });
