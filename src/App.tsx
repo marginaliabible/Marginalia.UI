@@ -126,6 +126,7 @@ function App() {
     availableTranslations,
     extraLanguages,
     currentBible,
+    loadedTranslations,
     isLoading,
     error,
     tabs,
@@ -141,6 +142,7 @@ function App() {
     selectedBook,
     selectedChapter,
     selectedVerses,
+    selectedVerseTranslationId,
     selectedLanguages,
     sourceUrls,
     resourceHiddenTags,
@@ -185,11 +187,19 @@ function App() {
   }, []);
 
   const handleCopySelectedVerses = useCallback(async () => {
-    if (!currentBible || !selectedBook) {
+    if (!selectedBook) {
       return;
     }
 
-    const book = currentBible.books.find((entry) => entry.name === selectedBook);
+    // Copy from the translation column the selection came from, not the primary translation.
+    const sourceBible = (selectedVerseTranslationId
+      ? loadedTranslations[selectedVerseTranslationId]
+      : null) ?? currentBible;
+    if (!sourceBible) {
+      return;
+    }
+
+    const book = sourceBible.books.find((entry) => entry.name === selectedBook);
     const chapter = book?.chapters.find((entry) => entry.chapter === selectedChapter);
     if (!book || !chapter) {
       return;
@@ -313,7 +323,7 @@ function App() {
     fallback.select();
     document.execCommand('copy');
     document.body.removeChild(fallback);
-  }, [currentBible, selectedBook, selectedChapter, selectedVerses]);
+  }, [currentBible, loadedTranslations, selectedBook, selectedChapter, selectedVerses, selectedVerseTranslationId]);
 
   // Ctrl/Cmd+K to focus search input; Ctrl+C to copy selected verses from the focused main pane.
   useEffect(() => {
