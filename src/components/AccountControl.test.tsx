@@ -48,7 +48,12 @@ jest.mock('../services/federatedAuthService', () => ({
     delete sessions[provider];
     return sessions;
   }),
+  revokeStoredRefreshToken: jest.fn(),
   writeStoredSessions: jest.fn(),
+}));
+
+jest.mock('../services/cloudControlService', () => ({
+  queueCloudFolderSelection: jest.fn(),
 }));
 
 jest.mock('../services/cloudConfigProviderService', () => ({

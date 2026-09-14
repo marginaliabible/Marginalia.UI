@@ -5,6 +5,53 @@ import { isSupportedMarkupFileName } from '../utils/supportedMarkupFileTypes';
 const GOOGLE_APPDATA_FILENAME = 'marginalia-config.json';
 const MICROSOFT_CONFIG_PATH = 'marginalia-config.json';
 
+const GOOGLE_DRIVE_API_BASE = 'https://www.googleapis.com/drive/v3';
+const GOOGLE_DRIVE_UPLOAD_API_BASE = 'https://www.googleapis.com/upload/drive/v3';
+const MICROSOFT_GRAPH_DRIVE_API_BASE = 'https://graph.microsoft.com/v1.0/me/drive';
+
+function googleDriveFilesUrl(query?: URLSearchParams | string): string {
+  const suffix = typeof query === 'string'
+    ? (query.startsWith('?') || query.startsWith('/') ? query : `?${query}`)
+    : query
+      ? `?${query.toString()}`
+      : '';
+  return `${GOOGLE_DRIVE_API_BASE}/files${suffix}`;
+}
+
+function googleDriveFileUrl(fileId: string, query?: string): string {
+  const encodedId = encodeURIComponent(fileId);
+  return query
+    ? `${GOOGLE_DRIVE_API_BASE}/files/${encodedId}?${query}`
+    : `${GOOGLE_DRIVE_API_BASE}/files/${encodedId}`;
+}
+
+function googleDriveUploadFileUrl(fileId?: string): string {
+  return fileId
+    ? `${GOOGLE_DRIVE_UPLOAD_API_BASE}/files/${encodeURIComponent(fileId)}?uploadType=multipart`
+    : `${GOOGLE_DRIVE_UPLOAD_API_BASE}/files?uploadType=multipart`;
+}
+
+function microsoftDriveChildrenUrl(parentId: string = 'root', select?: string): string {
+  const base = parentId === 'root'
+    ? `${MICROSOFT_GRAPH_DRIVE_API_BASE}/root/children`
+    : `${MICROSOFT_GRAPH_DRIVE_API_BASE}/items/${encodeURIComponent(parentId)}/children`;
+  return select ? `${base}?$select=${select}` : base;
+}
+
+function microsoftDriveItemUrl(itemId: string, select?: string): string {
+  const base = `${MICROSOFT_GRAPH_DRIVE_API_BASE}/items/${encodeURIComponent(itemId)}`;
+  return select ? `${base}?$select=${select}` : base;
+}
+
+function microsoftDriveSpecialUrl(specialFolder: string, select?: string): string {
+  const base = `${MICROSOFT_GRAPH_DRIVE_API_BASE}/special/${specialFolder}`;
+  return select ? `${base}?$select=${select}` : base;
+}
+
+function microsoftDriveApprootContentUrl(relativePath: string): string {
+  return `${MICROSOFT_GRAPH_DRIVE_API_BASE}/special/approot:/${encodeURIComponent(relativePath)}:/content`;
+}
+
 export interface CloudSyncTargetOption {
   id: string;
   kind: 'file' | 'folder';
@@ -100,7 +147,7 @@ function toUniqueLinkedAccounts(accounts: LinkedCloudAccount[]): LinkedCloudAcco
 
 async function fetchGoogleConfigFileId(accessToken: string): Promise<string | null> {
   const query = encodeURIComponent(`name = '${GOOGLE_APPDATA_FILENAME}' and trashed = false`);
-  const url = `https://www.googleapis.com/drive/v3/files?q=${query}&spaces=appDataFolder&fields=files(id,name)&pageSize=1`;
+  const url = googleDriveFilesUrl(`q=${query}&spaces=appDataFolder&fields=files(id,name)&pageSize=1`);
   const response = await fetch(url, {
     headers: {
       Authorization: `Bearer ${accessToken}`,
@@ -122,7 +169,7 @@ async function readGoogleConfig(session: FederatedSession): Promise<SyncedCloudC
     return null;
   }
 
-  const response = await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?alt=media`, {
+  const response = await fetch(googleDriveFileUrl(fileId, 'alt=media'), {
     headers: {
       Authorization: `Bearer ${session.accessToken}`,
     },
@@ -184,9 +231,7 @@ async function writeGoogleConfig(session: FederatedSession, payload: SyncedCloud
   const isUpdate = Boolean(existingFileId);
   const body = createGoogleMultipartBody(payload, boundary, { includeParents: !isUpdate });
   const method = isUpdate ? 'PATCH' : 'POST';
-  const base = isUpdate
-    ? `https://www.googleapis.com/upload/drive/v3/files/${encodeURIComponent(existingFileId as string)}?uploadType=multipart`
-    : 'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart';
+  const base = googleDriveUploadFileUrl(isUpdate ? existingFileId as string : undefined);
 
   const response = await fetch(base, {
     method,
@@ -204,7 +249,7 @@ async function writeGoogleConfig(session: FederatedSession, payload: SyncedCloud
 }
 
 async function readMicrosoftConfig(session: FederatedSession): Promise<SyncedCloudConfig | null> {
-  const url = `https://graph.microsoft.com/v1.0/me/drive/special/approot:/${encodeURIComponent(MICROSOFT_CONFIG_PATH)}:/content`;
+  const url = microsoftDriveApprootContentUrl(MICROSOFT_CONFIG_PATH);
   const response = await fetch(url, {
     headers: {
       Authorization: `Bearer ${session.accessToken}`,
@@ -231,7 +276,7 @@ async function readMicrosoftConfig(session: FederatedSession): Promise<SyncedClo
 }
 
 async function writeMicrosoftConfig(session: FederatedSession, payload: SyncedCloudConfig): Promise<void> {
-  const url = `https://graph.microsoft.com/v1.0/me/drive/special/approot:/${encodeURIComponent(MICROSOFT_CONFIG_PATH)}:/content`;
+  const url = microsoftDriveApprootContentUrl(MICROSOFT_CONFIG_PATH);
   const response = await fetch(url, {
     method: 'PUT',
     headers: {
@@ -248,7 +293,7 @@ async function writeMicrosoftConfig(session: FederatedSession, payload: SyncedCl
 }
 
 async function listGoogleCloudSyncTargets(session: FederatedSession): Promise<CloudSyncTargetOption[]> {
-  const url = 'https://www.googleapis.com/drive/v3/files?fields=files(id,name,mimeType)&q=trashed=false&pageSize=100';
+  const url = googleDriveFilesUrl('fields=files(id,name,mimeType)&q=trashed=false&pageSize=100');
   const response = await fetch(url, {
     headers: {
       Authorization: `Bearer ${session.accessToken}`,
@@ -278,10 +323,7 @@ async function listMicrosoftCloudSyncTargets(
   session: FederatedSession,
   parentId: string = 'root'
 ): Promise<CloudSyncTargetOption[]> {
-  const base = parentId === 'root'
-    ? 'https://graph.microsoft.com/v1.0/me/drive/root/children'
-    : `https://graph.microsoft.com/v1.0/me/drive/items/${encodeURIComponent(parentId)}/children`;
-  const url = `${base}?$select=id,name,folder,file`;
+  const url = microsoftDriveChildrenUrl(parentId, 'id,name,folder,file');
   const response = await fetch(url, {
     headers: {
       Authorization: `Bearer ${session.accessToken}`,
@@ -327,7 +369,7 @@ async function listGoogleFolderChildren(
       params.set('pageToken', pageToken);
     }
 
-    const response = await fetch(`https://www.googleapis.com/drive/v3/files?${params.toString()}`, {
+    const response = await fetch(googleDriveFilesUrl(params), {
       headers: {
         Authorization: `Bearer ${session.accessToken}`,
       },
@@ -381,9 +423,7 @@ async function listMicrosoftFolderChildren(
   parentId: string
 ): Promise<CloudFolderEntry[]> {
   const seenById = new Set<string>();
-  let nextUrl = parentId === 'root'
-    ? 'https://graph.microsoft.com/v1.0/me/drive/root/children?$select=id,name,folder,file,size,remoteItem'
-    : `https://graph.microsoft.com/v1.0/me/drive/items/${encodeURIComponent(parentId)}/children?$select=id,name,folder,file,size,remoteItem`;
+  let nextUrl = microsoftDriveChildrenUrl(parentId, 'id,name,folder,file,size,remoteItem');
   const allFolders: CloudFolderEntry[] = [];
 
   while (nextUrl) {
@@ -449,7 +489,7 @@ async function listMicrosoftFolderChildren(
   }
 
   if (parentId === 'root' && !allFolders.some((entry) => entry.kind === 'folder' && entry.name.trim().toLowerCase() === 'documents')) {
-    const specialDocumentsResponse = await fetch('https://graph.microsoft.com/v1.0/me/drive/special/documents?$select=id,name,folder,size', {
+    const specialDocumentsResponse = await fetch(microsoftDriveSpecialUrl('documents', 'id,name,folder,size'), {
       headers: {
         Authorization: `Bearer ${session.accessToken}`,
       },
@@ -499,7 +539,7 @@ async function readMicrosoftFolderLineage(
     seenIds.add(currentId);
 
     const response = await fetch(
-      `https://graph.microsoft.com/v1.0/me/drive/items/${encodeURIComponent(currentId)}?$select=id,name,size,folder,parentReference`,
+      microsoftDriveItemUrl(currentId, 'id,name,size,folder,parentReference'),
       {
         headers: {
           Authorization: `Bearer ${session.accessToken}`,

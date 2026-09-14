@@ -10,6 +10,7 @@ import {
   getMostRecentlyGrantedSession,
   getStoredFederatedSessions,
   removeStoredFederatedSession,
+  revokeStoredRefreshToken,
   type FederatedSession,
 } from '../services/federatedAuthService';
 import {
@@ -18,6 +19,7 @@ import {
   writeCloudConfigForSession,
   type SyncedCloudConfig,
 } from '../services/cloudConfigProviderService';
+import { queueCloudFolderSelection } from '../services/cloudControlService';
 import type { FederatedProvider, LinkedCloudAccount, MarginaliaState } from '../models/bible';
 import CloudFolderPicker, { type FolderSelectionTarget } from './CloudFolderPicker';
 import './AccountControl.scss';
@@ -930,6 +932,7 @@ const AccountControl: React.FC = () => {
 
     const nextSessions = removeStoredFederatedSession(provider);
     setSessions(nextSessions);
+    void revokeStoredRefreshToken(provider);
 
     persistCloudState({
       cloudLinkedAccounts: nextLinked,
@@ -966,6 +969,7 @@ const AccountControl: React.FC = () => {
   }, [focusFileSyncService, providerSessionByType]);
 
   const handleApplyFolderSelections = useCallback((nextSelections: Record<FederatedProvider, FolderSelectionTarget[]>) => {
+    const previousSelections = providerSyncPreferences;
     setProviderSyncPreferences((current) => ({
       ...current,
       google: {
@@ -1003,7 +1007,67 @@ const AccountControl: React.FC = () => {
     // Push the updated folder selections to the cloud right away instead of waiting on the debounced autosync.
     setConfigUpdatedAt(Date.now());
     setForceSyncRequestId((current) => current + 1);
-  }, []);
+
+    const userId = String((bibleService.readState() as MarginaliaState).userId ?? '').trim();
+    if (!userId) {
+      return;
+    }
+
+    void Promise.all(PROVIDERS.map(async (provider) => {
+      const next = nextSelections[provider];
+      const previous = previousSelections[provider];
+      if (!previous.syncFiles) {
+        // File sync is not enabled for this provider; cloud settings sync still updates via forceSync.
+        return;
+      }
+
+      const previousIds = new Set(previous.selectedTargets.map((target) => target.id));
+      const nextIds = new Set(next.map((target) => target.id));
+      const excluded = next.flatMap((target) => target.excludedItemIds || []);
+      const tags = next.flatMap((target) => target.tags || []);
+      const itemTags: Record<string, string[]> = {};
+      for (const target of next) {
+        for (const [itemId, itemTagList] of Object.entries(target.itemTags || {})) {
+          if (!Array.isArray(itemTagList) || itemTagList.length === 0) {
+            continue;
+          }
+          itemTags[itemId] = [...new Set([...(itemTags[itemId] || []), ...itemTagList.map(String)])];
+        }
+      }
+
+      const selectionChanged = previous.selectedTargets.length !== next.length
+        || [...previousIds].some((id) => !nextIds.has(id))
+        || [...nextIds].some((id) => !previousIds.has(id))
+        || JSON.stringify(previous.selectedTargets.map((target) => ({
+          id: target.id,
+          excludedItemIds: [...(target.excludedItemIds || [])].sort(),
+          tags: [...(target.tags || [])].sort(),
+          itemTags: target.itemTags || {},
+        }))) !== JSON.stringify(next.map((target) => ({
+          id: target.id,
+          excludedItemIds: [...(target.excludedItemIds || [])].sort(),
+          tags: [...(target.tags || [])].sort(),
+          itemTags: target.itemTags || {},
+        })));
+
+      if (!selectionChanged) {
+        return;
+      }
+
+      await queueCloudFolderSelection({
+        userId,
+        provider,
+        selectedFolders: next.map((target) => target.id),
+        excluded: [...new Set(excluded)],
+        removed: [...previousIds].filter((id) => !nextIds.has(id)),
+        tags: [...new Set(tags)],
+        itemTags,
+        accessToken: providerSessionByType[provider]?.accessToken,
+      });
+    })).catch((error: unknown) => {
+      setStatusMessage(error instanceof Error ? error.message : String(error));
+    });
+  }, [providerSessionByType, providerSyncPreferences]);
 
   const handleProviderAction = useCallback((provider: FederatedProvider) => {
     const connected = isProviderConnected(provider);

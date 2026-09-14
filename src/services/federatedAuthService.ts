@@ -1,7 +1,16 @@
 import type { FederatedProvider } from '../models/bible';
+import { bibleService } from './bibleService';
 
 const SESSIONS_STORAGE_KEY = 'marginalia:federated-auth:sessions';
 const PENDING_STORAGE_KEY = 'marginalia:federated-auth:pending';
+
+function readCurrentUserId(): string {
+  try {
+    return String(bibleService.readState().userId ?? '').trim();
+  } catch {
+    return '';
+  }
+}
 
 interface PendingAuthRequest {
   provider: FederatedProvider;
@@ -310,7 +319,7 @@ function readStoredSessions(): StoredFederatedSessions {
       delete session.refreshToken;
     }
 
-    if (Date.now() >= session.expiresAt && !session.refreshToken) {
+    if (Date.now() >= session.expiresAt && !session.refreshToken && !readCurrentUserId()) {
       continue;
     }
 
@@ -503,6 +512,7 @@ async function exchangeGoogleCode(
       codeVerifier,
       redirectUri,
       clientId,
+      userId: readCurrentUserId() || undefined,
     }),
   });
 
@@ -538,6 +548,7 @@ async function exchangeMicrosoftCode(
       redirectUri,
       origin: typeof window !== 'undefined' ? window.location.origin : undefined,
       clientId,
+      userId: readCurrentUserId() || undefined,
     }),
   });
 
@@ -567,7 +578,8 @@ async function refreshProviderToken(
     },
     body: JSON.stringify({
       provider,
-      refreshToken,
+      refreshToken: refreshToken || undefined,
+      userId: readCurrentUserId() || undefined,
       origin: provider === 'microsoft' && typeof window !== 'undefined' ? window.location.origin : undefined,
       clientId,
     }),
@@ -580,6 +592,55 @@ async function refreshProviderToken(
   }
 
   return (await response.json()) as GoogleTokenResponse | MicrosoftTokenResponse;
+}
+
+async function persistRefreshToken(
+  provider: FederatedProvider,
+  userId: string,
+  refreshToken: string
+): Promise<boolean> {
+  const lambdaBaseUrl = readAwsLambdaBaseUrl();
+  if (!lambdaBaseUrl || !userId) {
+    return false;
+  }
+
+  try {
+    const endpoint = new URL(lambdaBaseUrl);
+    endpoint.pathname = `${endpoint.pathname.replace(/\/$/, '')}/oauth/token-store`;
+    const response = await fetch(endpoint.toString(), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ provider, userId, refreshToken }),
+    });
+
+    if (!response.ok) {
+      return false;
+    }
+
+    return Boolean(((await response.json()) as { stored?: boolean }).stored);
+  } catch {
+    return false;
+  }
+}
+
+export async function revokeStoredRefreshToken(provider: FederatedProvider): Promise<void> {
+  const lambdaBaseUrl = readAwsLambdaBaseUrl();
+  const userId = readCurrentUserId();
+  if (!lambdaBaseUrl || !userId) {
+    return;
+  }
+
+  try {
+    const endpoint = new URL(lambdaBaseUrl);
+    endpoint.pathname = `${endpoint.pathname.replace(/\/$/, '')}/oauth/token-revoke`;
+    await fetch(endpoint.toString(), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ provider, userId }),
+    });
+  } catch {
+    // Local sign-out proceeds even when the broker cannot be reached.
+  }
 }
 
 export function getStoredFederatedSessions(): StoredFederatedSessions {
@@ -602,14 +663,14 @@ export async function getFreshFederatedSessions(): Promise<StoredFederatedSessio
       continue;
     }
 
-    if (!existing.refreshToken) {
+    if (!existing.refreshToken && !readCurrentUserId()) {
       delete sessions[provider];
       changed = true;
       continue;
     }
 
     try {
-      const refreshed = await refreshProviderToken(provider, existing.refreshToken, readClientId(provider));
+      const refreshed = await refreshProviderToken(provider, existing.refreshToken ?? '', readClientId(provider));
       const now = Date.now();
 
       sessions[provider] = {
@@ -760,11 +821,21 @@ export async function completeFederatedAuthorizationFromUrl(): Promise<OAuthCall
       ? await fetchGoogleProfile(tokenPayload.access_token)
       : await fetchMicrosoftProfile(tokenPayload.access_token);
 
+    // The broker keeps the refresh token when it can identify the user; otherwise hand it over now
+    // (first link, before a user ID exists) so the browser never has to retain a long-lived credential.
+    let retainedRefreshToken = tokenPayload.refresh_token;
+    if (retainedRefreshToken) {
+      const storeUserId = readCurrentUserId() || profile.email || profile.providerAccountId;
+      if (await persistRefreshToken(pending.provider, storeUserId, retainedRefreshToken)) {
+        retainedRefreshToken = undefined;
+      }
+    }
+
     const now = Date.now();
     const session: FederatedSession = {
       provider: pending.provider,
       accessToken: tokenPayload.access_token,
-      refreshToken: tokenPayload.refresh_token,
+      refreshToken: retainedRefreshToken,
       grantedAt: now,
       expiresAt: now + Math.max(300, tokenPayload.expires_in) * 1000,
       scope: tokenPayload.scope,
