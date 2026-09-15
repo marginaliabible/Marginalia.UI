@@ -1,6 +1,7 @@
 import React from 'react';
-import { useAppDispatch } from '../store/hooks';
+import { useAppDispatch, useAppSelector } from '../store/hooks';
 import { setActiveTab, closeTab } from '../store/slices/bibleSlice';
+import { resolveSelectedVerseContext } from '../utils/selectedVerseContext';
 import type { PanelTab } from '../models/tab';
 
 interface MobilePanelTabStripProps {
@@ -17,6 +18,8 @@ const MobilePanelTabStrip: React.FC<MobilePanelTabStripProps> = ({
   onToggle,
 }) => {
   const dispatch = useAppDispatch();
+  const { selectedBook, selectedChapter, selectedVerses } = useAppSelector((state) => state.ui);
+  const selectedVerseContext = resolveSelectedVerseContext(selectedBook, selectedChapter, selectedVerses);
 
   return (
     <div className={`mobile-panel-tab-strip ${isMobilePanelOpen ? 'is-open' : 'is-collapsed'}`}>
@@ -39,7 +42,10 @@ const MobilePanelTabStrip: React.FC<MobilePanelTabStripProps> = ({
             className={`mobile-panel-vtab${tab.id === activeTabId ? ' is-active' : ''}`}
             aria-label={tab.title}
             onClick={() => {
-              dispatch(setActiveTab(tab.id));
+              dispatch(setActiveTab({
+                tabId: tab.id,
+                verseContext: selectedVerseContext,
+              }));
             }}
           >
             <span
@@ -51,14 +57,20 @@ const MobilePanelTabStrip: React.FC<MobilePanelTabStripProps> = ({
               onClick={(event) => {
                 if (tab.id !== activeTabId) return;
                 event.stopPropagation();
-                dispatch(closeTab(tab.id));
+                dispatch(closeTab({
+                  tabId: tab.id,
+                  verseContext: selectedVerseContext,
+                }));
               }}
               onKeyDown={(event) => {
                 if (tab.id !== activeTabId) return;
                 if (event.key === 'Enter' || event.key === ' ') {
                   event.preventDefault();
                   event.stopPropagation();
-                  dispatch(closeTab(tab.id));
+                  dispatch(closeTab({
+                    tabId: tab.id,
+                    verseContext: selectedVerseContext,
+                  }));
                 }
               }}
             >

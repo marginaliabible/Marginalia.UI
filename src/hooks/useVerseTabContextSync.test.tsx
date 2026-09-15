@@ -13,6 +13,7 @@ import { Provider } from 'react-redux';
 import bibleReducer, {
   createDeferredSearchTab,
   openVerseTabs,
+  setActiveTab,
 } from '../store/slices/bibleSlice';
 import uiReducer, {
   clearVerseSelection,
@@ -69,8 +70,9 @@ describe('useVerseTabContextSync', () => {
     expect(verseTabs.every((tab) => tab.verseContext === undefined)).toBe(true);
   });
 
-  it('updates verse panel context when the route changes to a verse in the new chapter', () => {
+  it('updates only the active verse panel when the route changes to a verse in the new chapter', () => {
     const store = mountAtGenesis1();
+    const activeTabId = store.getState().bible.activeTabId;
 
     act(() => {
       store.dispatch(setSelectedChapter(2));
@@ -81,14 +83,16 @@ describe('useVerseTabContextSync', () => {
       }));
     });
 
-    const verseTabs = store.getState().bible.tabs.filter((tab) => (
+    const tabs = store.getState().bible.tabs;
+    const activeTab = tabs.find((tab) => tab.id === activeTabId);
+    const inactiveTabs = tabs.filter((tab) => (
       verseTabTypes.includes(tab.type as typeof verseTabTypes[number])
+      && tab.id !== activeTabId
     ));
-    expect(verseTabs.every((tab) => (
-      tab.verseContext?.book === 'Genesis'
-      && tab.verseContext?.chapter === 2
-      && tab.verseContext?.verse === 3
-    ))).toBe(true);
+
+    expect(activeTab?.type).toBe('resources');
+    expect(activeTab?.verseContext).toEqual({ book: 'Genesis', chapter: 2, verse: 3 });
+    expect(inactiveTabs.every((tab) => tab.verseContext === undefined)).toBe(true);
   });
 
   it('does not clear verse context when only the selected verse changes in the same chapter', () => {
@@ -108,10 +112,10 @@ describe('useVerseTabContextSync', () => {
       }));
     });
 
-    const verseTabs = store.getState().bible.tabs.filter((tab) => (
-      verseTabTypes.includes(tab.type as typeof verseTabTypes[number])
+    const activeTab = store.getState().bible.tabs.find((tab) => (
+      tab.id === store.getState().bible.activeTabId
     ));
-    expect(verseTabs.every((tab) => tab.verseContext?.verse === 4)).toBe(true);
+    expect(activeTab?.verseContext?.verse).toBe(4);
   });
 
   it('leaves deferred search tabs unpopulated when chapter changes', () => {
@@ -130,5 +134,39 @@ describe('useVerseTabContextSync', () => {
     expect(searchTabs).toHaveLength(1);
     expect(searchTabs[0].title).toBe('light');
     expect(searchTabs[0].searchResults).toBeUndefined();
+  });
+
+  it('keeps inactive verse tabs on their prior context until they are displayed', () => {
+    const store = mountAtGenesis1();
+    const translationsTab = store.getState().bible.tabs.find((tab) => tab.type === 'translations');
+
+    act(() => {
+      store.dispatch(setActiveTab({
+        tabId: translationsTab!.id,
+        verseContext: { book: 'Genesis', chapter: 1, verse: 1 },
+      }));
+      store.dispatch(setActiveTab({
+        tabId: store.getState().bible.tabs.find((tab) => tab.type === 'resources')!.id,
+        verseContext: { book: 'Genesis', chapter: 1, verse: 1 },
+      }));
+      store.dispatch(setSelectedChapter(2));
+      store.dispatch(setVerseSelection({
+        translationId: 'KJV',
+        verses: [9],
+        anchorVerse: 9,
+      }));
+    });
+
+    const tabs = store.getState().bible.tabs;
+    expect(tabs.find((tab) => tab.type === 'resources')?.verseContext).toEqual({
+      book: 'Genesis',
+      chapter: 2,
+      verse: 9,
+    });
+    expect(tabs.find((tab) => tab.type === 'translations')?.verseContext).toEqual({
+      book: 'Genesis',
+      chapter: 1,
+      verse: 1,
+    });
   });
 });

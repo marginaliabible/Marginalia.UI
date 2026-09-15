@@ -17,17 +17,9 @@ const LinksPanel: React.FC<LinksPanelProps> = ({ tab, isActive }) => {
   const [error, setError] = useState<string | null>(null);
   const [links, setLinks] = useState<ResolvedHyperlink[] | null>(null);
 
-  // Every tab body is mounted up front, so defer the first fetch until the tab is actually viewed.
-  const [hasBeenViewed, setHasBeenViewed] = useState(isActive);
-
   useEffect(() => {
-    if (isActive) {
-      setHasBeenViewed(true);
-    }
-  }, [isActive]);
-
-  useEffect(() => {
-    if (!hasBeenViewed) {
+    // Hidden tabs stay mounted; only populate while this tab is visible.
+    if (!isActive) {
       return;
     }
 
@@ -71,7 +63,7 @@ const LinksPanel: React.FC<LinksPanelProps> = ({ tab, isActive }) => {
     return () => {
       cancelled = true;
     };
-  }, [hasBeenViewed, verseContext, sourceUrls]);
+  }, [isActive, verseContext, sourceUrls]);
 
   if (!verseContext) {
     return <div className="links-panel-empty">Select a verse to see external links.</div>;

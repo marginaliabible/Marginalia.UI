@@ -8,9 +8,10 @@ import { getOrAssignResourceTagColors, TAG_COLOR_PALETTE } from '../utils/resour
 
 interface ResourcesPanelProps {
   tab: PanelTab;
+  isActive: boolean;
 }
 
-const ResourcesPanel: React.FC<ResourcesPanelProps> = ({ tab }) => {
+const ResourcesPanel: React.FC<ResourcesPanelProps> = ({ tab, isActive }) => {
   const verseContext = tab.verseContext as VerseContext | undefined;
   const dispatch = useAppDispatch();
   const { sourceUrls, resourceHiddenTags, pdfViewer } = useAppSelector((state) => state.ui);
@@ -28,6 +29,10 @@ const ResourcesPanel: React.FC<ResourcesPanelProps> = ({ tab }) => {
   }, []);
 
   useEffect(() => {
+    if (!isActive) {
+      return;
+    }
+
     let cancelled = false;
 
     const run = async () => {
@@ -77,7 +82,7 @@ const ResourcesPanel: React.FC<ResourcesPanelProps> = ({ tab }) => {
     return () => {
       cancelled = true;
     };
-  }, [verseContext, sourceUrls]);
+  }, [isActive, verseContext, sourceUrls]);
 
   const hiddenTags = useMemo(() => new Set(resourceHiddenTags), [resourceHiddenTags]);
 

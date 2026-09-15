@@ -158,6 +158,22 @@ const isVersePanelTab = (tab: PanelTab): boolean => (
   tab.type === 'translations' || tab.type === 'resources' || tab.type === 'links'
 );
 
+const applyVerseContextToTab = (
+  tab: PanelTab,
+  verseContext: { book: string; chapter: number; verse: number } | null,
+  now: number
+): void => {
+  if (verseContext) {
+    tab.verseContext = verseContext;
+  } else if (tab.verseContext) {
+    delete tab.verseContext;
+  } else {
+    return;
+  }
+
+  tab.updatedAt = now;
+};
+
 const applyVerseContextToVerseTabs = (
   state: BibleState,
   verseContext: { book: string; chapter: number; verse: number } | null
@@ -168,22 +184,26 @@ const applyVerseContextToVerseTabs = (
       continue;
     }
 
-    if (verseContext) {
-      tab.verseContext = verseContext;
-    } else if (tab.verseContext) {
-      delete tab.verseContext;
-    } else {
-      continue;
-    }
-
-    tab.updatedAt = now;
+    applyVerseContextToTab(tab, verseContext, now);
   }
+};
+
+const applyVerseContextToActiveVerseTab = (
+  state: BibleState,
+  verseContext: { book: string; chapter: number; verse: number } | null
+): void => {
+  const activeTab = state.tabs.find((tab) => tab.id === state.activeTabId);
+  if (!activeTab || !isVersePanelTab(activeTab)) {
+    return;
+  }
+
+  applyVerseContextToTab(activeTab, verseContext, Date.now());
 };
 
 const upsertVerseTab = (
   state: BibleState,
   type: 'translations' | 'resources' | 'links',
-  verseContext: { book: string; chapter: number; verse: number },
+  verseContext: { book: string; chapter: number; verse: number } | null,
   now: number
 ): PanelTab => {
   const existing = state.tabs.find((tab) => tab.type === type);
@@ -195,7 +215,9 @@ const upsertVerseTab = (
       : 'fa-solid fa-link';
 
   if (existing) {
-    existing.verseContext = verseContext;
+    if (verseContext) {
+      existing.verseContext = verseContext;
+    }
     existing.title = title;
     existing.iconClass = iconClass;
     existing.updatedAt = now;
@@ -207,10 +229,13 @@ const upsertVerseTab = (
     type,
     title,
     iconClass,
-    verseContext,
     createdAt: now,
     updatedAt: now,
   };
+
+  if (verseContext) {
+    created.verseContext = verseContext;
+  }
 
   state.tabs.push(created);
   return created;
@@ -373,8 +398,13 @@ const bibleSlice = createSlice({
       state.tabs[tabIndex] = updateSearchTab(state.tabs[tabIndex], searchResults, action.payload.translationIds);
       state.activeTabId = action.payload.tabId;
     },
-    setActiveTab: (state, action: PayloadAction<string>) => {
-      const target = state.tabs.find((tab) => tab.id === action.payload);
+    setActiveTab: (state, action: PayloadAction<string | {
+      tabId: string;
+      verseContext?: { book: string; chapter: number; verse: number } | null;
+    }>) => {
+      const tabId = typeof action.payload === 'string' ? action.payload : action.payload.tabId;
+      const verseContext = typeof action.payload === 'string' ? undefined : action.payload.verseContext;
+      const target = state.tabs.find((tab) => tab.id === tabId);
       if (!target) {
         return;
       }
@@ -383,10 +413,20 @@ const bibleSlice = createSlice({
         state.lastVersePanelType = target.type;
       }
 
-      state.activeTabId = action.payload;
+      state.activeTabId = tabId;
+
+      // When a verse panel becomes visible, bind it to the selected verse (or clear).
+      if (isVersePanelTab(target) && verseContext !== undefined) {
+        applyVerseContextToTab(target, verseContext, Date.now());
+      }
     },
-    closeTab: (state, action: PayloadAction<string>) => {
-      const closeIndex = state.tabs.findIndex((tab) => tab.id === action.payload);
+    closeTab: (state, action: PayloadAction<string | {
+      tabId: string;
+      verseContext?: { book: string; chapter: number; verse: number } | null;
+    }>) => {
+      const tabId = typeof action.payload === 'string' ? action.payload : action.payload.tabId;
+      const verseContext = typeof action.payload === 'string' ? undefined : action.payload.verseContext;
+      const closeIndex = state.tabs.findIndex((tab) => tab.id === tabId);
       if (closeIndex < 0) {
         return;
       }
@@ -407,6 +447,9 @@ const bibleSlice = createSlice({
       const fallbackTab = state.tabs[fallbackIndex];
       if (fallbackTab.type === 'translations' || fallbackTab.type === 'resources' || fallbackTab.type === 'links') {
         state.lastVersePanelType = fallbackTab.type;
+        if (verseContext !== undefined) {
+          applyVerseContextToTab(fallbackTab, verseContext, Date.now());
+        }
       }
     },
     setPanelDetached: (state, action: PayloadAction<{ detached: boolean; panelName?: string | null }>) => {
@@ -420,7 +463,9 @@ const bibleSlice = createSlice({
       state.activeTabId = null;
     },
     updateActiveVerseTabContext: (state, action: PayloadAction<{ book: string; chapter: number; verse: number }>) => {
-      applyVerseContextToVerseTabs(state, action.payload);
+      // Only the visible verse tab should react; inactive tabs keep their last rendered context
+      // until they are selected (see setActiveTab verseContext sync).
+      applyVerseContextToActiveVerseTab(state, action.payload);
     },
     clearVerseTabContexts: (state) => {
       applyVerseContextToVerseTabs(state, null);
@@ -430,18 +475,39 @@ const bibleSlice = createSlice({
       const now = Date.now();
       const verseContext = { book, chapter, verse };
 
-      const translationsTab = upsertVerseTab(state, 'translations', verseContext, now);
+      const preferredType = hasResources
+        ? state.lastVersePanelType
+        : state.lastVersePanelType === 'resources'
+          ? 'translations'
+          : state.lastVersePanelType;
+
+      // Ensure tabs exist, but only bind verseContext on the tab that will be shown.
+      const translationsTab = upsertVerseTab(
+        state,
+        'translations',
+        preferredType === 'translations' ? verseContext : null,
+        now
+      );
       let resourcesTab: PanelTab | null = null;
 
       if (hasResources) {
-        resourcesTab = upsertVerseTab(state, 'resources', verseContext, now);
+        resourcesTab = upsertVerseTab(
+          state,
+          'resources',
+          preferredType === 'resources' ? verseContext : null,
+          now
+        );
       } else {
         state.tabs = state.tabs.filter((tab) => tab.type !== 'resources');
       }
 
-      const linksTab = upsertVerseTab(state, 'links', verseContext, now);
+      const linksTab = upsertVerseTab(
+        state,
+        'links',
+        preferredType === 'links' ? verseContext : null,
+        now
+      );
 
-      const preferredType = hasResources ? state.lastVersePanelType : state.lastVersePanelType === 'resources' ? 'translations' : state.lastVersePanelType;
       if (preferredType === 'resources' && resourcesTab) {
         state.activeTabId = resourcesTab.id;
       } else if (preferredType === 'links') {

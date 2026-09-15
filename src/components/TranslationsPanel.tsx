@@ -5,6 +5,7 @@ import { bibleService } from '../services/bibleService';
 
 interface TranslationsPanelProps {
   tab: PanelTab;
+  isActive: boolean;
   translationRecords: TranslationRecord[];
   translationMetadataById: Map<string, BibleTranslationMeta>;
   addableTranslations: BibleTranslationMeta[];
@@ -16,6 +17,7 @@ interface TranslationsPanelProps {
 
 const TranslationsPanel: React.FC<TranslationsPanelProps> = ({
   tab,
+  isActive,
   translationRecords,
   translationMetadataById,
   addableTranslations,
@@ -42,6 +44,10 @@ const TranslationsPanel: React.FC<TranslationsPanelProps> = ({
   }, [addableTranslations, translationFilter]);
 
   useEffect(() => {
+    if (!isActive) {
+      return;
+    }
+
     let cancelled = false;
 
     const loadVerseTexts = async () => {
@@ -69,7 +75,7 @@ const TranslationsPanel: React.FC<TranslationsPanelProps> = ({
     return () => {
       cancelled = true;
     };
-  }, [verseContext, translationRecords]);
+  }, [isActive, verseContext, translationRecords]);
 
   const handleDragStart = (e: React.DragEvent<HTMLDivElement>, index: number) => {
     e.dataTransfer.effectAllowed = 'move';

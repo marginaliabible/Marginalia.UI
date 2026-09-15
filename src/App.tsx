@@ -20,6 +20,7 @@ import {
   setCurrentBibleFromId,
   removeLoadedTranslations,
 } from './store/slices/bibleSlice';
+import { resolveSelectedVerseContext } from './utils/selectedVerseContext';
 import {
   setSelectedTranslationId,
   setSelectedTranslationIds,
@@ -802,14 +803,20 @@ function App() {
   };
 
   const handleSelectTab = (tabId: string) => {
-    dispatch(setActiveTab(tabId));
+    dispatch(setActiveTab({
+      tabId,
+      verseContext: resolveSelectedVerseContext(selectedBook, selectedChapter, selectedVerses),
+    }));
     if (isPanelDetached) {
       focusDetachedPanel();
     }
   };
 
   const handleCloseTab = (tabId: string) => {
-    dispatch(closeTab(tabId));
+    dispatch(closeTab({
+      tabId,
+      verseContext: resolveSelectedVerseContext(selectedBook, selectedChapter, selectedVerses),
+    }));
   };
 
   const detachedSidePanelContentProps: React.ComponentProps<typeof DetachedPanelPortal>['sidePanelContentProps'] = {

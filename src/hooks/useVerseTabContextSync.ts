@@ -9,8 +9,9 @@ const isVersePanelTabType = (type: string): boolean => (
 const locationKeyFor = (book: string | null, chapter: number): string => `${book ?? ''}::${chapter}`;
 
 /**
- * Keep verse panel tabs aligned with the current book/chapter.
- * Search tabs and visibility-gated population are left untouched.
+ * Keep the active verse panel tab aligned with the current book/chapter.
+ * Inactive verse tabs keep their last context until selected; search tabs and
+ * visibility-gated population are left untouched.
  */
 export const useVerseTabContextSync = (): void => {
   const dispatch = useAppDispatch();

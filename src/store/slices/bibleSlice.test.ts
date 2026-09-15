@@ -8,6 +8,7 @@ jest.mock('../../services/searchIndexService', () => ({
 
 import reducer, {
   clearVerseTabContexts,
+  closeTab,
   createDeferredSearchTab,
   openVerseTabs,
   setActiveTab,
@@ -15,6 +16,7 @@ import reducer, {
 } from './bibleSlice';
 
 const genesisOneOne = { book: 'Genesis', chapter: 1, verse: 1 };
+const romansTenNine = { book: 'Romans', chapter: 10, verse: 9 };
 
 const verseTabTypes = ['translations', 'resources', 'links'] as const;
 
@@ -24,14 +26,18 @@ describe('bibleSlice verse tab context', () => {
     hasResources: true,
   }));
 
-  it('openVerseTabs stores the clicked verse on every verse panel tab', () => {
+  it('openVerseTabs binds the clicked verse only on the active verse panel tab', () => {
     const state = withVerseTabs();
-    const verseTabs = state.tabs.filter((tab) => verseTabTypes.includes(tab.type as typeof verseTabTypes[number]));
+    const activeTab = state.tabs.find((tab) => tab.id === state.activeTabId);
+    const inactiveTabs = state.tabs.filter((tab) => (
+      verseTabTypes.includes(tab.type as typeof verseTabTypes[number])
+      && tab.id !== state.activeTabId
+    ));
 
-    expect(verseTabs.map((tab) => tab.type).sort()).toEqual(['links', 'resources', 'translations']);
-    expect(verseTabs.every((tab) => tab.verseContext?.book === 'Genesis')).toBe(true);
-    expect(verseTabs.every((tab) => tab.verseContext?.chapter === 1)).toBe(true);
-    expect(verseTabs.every((tab) => tab.verseContext?.verse === 1)).toBe(true);
+    expect(activeTab?.type).toBe('resources');
+    expect(activeTab?.verseContext).toEqual(genesisOneOne);
+    expect(inactiveTabs.map((tab) => tab.type).sort()).toEqual(['links', 'translations']);
+    expect(inactiveTabs.every((tab) => tab.verseContext === undefined)).toBe(true);
   });
 
   it('clearVerseTabContexts removes verseContext from verse tabs and leaves search tabs untouched', () => {
@@ -52,23 +58,87 @@ describe('bibleSlice verse tab context', () => {
     expect(searchTabs[0].searchResults).toBeUndefined();
   });
 
-  it('updateActiveVerseTabContext updates every verse tab, not only the active one', () => {
+  it('updateActiveVerseTabContext updates only the active verse tab', () => {
     const opened = withVerseTabs();
     const linksTab = opened.tabs.find((tab) => tab.type === 'links');
+    const resourcesTab = opened.tabs.find((tab) => tab.type === 'resources');
     expect(linksTab).toBeDefined();
+    expect(resourcesTab).toBeDefined();
 
-    const withLinksActive = reducer(opened, setActiveTab(linksTab!.id));
-    const updated = reducer(withLinksActive, updateActiveVerseTabContext({
-      book: 'Psalms',
-      chapter: 23,
-      verse: 2,
+    const withLinksActive = reducer(opened, setActiveTab({
+      tabId: linksTab!.id,
+      verseContext: genesisOneOne,
+    }));
+    const updated = reducer(withLinksActive, updateActiveVerseTabContext(romansTenNine));
+
+    const links = updated.tabs.find((tab) => tab.type === 'links');
+    const resources = updated.tabs.find((tab) => tab.type === 'resources');
+    const translations = updated.tabs.find((tab) => tab.type === 'translations');
+
+    expect(links?.verseContext).toEqual(romansTenNine);
+    expect(resources?.verseContext).toEqual(genesisOneOne);
+    expect(translations?.verseContext).toBeUndefined();
+  });
+
+  it('setActiveTab applies the selected verse to a newly displayed verse tab', () => {
+    const opened = withVerseTabs();
+    const translationsTab = opened.tabs.find((tab) => tab.type === 'translations');
+    expect(translationsTab).toBeDefined();
+    expect(translationsTab?.verseContext).toBeUndefined();
+
+    const activated = reducer(opened, setActiveTab({
+      tabId: translationsTab!.id,
+      verseContext: romansTenNine,
     }));
 
-    const verseTabs = updated.tabs.filter((tab) => verseTabTypes.includes(tab.type as typeof verseTabTypes[number]));
-    expect(verseTabs.every((tab) => (
-      tab.verseContext?.book === 'Psalms'
-      && tab.verseContext?.chapter === 23
-      && tab.verseContext?.verse === 2
-    ))).toBe(true);
+    const translations = activated.tabs.find((tab) => tab.type === 'translations');
+    const resources = activated.tabs.find((tab) => tab.type === 'resources');
+
+    expect(activated.activeTabId).toBe(translationsTab!.id);
+    expect(translations?.verseContext).toEqual(romansTenNine);
+    expect(resources?.verseContext).toEqual(genesisOneOne);
+  });
+
+  it('openVerseTabs does not overwrite inactive tab verseContext when switching verses', () => {
+    const opened = withVerseTabs();
+    const translationsTab = opened.tabs.find((tab) => tab.type === 'translations');
+    const withTranslationsBound = reducer(opened, setActiveTab({
+      tabId: translationsTab!.id,
+      verseContext: genesisOneOne,
+    }));
+    const backToResources = reducer(withTranslationsBound, setActiveTab({
+      tabId: withTranslationsBound.tabs.find((tab) => tab.type === 'resources')!.id,
+      verseContext: genesisOneOne,
+    }));
+
+    const switched = reducer(backToResources, openVerseTabs({
+      ...romansTenNine,
+      hasResources: true,
+    }));
+
+    const resources = switched.tabs.find((tab) => tab.type === 'resources');
+    const translations = switched.tabs.find((tab) => tab.type === 'translations');
+
+    expect(switched.activeTabId).toBe(resources?.id);
+    expect(resources?.verseContext).toEqual(romansTenNine);
+    expect(translations?.verseContext).toEqual(genesisOneOne);
+  });
+
+  it('closeTab binds the selected verse onto a fallback verse tab', () => {
+    const opened = withVerseTabs();
+    const resourcesTab = opened.tabs.find((tab) => tab.type === 'resources');
+    const translationsTab = opened.tabs.find((tab) => tab.type === 'translations');
+    const withTranslations = reducer(opened, setActiveTab({
+      tabId: translationsTab!.id,
+      verseContext: genesisOneOne,
+    }));
+
+    const closed = reducer(withTranslations, closeTab({
+      tabId: translationsTab!.id,
+      verseContext: romansTenNine,
+    }));
+
+    expect(closed.activeTabId).toBe(resourcesTab!.id);
+    expect(closed.tabs.find((tab) => tab.type === 'resources')?.verseContext).toEqual(romansTenNine);
   });
 });

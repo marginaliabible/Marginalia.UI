@@ -125,6 +125,7 @@ const SidePanelContent: React.FC<SidePanelContentProps> = ({
             ) : tab.type === 'translations' ? (
               <TranslationsPanel
                 tab={tab}
+                isActive={tab.id === activeTabId}
                 translationRecords={translationRecords}
                 translationMetadataById={translationMetadataById}
                 addableTranslations={addableTranslations}
@@ -134,7 +135,7 @@ const SidePanelContent: React.FC<SidePanelContentProps> = ({
                 onReorder={onReorder}
               />
             ) : tab.type === 'resources' ? (
-              <ResourcesPanel tab={tab} />
+              <ResourcesPanel tab={tab} isActive={tab.id === activeTabId} />
             ) : tab.type === 'links' ? (
               <LinksPanel tab={tab} isActive={tab.id === activeTabId} />
             ) : null}
