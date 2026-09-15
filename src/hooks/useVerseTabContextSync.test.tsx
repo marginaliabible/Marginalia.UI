@@ -1,3 +1,11 @@
+jest.mock('../services/bibleService', () => ({
+  bibleService: {},
+}));
+
+jest.mock('../services/searchIndexService', () => ({
+  searchIndexService: {},
+}));
+
 import { configureStore } from '@reduxjs/toolkit';
 import { act, renderHook } from '@testing-library/react';
 import type { ReactNode } from 'react';

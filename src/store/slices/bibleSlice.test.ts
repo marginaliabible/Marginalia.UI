@@ -1,3 +1,11 @@
+jest.mock('../../services/bibleService', () => ({
+  bibleService: {},
+}));
+
+jest.mock('../../services/searchIndexService', () => ({
+  searchIndexService: {},
+}));
+
 import reducer, {
   clearVerseTabContexts,
   createDeferredSearchTab,
