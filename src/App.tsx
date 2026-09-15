@@ -67,6 +67,7 @@ import { useWorkspaceSplit } from './hooks/useWorkspaceSplit';
 import { usePopupPanel } from './hooks/usePopupPanel';
 import { useMobilePanelEffects } from './hooks/useMobilePanelEffects';
 import { useHashRouteSync } from './hooks/useHashRouteSync';
+import { useVerseTabContextSync } from './hooks/useVerseTabContextSync';
 import { beginGitHubAuthorization, initializeGitHubAuthFlow } from './services/githubAuthFlowService';
 import './App.scss';
 
@@ -524,6 +525,8 @@ function App() {
     selectedVerses,
   });
 
+  useVerseTabContextSync();
+
   const translationMetadataById = useMemo(
     () =>
       new Map(safeAvailableTranslations.map((translation) => [translation.id, translation] as const)),
@@ -632,15 +635,11 @@ function App() {
         verses: [target.verse],
         anchorVerse: target.verse,
       }));
-
-      const activeTab = tabs.find((tab) => tab.id === activeTabId);
-      if (activeTab && (activeTab.type === 'translations' || activeTab.type === 'resources')) {
-        dispatch(updateActiveVerseTabContext({
-          book: target.book,
-          chapter: target.chapter,
-          verse: target.verse,
-        }));
-      }
+      dispatch(updateActiveVerseTabContext({
+        book: target.book,
+        chapter: target.chapter,
+        verse: target.verse,
+      }));
     } else {
       dispatch(clearVerseSelection());
     }

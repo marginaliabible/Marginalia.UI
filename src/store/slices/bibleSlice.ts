@@ -154,6 +154,32 @@ const findActiveTabIndex = (state: BibleState): number => {
   return state.tabs.findIndex((tab) => tab.id === state.activeTabId);
 };
 
+const isVersePanelTab = (tab: PanelTab): boolean => (
+  tab.type === 'translations' || tab.type === 'resources' || tab.type === 'links'
+);
+
+const applyVerseContextToVerseTabs = (
+  state: BibleState,
+  verseContext: { book: string; chapter: number; verse: number } | null
+): void => {
+  const now = Date.now();
+  for (const tab of state.tabs) {
+    if (!isVersePanelTab(tab)) {
+      continue;
+    }
+
+    if (verseContext) {
+      tab.verseContext = verseContext;
+    } else if (tab.verseContext) {
+      delete tab.verseContext;
+    } else {
+      continue;
+    }
+
+    tab.updatedAt = now;
+  }
+};
+
 const upsertVerseTab = (
   state: BibleState,
   type: 'translations' | 'resources' | 'links',
@@ -394,17 +420,10 @@ const bibleSlice = createSlice({
       state.activeTabId = null;
     },
     updateActiveVerseTabContext: (state, action: PayloadAction<{ book: string; chapter: number; verse: number }>) => {
-      if (!state.activeTabId) {
-        return;
-      }
-
-      const activeTab = state.tabs.find((tab) => tab.id === state.activeTabId);
-      if (!activeTab || (activeTab.type !== 'translations' && activeTab.type !== 'resources' && activeTab.type !== 'links')) {
-        return;
-      }
-
-      activeTab.verseContext = action.payload;
-      activeTab.updatedAt = Date.now();
+      applyVerseContextToVerseTabs(state, action.payload);
+    },
+    clearVerseTabContexts: (state) => {
+      applyVerseContextToVerseTabs(state, null);
     },
     openVerseTabs: (state, action: PayloadAction<{ book: string; chapter: number; verse: number; hasResources: boolean }>) => {
       const { book, chapter, verse, hasResources } = action.payload;
@@ -493,6 +512,7 @@ export const {
   setPanelDetached,
   clearSearch,
   updateActiveVerseTabContext,
+  clearVerseTabContexts,
   openVerseTabs
 } = bibleSlice.actions;
 
