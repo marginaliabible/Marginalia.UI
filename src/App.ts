@@ -59,6 +59,18 @@ export const verseDomId = (book: string, chapter: number, verse: number): string
   return `${book.replace(/\s+/g, '_')}-${chapter}-${verse}`;
 };
 
+export const verseElementId = (
+  contentBook: string | null | undefined,
+  contentChapter: number | null | undefined,
+  verse: number
+): string | undefined => {
+  if (!contentBook || !contentChapter || contentChapter <= 0 || verse <= 0) {
+    return undefined;
+  }
+
+  return verseDomId(contentBook, contentChapter, verse);
+};
+
 export const buildHashRoute = (target: HashRouteTarget, includeVerse = false): string => {
   const safeBook = target.book.trim();
   const safeChapter = Math.max(1, Math.trunc(target.chapter));
@@ -167,23 +179,289 @@ export const detectPreferredTheme = (): ThemePreference => {
   return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
 };
 
-export const scrollToVerse = async (target: QuickJumpTarget): Promise<void> => {
+export interface ScrollToVerseOptions {
+  behavior?: ScrollBehavior;
+  block?: ScrollLogicalPosition;
+  followLayout?: boolean;
+}
+
+export const VERSE_REFERENCE_SCROLL_OPTIONS: ScrollToVerseOptions = {
+  behavior: 'auto',
+  block: 'nearest',
+  followLayout: true,
+};
+
+const VIEW_EPSILON_PX = 1;
+const HEADER_SCROLL_PADDING_PX = 8;
+const ELEMENT_WAIT_MS = 4000;
+const LAYOUT_FOLLOW_MS = 2500;
+const STABLE_VISIBLE_FRAMES = 3;
+const USER_SCROLL_KEYS = new Set(['PageUp', 'PageDown', 'Home', 'End', ' ']);
+
+type VerseScrollSession = {
+  id: number;
+  cancelled: boolean;
+  userInterrupted: boolean;
+  ignoreProgrammaticScroll: boolean;
+  rafIds: number[];
+  pendingFrameResolvers: Array<() => void>;
+  cleanupFns: Array<() => void>;
+};
+
+let verseScrollSessionId = 0;
+let activeVerseScrollSession: VerseScrollSession | null = null;
+
+const stickyHeaderBottom = (): number => {
+  const header = document.querySelector('.verse-grid-header');
+  if (!header) {
+    return 0;
+  }
+
+  const rect = header.getBoundingClientRect();
+  if (rect.height <= 0) {
+    return 0;
+  }
+
+  return Math.max(0, rect.bottom);
+};
+
+export const isElementFullyInView = (element: Element): boolean => {
+  const rect = element.getBoundingClientRect();
+  if (rect.width <= 0 && rect.height <= 0) {
+    return false;
+  }
+
+  const topBound = stickyHeaderBottom();
+  const bottomBound = window.innerHeight;
+  const available = bottomBound - topBound;
+  if (available <= 0) {
+    return false;
+  }
+
+  if (rect.height > available + VIEW_EPSILON_PX) {
+    return rect.top >= topBound - VIEW_EPSILON_PX && rect.top <= topBound + HEADER_SCROLL_PADDING_PX;
+  }
+
+  return rect.top >= topBound - VIEW_EPSILON_PX && rect.bottom <= bottomBound + VIEW_EPSILON_PX;
+};
+
+const applyStickyScrollMargin = (element: HTMLElement): void => {
+  const headerOffset = Math.ceil(stickyHeaderBottom()) + HEADER_SCROLL_PADDING_PX;
+  element.style.scrollMarginTop = `${headerOffset}px`;
+};
+
+const cancelVerseScrollSession = (session: VerseScrollSession | null): void => {
+  if (!session) {
+    return;
+  }
+
+  session.cancelled = true;
+  session.rafIds.forEach((rafId) => window.cancelAnimationFrame(rafId));
+  session.rafIds = [];
+  session.pendingFrameResolvers.splice(0).forEach((resolve) => resolve());
+  session.cleanupFns.splice(0).forEach((cleanup) => cleanup());
+};
+
+export const cancelActiveVerseScroll = (): void => {
+  cancelVerseScrollSession(activeVerseScrollSession);
+  activeVerseScrollSession = null;
+};
+
+const beginVerseScrollSession = (): VerseScrollSession => {
+  cancelActiveVerseScroll();
+  verseScrollSessionId += 1;
+  const session: VerseScrollSession = {
+    id: verseScrollSessionId,
+    cancelled: false,
+    userInterrupted: false,
+    ignoreProgrammaticScroll: false,
+    rafIds: [],
+    pendingFrameResolvers: [],
+    cleanupFns: [],
+  };
+  activeVerseScrollSession = session;
+  return session;
+};
+
+const isCurrentVerseScrollSession = (session: VerseScrollSession): boolean => (
+  !session.cancelled
+  && !session.userInterrupted
+  && activeVerseScrollSession?.id === session.id
+);
+
+const waitForAnimationFrame = (session: VerseScrollSession): Promise<void> => {
+  return new Promise((resolve) => {
+    const finish = () => {
+      session.pendingFrameResolvers = session.pendingFrameResolvers.filter((pending) => pending !== finish);
+      resolve();
+    };
+
+    session.pendingFrameResolvers.push(finish);
+    const rafId = window.requestAnimationFrame(() => {
+      session.rafIds = session.rafIds.filter((id) => id !== rafId);
+      finish();
+    });
+    session.rafIds.push(rafId);
+  });
+};
+
+const markProgrammaticScroll = (session: VerseScrollSession): void => {
+  session.ignoreProgrammaticScroll = true;
+  const firstRafId = window.requestAnimationFrame(() => {
+    const secondRafId = window.requestAnimationFrame(() => {
+      session.ignoreProgrammaticScroll = false;
+      session.rafIds = session.rafIds.filter((id) => id !== firstRafId && id !== secondRafId);
+    });
+    session.rafIds.push(secondRafId);
+  });
+  session.rafIds.push(firstRafId);
+};
+
+const scrollElementIntoView = (
+  session: VerseScrollSession,
+  element: HTMLElement,
+  behavior: ScrollBehavior,
+  block: ScrollLogicalPosition
+): void => {
+  applyStickyScrollMargin(element);
+  markProgrammaticScroll(session);
+  element.scrollIntoView({ behavior, block });
+};
+
+const attachUserScrollInterrupt = (session: VerseScrollSession): void => {
+  const interrupt = () => {
+    session.userInterrupted = true;
+  };
+
+  const handleKeyDown = (event: KeyboardEvent) => {
+    if (USER_SCROLL_KEYS.has(event.key)) {
+      interrupt();
+    }
+  };
+
+  // Only treat explicit user gestures as an interrupt. Assigning location.hash on a
+  // book/chapter change (and the chapter remount itself) can emit `scroll` without
+  // a gesture; aborting on that leaves a cold late-verse jump stuck at chapter top.
+  window.addEventListener('wheel', interrupt, { passive: true });
+  window.addEventListener('touchmove', interrupt, { passive: true });
+  window.addEventListener('keydown', handleKeyDown, true);
+
+  session.cleanupFns.push(() => {
+    window.removeEventListener('wheel', interrupt);
+    window.removeEventListener('touchmove', interrupt);
+    window.removeEventListener('keydown', handleKeyDown, true);
+  });
+};
+
+const waitForVerseElement = async (
+  session: VerseScrollSession,
+  elementId: string,
+  deadline: number
+): Promise<HTMLElement | null> => {
+  while (isCurrentVerseScrollSession(session) && performance.now() < deadline) {
+    const element = document.getElementById(elementId);
+    if (element) {
+      return element;
+    }
+
+    await waitForAnimationFrame(session);
+  }
+
+  return isCurrentVerseScrollSession(session) ? document.getElementById(elementId) : null;
+};
+
+const followVerseUntilSettled = async (
+  session: VerseScrollSession,
+  elementId: string,
+  behavior: ScrollBehavior,
+  block: ScrollLogicalPosition,
+  deadline: number,
+  onFirstVisible: () => void
+): Promise<void> => {
+  let stableVisibleFrames = 0;
+  let notifiedVisible = false;
+  const notifyVisible = () => {
+    if (!notifiedVisible) {
+      notifiedVisible = true;
+      onFirstVisible();
+    }
+  };
+
+  while (isCurrentVerseScrollSession(session) && performance.now() < deadline) {
+    const element = document.getElementById(elementId);
+    if (!element) {
+      stableVisibleFrames = 0;
+      await waitForAnimationFrame(session);
+      continue;
+    }
+
+    if (!isElementFullyInView(element)) {
+      scrollElementIntoView(session, element, behavior, block);
+      stableVisibleFrames = 0;
+    } else {
+      stableVisibleFrames += 1;
+      notifyVisible();
+      if (stableVisibleFrames >= STABLE_VISIBLE_FRAMES) {
+        break;
+      }
+    }
+
+    await waitForAnimationFrame(session);
+  }
+
+  notifyVisible();
+};
+
+const finishVerseScrollSession = (session: VerseScrollSession): void => {
+  if (activeVerseScrollSession?.id === session.id) {
+    cancelVerseScrollSession(session);
+    activeVerseScrollSession = null;
+  }
+};
+
+export const scrollToVerse = async (
+  target: QuickJumpTarget,
+  options: ScrollToVerseOptions = {}
+): Promise<void> => {
   if (typeof window === 'undefined' || typeof document === 'undefined') {
     return;
   }
 
+  const behavior = options.behavior ?? 'auto';
+  const block = options.block ?? 'nearest';
+  const followLayout = options.followLayout ?? true;
+  const session = beginVerseScrollSession();
+  attachUserScrollInterrupt(session);
+
   if (!target.verse) {
-    await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+    await waitForAnimationFrame(session);
+    if (isCurrentVerseScrollSession(session)) {
+      markProgrammaticScroll(session);
+      window.scrollTo({ top: 0, behavior });
+    }
+    finishVerseScrollSession(session);
     return;
   }
 
   const elementId = verseDomId(target.book, target.chapter, target.verse);
-
-  await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
-
-  const element = document.getElementById(elementId);
-  if (element) {
-    element.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  const element = await waitForVerseElement(session, elementId, performance.now() + ELEMENT_WAIT_MS);
+  if (!element || !isCurrentVerseScrollSession(session)) {
+    finishVerseScrollSession(session);
+    return;
   }
+
+  scrollElementIntoView(session, element, behavior, block);
+
+  if (!followLayout) {
+    finishVerseScrollSession(session);
+    return;
+  }
+
+  const followDeadline = performance.now() + LAYOUT_FOLLOW_MS;
+  await new Promise<void>((resolve) => {
+    void followVerseUntilSettled(session, elementId, behavior, block, followDeadline, resolve)
+      .finally(() => {
+        finishVerseScrollSession(session);
+      });
+  });
 };

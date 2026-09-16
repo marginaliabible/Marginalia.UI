@@ -61,6 +61,7 @@ import {
   parseSearchFromHash,
   detectPreferredTheme,
   scrollToVerse,
+  VERSE_REFERENCE_SCROLL_OPTIONS,
 } from './App';
 import { useDesktopLayout } from './hooks/useDesktopLayout';
 import { useWorkspaceSplit } from './hooks/useWorkspaceSplit';
@@ -122,6 +123,7 @@ function App() {
   const [gitHubAuthPromptContext, setGitHubAuthPromptContext] = useState<string | null>(null);
   const [gitHubAuthPromptError, setGitHubAuthPromptError] = useState<string | null>(null);
   const [isLaunchingGitHubAuth, setIsLaunchingGitHubAuth] = useState(false);
+  const goToReferenceGenerationRef = useRef(0);
 
   // Redux state
   const {
@@ -609,6 +611,7 @@ function App() {
   const hasSidePanel = !isPanelDetached && Boolean(activeWorkspacePanel);
 
   const goToReference = async (target: QuickJumpTarget, translationId?: string) => {
+    const generation = ++goToReferenceGenerationRef.current;
     const nextActiveId = translationId && safeSelectedTranslationIds.includes(translationId)
       ? translationId
       : selectedTranslationId;
@@ -620,6 +623,9 @@ function App() {
     if (nextActiveId !== selectedTranslationId) {
       const loadResult = await dispatch(loadTranslation(nextActiveId));
       activeBible = loadTranslation.fulfilled.match(loadResult) ? loadResult.payload : currentBible;
+    }
+    if (generation !== goToReferenceGenerationRef.current) {
+      return;
     }
     if (!activeBible) return;
 
@@ -641,7 +647,7 @@ function App() {
 
     mainPaneRef.current?.focus({ preventScroll: true });
 
-    await scrollToVerse(target);
+    await scrollToVerse(target, VERSE_REFERENCE_SCROLL_OPTIONS);
   };
 
   const handleThemeToggle = (e: ChangeEvent<HTMLInputElement>) => {

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef } from 'react';
 import { setSelectedBook, setSelectedChapter, setVerseSelection, clearVerseSelection } from '../store/slices/uiSlice';
 import { useAppDispatch } from '../store/hooks';
 import type { BibleData } from '../models/bible';
-import { buildSearchHashRoute, buildHashRoute, parseHashRoute, parseSearchFromHash, scrollToVerse } from '../App';
+import { buildSearchHashRoute, buildHashRoute, parseHashRoute, parseSearchFromHash, scrollToVerse, VERSE_REFERENCE_SCROLL_OPTIONS } from '../App';
 
 interface UseHashRouteSyncOptions {
   currentBible: BibleData | null;
@@ -23,11 +23,11 @@ export const useHashRouteSync = ({
 }: UseHashRouteSyncOptions): void => {
   const dispatch = useAppDispatch();
   const hasSyncedChapterHashRef = useRef(false);
-  const suppressNextHashApplyRef = useRef(false);
   const lastSelectedChapterKeyRef = useRef<string | null>(null);
   const selectedBookRef = useRef<string | null>(selectedBook);
   const selectedChapterRef = useRef<number>(selectedChapter);
   const selectedTranslationIdRef = useRef<string>(selectedTranslationId);
+  const applyGenerationRef = useRef(0);
 
   useEffect(() => {
     selectedBookRef.current = selectedBook;
@@ -46,6 +46,7 @@ export const useHashRouteSync = ({
       return;
     }
 
+    const generation = ++applyGenerationRef.current;
     const route = parseHashRoute(window.location.hash);
     if (!route) {
       return;
@@ -69,6 +70,10 @@ export const useHashRouteSync = ({
       dispatch(setSelectedChapter(nextChapter));
     }
 
+    if (generation !== applyGenerationRef.current) {
+      return;
+    }
+
     if (route.verse) {
       const chapterEntry = book.chapters.find((entry) => entry.chapter === nextChapter);
       const verseExists = chapterEntry?.verses.some((entry) => entry.verse === route.verse) ?? false;
@@ -79,7 +84,10 @@ export const useHashRouteSync = ({
           verses: [route.verse],
           anchorVerse: route.verse,
         }));
-        await scrollToVerse({ book: book.name, chapter: nextChapter, verse: route.verse });
+        await scrollToVerse(
+          { book: book.name, chapter: nextChapter, verse: route.verse },
+          VERSE_REFERENCE_SCROLL_OPTIONS
+        );
         return;
       }
     }
@@ -97,11 +105,6 @@ export const useHashRouteSync = ({
     void applyHashRouteFromLocation();
 
     const handleHashChange = () => {
-      if (suppressNextHashApplyRef.current) {
-        suppressNextHashApplyRef.current = false;
-        return;
-      }
-
       void applyHashRouteFromLocation();
     };
 
@@ -160,8 +163,13 @@ export const useHashRouteSync = ({
 
     if (chapterChanged) {
       if (window.location.hash !== nextChapterHash && window.location.hash !== nextChapterHashWithSearch) {
-        suppressNextHashApplyRef.current = true;
-        window.location.hash = nextChapterHashWithSearch;
+        // pushState avoids the native hash-assignment scroll-to-top that can fire
+        // before the new chapter's late verses have mounted.
+        window.history.pushState(
+          window.history.state,
+          '',
+          `${window.location.pathname}${window.location.search}${nextChapterHashWithSearch}`
+        );
       }
 
       if (nextVerseHash !== nextChapterHash && window.location.hash !== nextVerseHashWithSearch) {
