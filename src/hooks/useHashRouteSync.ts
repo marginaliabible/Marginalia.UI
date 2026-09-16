@@ -23,7 +23,6 @@ export const useHashRouteSync = ({
 }: UseHashRouteSyncOptions): void => {
   const dispatch = useAppDispatch();
   const hasSyncedChapterHashRef = useRef(false);
-  const suppressNextHashApplyRef = useRef(false);
   const lastSelectedChapterKeyRef = useRef<string | null>(null);
   const selectedBookRef = useRef<string | null>(selectedBook);
   const selectedChapterRef = useRef<number>(selectedChapter);
@@ -106,11 +105,6 @@ export const useHashRouteSync = ({
     void applyHashRouteFromLocation();
 
     const handleHashChange = () => {
-      if (suppressNextHashApplyRef.current) {
-        suppressNextHashApplyRef.current = false;
-        return;
-      }
-
       void applyHashRouteFromLocation();
     };
 
@@ -169,8 +163,13 @@ export const useHashRouteSync = ({
 
     if (chapterChanged) {
       if (window.location.hash !== nextChapterHash && window.location.hash !== nextChapterHashWithSearch) {
-        suppressNextHashApplyRef.current = true;
-        window.location.hash = nextChapterHashWithSearch;
+        // pushState avoids the native hash-assignment scroll-to-top that can fire
+        // before the new chapter's late verses have mounted.
+        window.history.pushState(
+          window.history.state,
+          '',
+          `${window.location.pathname}${window.location.search}${nextChapterHashWithSearch}`
+        );
       }
 
       if (nextVerseHash !== nextChapterHash && window.location.hash !== nextVerseHashWithSearch) {

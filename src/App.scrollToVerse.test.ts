@@ -182,4 +182,24 @@ describe('scrollToVerse', () => {
     expect(verse.scrollIntoView.mock.calls.length).toBe(callsAfterJump);
     expect(verse.getTop()).toBe(1700);
   });
+
+  it('still scrolls a delayed late-verse mount after a hash-change scroll event', async () => {
+    const pending = scrollToVerse(
+      { book: 'Genesis', chapter: 50, verse: 26 },
+      { block: 'nearest', followLayout: true }
+    );
+
+    await flushFrames(2);
+    window.dispatchEvent(new Event('scroll'));
+    expect(document.getElementById('Genesis-50-26')).toBeNull();
+
+    const verse = mountVerse('Genesis-50-26', 2200);
+    await flushFrames(8);
+    await pending;
+
+    expect(verse.scrollIntoView).toHaveBeenCalledWith(
+      expect.objectContaining({ behavior: 'auto', block: 'nearest' })
+    );
+    expect(isElementFullyInView(verse.element)).toBe(true);
+  });
 });

@@ -339,22 +339,17 @@ const attachUserScrollInterrupt = (session: VerseScrollSession): void => {
     }
   };
 
-  const handleScroll = () => {
-    if (!session.ignoreProgrammaticScroll) {
-      interrupt();
-    }
-  };
-
+  // Only treat explicit user gestures as an interrupt. Assigning location.hash on a
+  // book/chapter change (and the chapter remount itself) can emit `scroll` without
+  // a gesture; aborting on that leaves a cold late-verse jump stuck at chapter top.
   window.addEventListener('wheel', interrupt, { passive: true });
   window.addEventListener('touchmove', interrupt, { passive: true });
   window.addEventListener('keydown', handleKeyDown, true);
-  window.addEventListener('scroll', handleScroll, { passive: true });
 
   session.cleanupFns.push(() => {
     window.removeEventListener('wheel', interrupt);
     window.removeEventListener('touchmove', interrupt);
     window.removeEventListener('keydown', handleKeyDown, true);
-    window.removeEventListener('scroll', handleScroll);
   });
 };
 
