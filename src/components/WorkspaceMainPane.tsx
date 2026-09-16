@@ -198,8 +198,10 @@ const WorkspaceMainPane: React.FC<WorkspaceMainPaneProps> = ({
     void scrollToVerse({ book: selectedBook, chapter: nextChapter, verse: 1 });
   };
 
-  const openVersePanel = (verse: number) => {
-    if (isMobileLayout && !isPanelDetached) {
+  const openVersePanel = (verse: number, options?: { expandMobile?: boolean }) => {
+    // Ensures verse tabs exist (and expands on mobile when requested).
+    // Displayed verse context is driven by selection via useVerseTabContextSync.
+    if (options?.expandMobile && isMobileLayout && !isPanelDetached) {
       setIsMobilePanelOpen(true);
     }
 
@@ -209,10 +211,6 @@ const WorkspaceMainPane: React.FC<WorkspaceMainPaneProps> = ({
         dispatch(openVerseTabs({ book: selectedBook, chapter: selectedChapter, verse, hasResources }));
       })();
     }
-  };
-
-  const handleVerseNumberClick = (verse: number) => {
-    openVersePanel(verse);
   };
 
   const focusMainPane = () => {
@@ -237,6 +235,16 @@ const WorkspaceMainPane: React.FC<WorkspaceMainPaneProps> = ({
     };
   };
 
+  const handleVerseNumberClick = (verse: number) => {
+    const translationId = selectedVerseTranslationId ?? selectedTranslationId;
+    if (translationId) {
+      focusMainPane();
+      dispatch(setVerseSelection({ translationId, verses: [verse], anchorVerse: verse }));
+      setKeyboardCursor(translationId, verse, verse);
+    }
+    openVersePanel(verse, { expandMobile: true });
+  };
+
   const handleVerseCellSelect = (
     verse: number,
     translationId: string,
@@ -255,6 +263,7 @@ const WorkspaceMainPane: React.FC<WorkspaceMainPaneProps> = ({
       dispatch(setVerseSelection({ translationId, verses: [verse], anchorVerse: verse }));
       setKeyboardCursor(translationId, verse, verse);
       if (mode === 'single') {
+        // Ensure verse tabs exist; mobile expand is reserved for verse-number clicks.
         openVersePanel(verse);
       }
       return;
@@ -354,7 +363,6 @@ const WorkspaceMainPane: React.FC<WorkspaceMainPaneProps> = ({
       }));
       setKeyboardCursor(selectedVerseTranslationId, nextVerse, nextVerse);
       void scrollToVerse({ book: selectedBook, chapter: selectedChapter, verse: nextVerse });
-      openVersePanel(nextVerse);
       event.preventDefault();
       return;
     }
@@ -410,7 +418,6 @@ const WorkspaceMainPane: React.FC<WorkspaceMainPaneProps> = ({
   }, [
     chaptersByTranslation,
     dispatch,
-    openVersePanel,
     selectedBook,
     selectedChapter,
     selectedVerseTranslationId,
