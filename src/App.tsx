@@ -62,6 +62,7 @@ import {
   parseSearchFromHash,
   detectPreferredTheme,
   scrollToVerse,
+  VERSE_REFERENCE_SCROLL_OPTIONS,
 } from './App';
 import { useDesktopLayout } from './hooks/useDesktopLayout';
 import { useWorkspaceSplit } from './hooks/useWorkspaceSplit';
@@ -652,7 +653,7 @@ function App() {
 
     mainPaneRef.current?.focus({ preventScroll: true });
 
-    await scrollToVerse(target, { behavior: 'auto', block: 'center', followLayout: true });
+    await scrollToVerse(target, VERSE_REFERENCE_SCROLL_OPTIONS);
   };
 
   const handleThemeToggle = (e: ChangeEvent<HTMLInputElement>) => {

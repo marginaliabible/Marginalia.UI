@@ -3,7 +3,7 @@ import { setSelectedBook, setSelectedChapter, setVerseSelection, clearVerseSelec
 import { updateActiveVerseTabContext } from '../store/slices/bibleSlice';
 import { useAppDispatch } from '../store/hooks';
 import type { BibleData } from '../models/bible';
-import { buildSearchHashRoute, buildHashRoute, parseHashRoute, parseSearchFromHash, scrollToVerse } from '../App';
+import { buildSearchHashRoute, buildHashRoute, parseHashRoute, parseSearchFromHash, scrollToVerse, VERSE_REFERENCE_SCROLL_OPTIONS } from '../App';
 
 interface UseHashRouteSyncOptions {
   currentBible: BibleData | null;
@@ -93,7 +93,7 @@ export const useHashRouteSync = ({
         }));
         await scrollToVerse(
           { book: book.name, chapter: nextChapter, verse: route.verse },
-          { behavior: 'auto', block: 'center', followLayout: true }
+          VERSE_REFERENCE_SCROLL_OPTIONS
         );
         return;
       }

@@ -185,6 +185,12 @@ export interface ScrollToVerseOptions {
   followLayout?: boolean;
 }
 
+export const VERSE_REFERENCE_SCROLL_OPTIONS: ScrollToVerseOptions = {
+  behavior: 'auto',
+  block: 'nearest',
+  followLayout: true,
+};
+
 const VIEW_EPSILON_PX = 1;
 const HEADER_SCROLL_PADDING_PX = 8;
 const ELEMENT_WAIT_MS = 4000;

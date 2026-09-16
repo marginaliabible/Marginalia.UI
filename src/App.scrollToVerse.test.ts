@@ -126,7 +126,9 @@ describe('scrollToVerse', () => {
     await flushFrames(8);
     await pending;
 
-    expect(verse.scrollIntoView).toHaveBeenCalled();
+    expect(verse.scrollIntoView).toHaveBeenCalledWith(
+      expect.objectContaining({ behavior: 'auto', block: 'nearest' })
+    );
     expect(verse.getTop()).toBe(240);
     expect(isElementFullyInView(verse.element)).toBe(true);
   });
@@ -135,7 +137,7 @@ describe('scrollToVerse', () => {
     const verse = mountVerse('Genesis-50-26', 1800);
     const pending = scrollToVerse(
       { book: 'Genesis', chapter: 50, verse: 26 },
-      { block: 'center', followLayout: true }
+      { block: 'nearest', followLayout: true }
     );
 
     await Promise.resolve();
