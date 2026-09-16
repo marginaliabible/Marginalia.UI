@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useRef } from 'react';
 import { setSelectedBook, setSelectedChapter, setVerseSelection, clearVerseSelection } from '../store/slices/uiSlice';
-import { updateActiveVerseTabContext } from '../store/slices/bibleSlice';
 import { useAppDispatch } from '../store/hooks';
 import type { BibleData } from '../models/bible';
 import { buildSearchHashRoute, buildHashRoute, parseHashRoute, parseSearchFromHash, scrollToVerse, VERSE_REFERENCE_SCROLL_OPTIONS } from '../App';
@@ -85,11 +84,6 @@ export const useHashRouteSync = ({
           translationId: selectedTranslationIdRef.current,
           verses: [route.verse],
           anchorVerse: route.verse,
-        }));
-        dispatch(updateActiveVerseTabContext({
-          book: book.name,
-          chapter: nextChapter,
-          verse: route.verse,
         }));
         await scrollToVerse(
           { book: book.name, chapter: nextChapter, verse: route.verse },

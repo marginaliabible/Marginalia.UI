@@ -164,6 +164,15 @@ const applyVerseContextToTab = (
   now: number
 ): void => {
   if (verseContext) {
+    const current = tab.verseContext;
+    if (
+      current
+      && current.book === verseContext.book
+      && current.chapter === verseContext.chapter
+      && current.verse === verseContext.verse
+    ) {
+      return;
+    }
     tab.verseContext = verseContext;
   } else if (tab.verseContext) {
     delete tab.verseContext;

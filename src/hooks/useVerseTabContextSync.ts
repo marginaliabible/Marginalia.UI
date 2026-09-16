@@ -1,6 +1,8 @@
 import { useEffect, useRef } from 'react';
 import { useAppDispatch, useAppSelector } from '../store/hooks';
 import { clearVerseTabContexts, updateActiveVerseTabContext } from '../store/slices/bibleSlice';
+import { resolveSelectedVerseContext } from '../utils/selectedVerseContext';
+import type { VerseContext } from '../models/tab';
 
 const isVersePanelTabType = (type: string): boolean => (
   type === 'translations' || type === 'resources' || type === 'links'
@@ -8,8 +10,19 @@ const isVersePanelTabType = (type: string): boolean => (
 
 const locationKeyFor = (book: string | null, chapter: number): string => `${book ?? ''}::${chapter}`;
 
+const sameVerseContext = (
+  left: VerseContext | null | undefined,
+  right: VerseContext | null | undefined
+): boolean => (
+  Boolean(left)
+  && Boolean(right)
+  && left!.book === right!.book
+  && left!.chapter === right!.chapter
+  && left!.verse === right!.verse
+);
+
 /**
- * Keep the active verse panel tab aligned with the current book/chapter.
+ * Drive the active verse panel tab from the current verse selection.
  * Inactive verse tabs keep their last context until selected; search tabs and
  * visibility-gated population are left untouched.
  */
@@ -18,31 +31,52 @@ export const useVerseTabContextSync = (): void => {
   const selectedBook = useAppSelector((state) => state.ui.selectedBook);
   const selectedChapter = useAppSelector((state) => state.ui.selectedChapter);
   const selectedVerses = useAppSelector((state) => state.ui.selectedVerses);
-  const tabs = useAppSelector((state) => state.bible.tabs);
+  const hasVersePanelTab = useAppSelector((state) => (
+    state.bible.tabs.some((tab) => isVersePanelTabType(tab.type))
+  ));
+  const activeVerseTabContext = useAppSelector((state) => {
+    const activeTab = state.bible.tabs.find((tab) => tab.id === state.bible.activeTabId);
+    if (!activeTab || !isVersePanelTabType(activeTab.type)) {
+      return null;
+    }
+    return activeTab.verseContext ?? null;
+  });
   const locationKeyRef = useRef(locationKeyFor(selectedBook, selectedChapter));
 
   useEffect(() => {
-    const locationKey = locationKeyFor(selectedBook, selectedChapter);
-    if (locationKeyRef.current === locationKey) {
-      return;
-    }
-    locationKeyRef.current = locationKey;
-
-    const hasVersePanelTab = tabs.some((tab) => isVersePanelTabType(tab.type));
     if (!hasVersePanelTab) {
       return;
     }
 
-    const selectedVerse = selectedVerses.find((verse) => Number.isInteger(verse) && verse > 0);
-    if (selectedBook && selectedVerse) {
-      dispatch(updateActiveVerseTabContext({
-        book: selectedBook,
-        chapter: selectedChapter,
-        verse: selectedVerse,
-      }));
+    const locationKey = locationKeyFor(selectedBook, selectedChapter);
+    const locationChanged = locationKeyRef.current !== locationKey;
+    locationKeyRef.current = locationKey;
+
+    const selectedVerseContext = resolveSelectedVerseContext(
+      selectedBook,
+      selectedChapter,
+      selectedVerses
+    );
+
+    if (selectedVerseContext) {
+      if (sameVerseContext(activeVerseTabContext, selectedVerseContext)) {
+        return;
+      }
+      dispatch(updateActiveVerseTabContext(selectedVerseContext));
       return;
     }
 
-    dispatch(clearVerseTabContexts());
-  }, [dispatch, selectedBook, selectedChapter, selectedVerses, tabs]);
+    // Only clear when leaving a location with no selection; clearing a selection
+    // in-place leaves the last panel context until a new verse is chosen.
+    if (locationChanged && activeVerseTabContext) {
+      dispatch(clearVerseTabContexts());
+    }
+  }, [
+    activeVerseTabContext,
+    dispatch,
+    hasVersePanelTab,
+    selectedBook,
+    selectedChapter,
+    selectedVerses,
+  ]);
 };

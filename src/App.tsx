@@ -16,7 +16,6 @@ import {
   createDeferredSearchTab,
   setActiveTab,
   closeTab,
-  updateActiveVerseTabContext,
   setCurrentBibleFromId,
   removeLoadedTranslations,
 } from './store/slices/bibleSlice';
@@ -641,11 +640,6 @@ function App() {
         translationId: nextActiveId,
         verses: [target.verse],
         anchorVerse: target.verse,
-      }));
-      dispatch(updateActiveVerseTabContext({
-        book: target.book,
-        chapter: target.chapter,
-        verse: target.verse,
       }));
     } else {
       dispatch(clearVerseSelection());

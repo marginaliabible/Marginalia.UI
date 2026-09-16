@@ -95,7 +95,7 @@ describe('useVerseTabContextSync', () => {
     expect(inactiveTabs.every((tab) => tab.verseContext === undefined)).toBe(true);
   });
 
-  it('does not clear verse context when only the selected verse changes in the same chapter', () => {
+  it('updates the active verse panel when only the selected verse changes in the same chapter', () => {
     const store = mountAtGenesis1();
 
     act(() => {
@@ -104,18 +104,24 @@ describe('useVerseTabContextSync', () => {
         verses: [4],
         anchorVerse: 4,
       }));
-      store.dispatch(openVerseTabs({
-        book: 'Genesis',
-        chapter: 1,
-        verse: 4,
-        hasResources: true,
-      }));
     });
 
     const activeTab = store.getState().bible.tabs.find((tab) => (
       tab.id === store.getState().bible.activeTabId
     ));
     expect(activeTab?.verseContext?.verse).toBe(4);
+  });
+
+  it('does not clear verse context when selection is cleared in the same chapter', () => {
+    const store = mountAtGenesis1();
+    const activeTabId = store.getState().bible.activeTabId;
+
+    act(() => {
+      store.dispatch(clearVerseSelection());
+    });
+
+    const activeTab = store.getState().bible.tabs.find((tab) => tab.id === activeTabId);
+    expect(activeTab?.verseContext).toEqual({ book: 'Genesis', chapter: 1, verse: 1 });
   });
 
   it('leaves deferred search tabs unpopulated when chapter changes', () => {
