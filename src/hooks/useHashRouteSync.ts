@@ -29,6 +29,7 @@ export const useHashRouteSync = ({
   const selectedBookRef = useRef<string | null>(selectedBook);
   const selectedChapterRef = useRef<number>(selectedChapter);
   const selectedTranslationIdRef = useRef<string>(selectedTranslationId);
+  const applyGenerationRef = useRef(0);
 
   useEffect(() => {
     selectedBookRef.current = selectedBook;
@@ -47,6 +48,7 @@ export const useHashRouteSync = ({
       return;
     }
 
+    const generation = ++applyGenerationRef.current;
     const route = parseHashRoute(window.location.hash);
     if (!route) {
       return;
@@ -70,6 +72,10 @@ export const useHashRouteSync = ({
       dispatch(setSelectedChapter(nextChapter));
     }
 
+    if (generation !== applyGenerationRef.current) {
+      return;
+    }
+
     if (route.verse) {
       const chapterEntry = book.chapters.find((entry) => entry.chapter === nextChapter);
       const verseExists = chapterEntry?.verses.some((entry) => entry.verse === route.verse) ?? false;
@@ -85,7 +91,10 @@ export const useHashRouteSync = ({
           chapter: nextChapter,
           verse: route.verse,
         }));
-        await scrollToVerse({ book: book.name, chapter: nextChapter, verse: route.verse });
+        await scrollToVerse(
+          { book: book.name, chapter: nextChapter, verse: route.verse },
+          { behavior: 'auto', block: 'center', followLayout: true }
+        );
         return;
       }
     }

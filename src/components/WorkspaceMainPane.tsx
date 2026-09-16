@@ -13,7 +13,7 @@ import {
 } from '../store/slices/uiSlice';
 import { bibleService } from '../services/bibleService';
 import { searchIndexService } from '../services/searchIndexService';
-import { verseDomId, scrollToVerse } from '../App';
+import { scrollToVerse } from '../App';
 import type { BibleChapter, BibleTranslationMeta, QuickJumpTarget } from '../models/bible';
 import type { WorkspacePanelKey } from '../App';
 
@@ -78,7 +78,11 @@ const WorkspaceMainPane: React.FC<WorkspaceMainPaneProps> = ({
     pdfViewer,
   } = useAppSelector((state) => state.ui);
 
-  const [chaptersByTranslation, setChaptersByTranslation] = useState<Record<string, BibleChapter | null>>({});
+  const [loadedChapterView, setLoadedChapterView] = useState<{
+    book: string;
+    chapter: number;
+    byTranslation: Record<string, BibleChapter | null>;
+  } | null>(null);
   const [resourceVerseTagsByVerse, setResourceVerseTagsByVerse] = useState<Map<number, string[]>>(new Map());
   const keyboardCursorRef = useRef<{
     translationId: string;
@@ -91,6 +95,8 @@ const WorkspaceMainPane: React.FC<WorkspaceMainPaneProps> = ({
   const starredTranslationIds = useMemo(() => {
     return translationRecords.filter((r) => r.starred).map((r) => r.id);
   }, [translationRecords]);
+
+  const chaptersByTranslation = loadedChapterView?.byTranslation ?? {};
 
   const selectedBookEntry = useMemo(() => {
     if (!currentBible || !selectedBook) return null;
@@ -117,25 +123,33 @@ const WorkspaceMainPane: React.FC<WorkspaceMainPaneProps> = ({
     searchIndexService.setIndexCacheLimit(Math.max(1, starredTranslationIds.length));
   }, [selectedTranslationId, starredTranslationIds]);
 
-  // Load visible chapters for all starred translations
+  // Load visible chapters for all starred translations. Keep the previously loaded
+  // chapter on screen until the new one arrives so verse DOM ids never remap onto
+  // stale rows from a different book/chapter.
   useEffect(() => {
     let cancelled = false;
+    const requestedBook = selectedBook;
+    const requestedChapter = selectedChapter;
 
     const loadVisibleChapters = async () => {
-      if (!selectedBook || starredTranslationIds.length === 0) {
-        if (!cancelled) setChaptersByTranslation({});
+      if (!requestedBook || starredTranslationIds.length === 0) {
+        if (!cancelled) setLoadedChapterView(null);
         return;
       }
 
       const entries = await Promise.all(
         starredTranslationIds.map(async (translationId) => {
-          const chapter = await bibleService.loadChapter(translationId, selectedBook, selectedChapter);
+          const chapter = await bibleService.loadChapter(translationId, requestedBook, requestedChapter);
           return [translationId, chapter] as const;
         })
       );
 
       if (!cancelled) {
-        setChaptersByTranslation(Object.fromEntries(entries));
+        setLoadedChapterView({
+          book: requestedBook,
+          chapter: requestedChapter,
+          byTranslation: Object.fromEntries(entries),
+        });
       }
     };
 
@@ -478,7 +492,8 @@ const WorkspaceMainPane: React.FC<WorkspaceMainPaneProps> = ({
               setIsMobilePanelOpen={setIsMobilePanelOpen}
               resourceVerseTagsByVerse={resourceVerseTagsByVerse}
               resourceHiddenTags={resourceHiddenTags}
-              verseDomId={verseDomId}
+              verseDomBook={loadedChapterView?.book ?? ''}
+              verseDomChapter={loadedChapterView?.chapter ?? 0}
             />
           ) : (
             <p className="text-body-secondary mb-0">Select a chapter to begin.</p>

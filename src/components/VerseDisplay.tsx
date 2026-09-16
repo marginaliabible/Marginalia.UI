@@ -3,6 +3,7 @@ import type { BibleBook, BibleChapter } from '../models/bible';
 import MiniSearchBar, { type MiniSearchBarHandle } from './MiniSearchBar';
 import type { QuickJumpTarget } from '../models/bible';
 import { getOrAssignResourceTagColors } from '../utils/resourceTagColors';
+import { verseElementId } from '../App';
 
 type VerseSelectionMode = 'single' | 'toggle' | 'range' | 'mobile-range' | 'mobile-anchor';
 
@@ -39,7 +40,8 @@ interface VerseDisplayProps {
   setIsMobilePanelOpen: (open: boolean) => void;
   resourceVerseTagsByVerse: Map<number, string[]>;
   resourceHiddenTags: string[];
-  verseDomId: (book: string, chapter: number, verse: number) => string;
+  verseDomBook?: string;
+  verseDomChapter?: number;
 }
 const MAX_INNER_TAGS = 5;
 
@@ -76,7 +78,8 @@ const VerseDisplay: React.FC<VerseDisplayProps> = ({
   setIsMobilePanelOpen,
   resourceVerseTagsByVerse,
   resourceHiddenTags,
-  verseDomId,
+  verseDomBook,
+  verseDomChapter,
 }) => {
   const shellRef = useRef<HTMLDivElement | null>(null);
   const longPressTimeoutRef = useRef<number | null>(null);
@@ -601,7 +604,7 @@ const VerseDisplay: React.FC<VerseDisplayProps> = ({
         {verseNumbers.map((verseNumber) => (
           <div
             key={verseNumber}
-            id={verseDomId(selectedBook ?? '', selectedChapter, verseNumber)}
+            id={verseElementId(verseDomBook, verseDomChapter, verseNumber)}
             className="verse-grid-row"
             role="listitem"
           >
