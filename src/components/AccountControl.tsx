@@ -948,13 +948,37 @@ const AccountControl: React.FC = () => {
   }, [configUpdatedAt, lastSyncedAt, linkedAccounts, persistCloudState]);
 
   const handleSyncPreferenceToggle = useCallback((provider: FederatedProvider, field: 'syncSettings' | 'syncFiles') => {
-    setProviderSyncPreferences((current) => ({
-      ...current,
-      [provider]: {
-        ...current[provider],
-        [field]: !current[provider][field],
-      },
-    }));
+    setProviderSyncPreferences((current) => {
+      const nextValue = !current[provider][field];
+      // Sync Files requires Sync Settings (marginalia-config.json is the selection SoT).
+      if (field === 'syncFiles' && nextValue) {
+        return {
+          ...current,
+          [provider]: {
+            ...current[provider],
+            syncFiles: true,
+            syncSettings: true,
+          },
+        };
+      }
+      if (field === 'syncSettings' && !nextValue) {
+        return {
+          ...current,
+          [provider]: {
+            ...current[provider],
+            syncSettings: false,
+            syncFiles: false,
+          },
+        };
+      }
+      return {
+        ...current,
+        [provider]: {
+          ...current[provider],
+          [field]: nextValue,
+        },
+      };
+    });
   }, []);
 
   const handleModifyFilesAccess = useCallback((provider: FederatedProvider) => {
@@ -970,104 +994,132 @@ const AccountControl: React.FC = () => {
 
   const handleApplyFolderSelections = useCallback((nextSelections: Record<FederatedProvider, FolderSelectionTarget[]>) => {
     const previousSelections = providerSyncPreferences;
+    const nextGoogleTargets = nextSelections.google.map((target) => ({
+      id: target.id,
+      kind: 'folder' as const,
+      name: target.name,
+      path: target.path,
+      sizeBytes: target.sizeBytes,
+      sizeKnown: target.sizeKnown,
+      excludedItemIds: target.excludedItemIds,
+      tags: target.tags,
+      itemTags: target.itemTags,
+      itemTagExclusions: target.itemTagExclusions,
+    }));
+    const nextMicrosoftTargets = nextSelections.microsoft.map((target) => ({
+      id: target.id,
+      kind: 'folder' as const,
+      name: target.name,
+      path: target.path,
+      sizeBytes: target.sizeBytes,
+      sizeKnown: target.sizeKnown,
+      excludedItemIds: target.excludedItemIds,
+      tags: target.tags,
+      itemTags: target.itemTags,
+      itemTagExclusions: target.itemTagExclusions,
+    }));
+
     setProviderSyncPreferences((current) => ({
       ...current,
       google: {
         ...current.google,
-        selectedTargets: nextSelections.google.map((target) => ({
-          id: target.id,
-          kind: 'folder',
-          name: target.name,
-          path: target.path,
-          sizeBytes: target.sizeBytes,
-          sizeKnown: target.sizeKnown,
-          excludedItemIds: target.excludedItemIds,
-          tags: target.tags,
-          itemTags: target.itemTags,
-          itemTagExclusions: target.itemTagExclusions,
-        })),
+        selectedTargets: nextGoogleTargets,
       },
       microsoft: {
         ...current.microsoft,
-        selectedTargets: nextSelections.microsoft.map((target) => ({
-          id: target.id,
-          kind: 'folder',
-          name: target.name,
-          path: target.path,
-          sizeBytes: target.sizeBytes,
-          sizeKnown: target.sizeKnown,
-          excludedItemIds: target.excludedItemIds,
-          tags: target.tags,
-          itemTags: target.itemTags,
-          itemTagExclusions: target.itemTagExclusions,
-        })),
+        selectedTargets: nextMicrosoftTargets,
       },
     }));
 
-    // Push the updated folder selections to the cloud right away instead of waiting on the debounced autosync.
-    setConfigUpdatedAt(Date.now());
-    setForceSyncRequestId((current) => current + 1);
+    const syncedAt = Date.now();
+    setConfigUpdatedAt(syncedAt);
 
     const userId = String((bibleService.readState() as MarginaliaState).userId ?? '').trim();
     if (!userId) {
       return;
     }
 
-    void Promise.all(PROVIDERS.map(async (provider) => {
-      const next = nextSelections[provider];
-      const previous = previousSelections[provider];
-      if (!previous.syncFiles) {
-        // File sync is not enabled for this provider; cloud settings sync still updates via forceSync.
-        return;
-      }
+    // Write marginalia-config.json first (selection SoT), then notify CCS to enumerate from that config.
+    void (async () => {
+      const currentSessions = await getFreshFederatedSessions();
+      setSessions(currentSessions);
 
-      const previousIds = new Set(previous.selectedTargets.map((target) => target.id));
-      const nextIds = new Set(next.map((target) => target.id));
-      const excluded = next.flatMap((target) => target.excludedItemIds || []);
-      const tags = next.flatMap((target) => target.tags || []);
-      const itemTags: Record<string, string[]> = {};
-      for (const target of next) {
-        for (const [itemId, itemTagList] of Object.entries(target.itemTags || {})) {
-          if (!Array.isArray(itemTagList) || itemTagList.length === 0) {
-            continue;
-          }
-          itemTags[itemId] = [...new Set([...(itemTags[itemId] || []), ...itemTagList.map(String)])];
+      const nextPreferences: ProviderSyncPreferenceMap = {
+        google: { ...previousSelections.google, selectedTargets: nextGoogleTargets },
+        microsoft: { ...previousSelections.microsoft, selectedTargets: nextMicrosoftTargets },
+      };
+      const payload = toSyncedCloudConfig({
+        ...configSnapshot,
+        providerFolderSelections: {
+          google: nextGoogleTargets,
+          microsoft: nextMicrosoftTargets,
+        },
+      }, linkedAccounts, syncedAt);
+
+      for (const provider of PROVIDERS) {
+        if (!nextPreferences[provider].syncSettings) {
+          continue;
+        }
+        const session = currentSessions[provider];
+        if (!session) {
+          continue;
+        }
+        try {
+          await writeCloudConfigForSession(session, payload);
+        } catch (writeError) {
+          setStatusMessage(writeError instanceof Error ? writeError.message : String(writeError));
+          return;
         }
       }
 
-      const selectionChanged = previous.selectedTargets.length !== next.length
-        || [...previousIds].some((id) => !nextIds.has(id))
-        || [...nextIds].some((id) => !previousIds.has(id))
-        || JSON.stringify(previous.selectedTargets.map((target) => ({
-          id: target.id,
-          excludedItemIds: [...(target.excludedItemIds || [])].sort(),
-          tags: [...(target.tags || [])].sort(),
-          itemTags: target.itemTags || {},
-        }))) !== JSON.stringify(next.map((target) => ({
-          id: target.id,
-          excludedItemIds: [...(target.excludedItemIds || [])].sort(),
-          tags: [...(target.tags || [])].sort(),
-          itemTags: target.itemTags || {},
-        })));
-
-      if (!selectionChanged) {
-        return;
-      }
-
-      await queueCloudFolderSelection({
-        userId,
-        provider,
-        selectedFolders: next.map((target) => target.id),
-        excluded: [...new Set(excluded)],
-        removed: [...previousIds].filter((id) => !nextIds.has(id)),
-        tags: [...new Set(tags)],
-        itemTags,
-        accessToken: providerSessionByType[provider]?.accessToken,
+      setLastSyncedAt(syncedAt);
+      persistCloudState({
+        cloudLinkedAccounts: linkedAccounts,
+        cloudConfigUpdatedAt: syncedAt,
+        cloudConfigLastSyncedAt: syncedAt,
       });
-    })).catch((error: unknown) => {
+      setHasPendingSync(false);
+
+      await Promise.all(PROVIDERS.map(async (provider) => {
+        const next = nextSelections[provider];
+        const previous = previousSelections[provider];
+        if (!previous.syncFiles) {
+          return;
+        }
+
+        const previousIds = new Set(previous.selectedTargets.map((target) => target.id));
+        const nextIds = new Set(next.map((target) => target.id));
+
+        const selectionChanged = previous.selectedTargets.length !== next.length
+          || [...previousIds].some((id) => !nextIds.has(id))
+          || [...nextIds].some((id) => !previousIds.has(id))
+          || JSON.stringify(previous.selectedTargets.map((target) => ({
+            id: target.id,
+            excludedItemIds: [...(target.excludedItemIds || [])].sort(),
+            tags: [...(target.tags || [])].sort(),
+            itemTags: target.itemTags || {},
+          }))) !== JSON.stringify(next.map((target) => ({
+            id: target.id,
+            excludedItemIds: [...(target.excludedItemIds || [])].sort(),
+            tags: [...(target.tags || [])].sort(),
+            itemTags: target.itemTags || {},
+          })));
+
+        if (!selectionChanged) {
+          return;
+        }
+
+        await queueCloudFolderSelection({
+          userId,
+          provider,
+          removed: [...previousIds].filter((id) => !nextIds.has(id)),
+          accessToken: providerSessionByType[provider]?.accessToken,
+        });
+      }));
+    })().catch((error: unknown) => {
       setStatusMessage(error instanceof Error ? error.message : String(error));
     });
-  }, [providerSessionByType, providerSyncPreferences]);
+  }, [configSnapshot, linkedAccounts, persistCloudState, providerSessionByType, providerSyncPreferences]);
 
   const handleProviderAction = useCallback((provider: FederatedProvider) => {
     const connected = isProviderConnected(provider);
@@ -1117,6 +1169,7 @@ const AccountControl: React.FC = () => {
         [provider]: {
           ...current[provider],
           syncFiles: true,
+          syncSettings: true,
         },
       };
     });

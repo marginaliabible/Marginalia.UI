@@ -490,7 +490,7 @@ describe('AccountControl', () => {
     fireEvent.click(getProviderCheckbox('google-sync-files'));
     fireEvent.click(screen.getByRole('button', { name: 'Connect' }));
     expect(mockBeginAuth).toHaveBeenCalledWith('google', {
-      syncSettings: false,
+      syncSettings: true,
       syncFiles: true,
     });
     firstRender.unmount();
@@ -558,7 +558,7 @@ describe('AccountControl', () => {
 
     window.localStorage.setItem('marginalia:provider-sync-preferences', JSON.stringify({
       google: {
-        syncSettings: false,
+        syncSettings: true,
         syncFiles: true,
         selectedTargets: [],
       },
@@ -646,7 +646,7 @@ describe('AccountControl', () => {
 
     window.localStorage.setItem('marginalia:provider-sync-preferences', JSON.stringify({
       google: {
-        syncSettings: false,
+        syncSettings: true,
         syncFiles: true,
         selectedTargets: [],
       },
@@ -730,7 +730,7 @@ describe('AccountControl', () => {
 
     window.localStorage.setItem('marginalia:provider-sync-preferences', JSON.stringify({
       google: {
-        syncSettings: false,
+        syncSettings: true,
         syncFiles: true,
         selectedTargets: [],
       },
@@ -809,7 +809,7 @@ describe('AccountControl', () => {
 
     window.localStorage.setItem('marginalia:provider-sync-preferences', JSON.stringify({
       google: {
-        syncSettings: false,
+        syncSettings: true,
         syncFiles: true,
         selectedTargets: [
           {
@@ -902,7 +902,7 @@ describe('AccountControl', () => {
 
     window.localStorage.setItem('marginalia:provider-sync-preferences', JSON.stringify({
       google: {
-        syncSettings: false,
+        syncSettings: true,
         syncFiles: true,
         selectedTargets: [],
       },
@@ -1009,7 +1009,7 @@ describe('AccountControl', () => {
 
     window.localStorage.setItem('marginalia:provider-sync-preferences', JSON.stringify({
       google: {
-        syncSettings: false,
+        syncSettings: true,
         syncFiles: true,
         selectedTargets: [],
       },
@@ -1089,7 +1089,7 @@ describe('AccountControl', () => {
 
     window.localStorage.setItem('marginalia:provider-sync-preferences', JSON.stringify({
       google: {
-        syncSettings: false,
+        syncSettings: true,
         syncFiles: true,
         selectedTargets: [],
       },
@@ -1159,7 +1159,7 @@ describe('AccountControl', () => {
 
     window.localStorage.setItem('marginalia:provider-sync-preferences', JSON.stringify({
       google: {
-        syncSettings: false,
+        syncSettings: true,
         syncFiles: true,
         selectedTargets: [],
       },
@@ -1235,7 +1235,7 @@ describe('AccountControl', () => {
 
     window.localStorage.setItem('marginalia:provider-sync-preferences', JSON.stringify({
       google: {
-        syncSettings: false,
+        syncSettings: true,
         syncFiles: true,
         selectedTargets: [],
       },
@@ -1304,7 +1304,7 @@ describe('AccountControl', () => {
 
     window.localStorage.setItem('marginalia:provider-sync-preferences', JSON.stringify({
       google: {
-        syncSettings: false,
+        syncSettings: true,
         syncFiles: true,
         selectedTargets: [
           {
@@ -1373,7 +1373,7 @@ describe('AccountControl', () => {
 
     window.localStorage.setItem('marginalia:provider-sync-preferences', JSON.stringify({
       google: {
-        syncSettings: false,
+        syncSettings: true,
         syncFiles: true,
         selectedTargets: [
           {
@@ -1385,7 +1385,7 @@ describe('AccountControl', () => {
         ],
       },
       microsoft: {
-        syncSettings: false,
+        syncSettings: true,
         syncFiles: true,
         selectedTargets: [
           {
@@ -1441,7 +1441,7 @@ describe('AccountControl', () => {
         selectedTargets: [],
       },
       microsoft: {
-        syncSettings: false,
+        syncSettings: true,
         syncFiles: true,
         selectedTargets: [],
       },
@@ -1484,7 +1484,7 @@ describe('AccountControl', () => {
         selectedTargets: [],
       },
       microsoft: {
-        syncSettings: false,
+        syncSettings: true,
         syncFiles: true,
         selectedTargets: [],
       },

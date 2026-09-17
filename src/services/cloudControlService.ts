@@ -3,12 +3,8 @@ import type { FederatedProvider } from '../models/bible';
 export interface CloudFolderSelectionRequest {
   userId: string;
   provider: FederatedProvider;
-  selectedFolders: string[];
-  excluded: string[];
+  // Folders deselected on this Apply — one-shot prune hint; selection SoT is marginalia-config.json.
   removed: string[];
-  tags: string[];
-  // Per-item tag overrides keyed by cloud item id (and optionally path).
-  itemTags?: Record<string, string[]>;
   // Transient credential used only to enumerate the selected folders right now; CloudControlService
   // never persists it.
   accessToken?: string;

@@ -82,6 +82,9 @@ export interface SyncedCloudFolderSelection {
   sizeKnown?: boolean;
   // Cloud item IDs (folders or files, any depth) explicitly excluded from sync within this selection.
   excludedItemIds?: string[];
+  tags?: string[];
+  itemTags?: Record<string, string[]>;
+  itemTagExclusions?: Record<string, string[]>;
 }
 
 export interface SyncedCloudConfig {
