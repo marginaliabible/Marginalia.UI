@@ -323,6 +323,12 @@ button.account-provider-modify-link {
   padding: 0;
   text-align: left;
   color: var(--bs-body-color);
+  cursor: pointer;
+}
+
+.cloud-folder-tree-name:disabled {
+  cursor: default;
+  color: var(--bs-secondary-color);
 }
 
 .cloud-folder-tree-loading {
@@ -436,6 +442,10 @@ button.account-provider-modify-link {
   white-space: nowrap;
 }
 
+.btn.cloud-folder-tag-add-btn.is-flashing {
+  animation: cloud-folder-tag-add-flash 0.85s ease;
+}
+
 .cloud-folder-tag-chip {
   border: 1px solid var(--resource-tag-color);
   border-radius: 0.35rem;
@@ -472,6 +482,22 @@ button.account-provider-modify-link {
   text-decoration: none;
   cursor: default;
   pointer-events: none;
+}
+
+@keyframes cloud-folder-tag-add-flash {
+  0%,
+  100% {
+    color: var(--bs-secondary-color);
+    border-color: var(--bs-border-color);
+    background-color: transparent;
+  }
+
+  15%,
+  55% {
+    color: var(--bs-danger);
+    border-color: var(--bs-danger);
+    background-color: color-mix(in srgb, var(--bs-danger-bg-subtle) 80%, transparent);
+  }
 }
 
 @keyframes cloud-folder-highlight-fade {

@@ -150,6 +150,24 @@ function getProviderCheckbox(id: 'google-sync-settings' | 'google-sync-files' | 
   return document.getElementById(id) as HTMLInputElement;
 }
 
+async function assignFileSyncTag(itemLabel: string, tagName = 'Teaching') {
+  const rightPanel = within(document.querySelector('.cloud-folder-picker-right') as HTMLElement);
+  fireEvent.click(rightPanel.getByRole('button', { name: '+ Tags' }));
+
+  await waitFor(() => {
+    expect(screen.getByText(`Tags for ${itemLabel}`)).toBeInTheDocument();
+  });
+
+  const tagInput = document.getElementById('fileSyncTagInput') as HTMLInputElement;
+  fireEvent.change(tagInput, { target: { value: tagName } });
+  fireEvent.keyDown(tagInput, { key: 'Enter' });
+  fireEvent.click(screen.getByRole('button', { name: 'Done' }));
+
+  await waitFor(() => {
+    expect(screen.queryByText(`Tags for ${itemLabel}`)).not.toBeInTheDocument();
+  });
+}
+
 async function renderAccountControl() {
   let view: ReturnType<typeof render> | null = null;
   await act(async () => {
@@ -611,6 +629,8 @@ describe('AccountControl', () => {
       expect(screen.getByText('24 MB')).toBeInTheDocument();
     });
 
+    await assignFileSyncTag('Bible Notes Folder');
+
     fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
 
     await waitFor(() => {
@@ -623,6 +643,7 @@ describe('AccountControl', () => {
           path: 'Google Drive/Bible Notes Folder',
           sizeBytes: 25165824,
           sizeKnown: true,
+          tags: ['Teaching'],
         },
       ]);
     });
@@ -703,12 +724,15 @@ describe('AccountControl', () => {
 
     fireEvent.click(rightPanel.getByLabelText(/Exclude .*notes\.txt from sync/i));
 
+    await assignFileSyncTag('Bible Notes Folder');
+
     fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
 
     await waitFor(() => {
       const persisted = JSON.parse(window.localStorage.getItem('marginalia:provider-sync-preferences') || '{}');
       expect(persisted.google.selectedTargets).toHaveLength(1);
       expect(persisted.google.selectedTargets[0].excludedItemIds).toEqual(['g-file-notes']);
+      expect(persisted.google.selectedTargets[0].tags).toEqual(['Teaching']);
     });
   });
 
@@ -789,6 +813,154 @@ describe('AccountControl', () => {
       const persisted = JSON.parse(window.localStorage.getItem('marginalia:provider-sync-preferences') || '{}');
       expect(persisted.google.selectedTargets[0].tags).toEqual(['Teaching']);
     });
+  });
+
+  it('flashes the + Tags button when the last tag is removed, but not when a folder is first selected', async () => {
+    mockReadState.mockReturnValue({
+      lastTranslationId: 'KJV',
+      lastTranslationIds: ['KJV'],
+      cloudLinkedAccounts: [
+        {
+          provider: 'google',
+          providerAccountId: 'g-user-1',
+          email: 'g@example.com',
+          linkedAt: Date.now() - 5000,
+        },
+      ],
+      cloudConfigUpdatedAt: Date.now() - 10_000,
+      cloudConfigLastSyncedAt: Date.now() - 10_000,
+    });
+
+    window.localStorage.setItem('marginalia:provider-sync-preferences', JSON.stringify({
+      google: {
+        syncSettings: true,
+        syncFiles: true,
+        selectedTargets: [],
+      },
+      microsoft: {
+        syncSettings: false,
+        syncFiles: false,
+        selectedTargets: [],
+      },
+    }));
+
+    mockGetStoredSessions.mockReturnValue({ google: googleSession });
+    mockGetFreshSessions.mockResolvedValue({ google: googleSession });
+    mockComputeSupportedFolderSizeForSession.mockResolvedValue(1024);
+    mockListFolderChildrenForSession.mockResolvedValue([
+      { id: 'g-folder-1', name: 'Bible Notes Folder', kind: 'folder', sizeBytes: 0, hasChildren: false },
+    ]);
+
+    await renderAccountControl();
+    openAccountModal();
+    expandProvider('Google');
+
+    await waitFor(() => {
+      expect(screen.getByText('Google Drive')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByLabelText('Expand Google Drive'));
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('Google Drive/Bible Notes Folder')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByLabelText('Google Drive/Bible Notes Folder'));
+
+    const rightPanel = within(document.querySelector('.cloud-folder-picker-right') as HTMLElement);
+
+    await waitFor(() => {
+      expect(rightPanel.getByRole('button', { name: '+ Tags' })).toBeInTheDocument();
+    });
+
+    // Newly selected folders start untagged without a warning flash.
+    expect(rightPanel.getByRole('button', { name: '+ Tags' })).not.toHaveClass('is-flashing');
+
+    await assignFileSyncTag('Bible Notes Folder');
+
+    fireEvent.click(rightPanel.getByRole('button', { name: 'Teaching' }));
+
+    await waitFor(() => {
+      expect(screen.getByText('Tags for Bible Notes Folder')).toBeInTheDocument();
+    });
+
+    const removeTagButton = document.querySelector('.file-sync-tag-select__multi-value__remove');
+    expect(removeTagButton).not.toBeNull();
+    fireEvent.click(removeTagButton as Element);
+    fireEvent.click(screen.getByRole('button', { name: 'Done' }));
+
+    await waitFor(() => {
+      expect(rightPanel.getByRole('button', { name: '+ Tags' })).toHaveClass('is-flashing');
+    });
+  });
+
+  it('blocks Apply when a selected folder has no tags, alerts, and flashes + Tags', async () => {
+    const alertSpy = jest.spyOn(window, 'alert').mockImplementation(() => undefined);
+
+    mockReadState.mockReturnValue({
+      lastTranslationId: 'KJV',
+      lastTranslationIds: ['KJV'],
+      cloudLinkedAccounts: [
+        {
+          provider: 'google',
+          providerAccountId: 'g-user-1',
+          email: 'g@example.com',
+          linkedAt: Date.now() - 5000,
+        },
+      ],
+      cloudConfigUpdatedAt: Date.now() - 10_000,
+      cloudConfigLastSyncedAt: Date.now() - 10_000,
+    });
+
+    window.localStorage.setItem('marginalia:provider-sync-preferences', JSON.stringify({
+      google: {
+        syncSettings: true,
+        syncFiles: true,
+        selectedTargets: [],
+      },
+      microsoft: {
+        syncSettings: false,
+        syncFiles: false,
+        selectedTargets: [],
+      },
+    }));
+
+    mockGetStoredSessions.mockReturnValue({ google: googleSession });
+    mockGetFreshSessions.mockResolvedValue({ google: googleSession });
+    mockComputeSupportedFolderSizeForSession.mockResolvedValue(1024);
+    mockListFolderChildrenForSession.mockResolvedValue([
+      { id: 'g-folder-1', name: 'Bible Notes Folder', kind: 'folder', sizeBytes: 0, hasChildren: false },
+    ]);
+
+    await renderAccountControl();
+    openAccountModal();
+    expandProvider('Google');
+
+    await waitFor(() => {
+      expect(screen.getByText('Google Drive')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByLabelText('Expand Google Drive'));
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('Google Drive/Bible Notes Folder')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByLabelText('Google Drive/Bible Notes Folder'));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
+
+    expect(alertSpy).toHaveBeenCalledWith('You must supply tags for all files before saving.');
+
+    const rightPanel = within(document.querySelector('.cloud-folder-picker-right') as HTMLElement);
+    await waitFor(() => {
+      expect(rightPanel.getByRole('button', { name: '+ Tags' })).toHaveClass('is-flashing');
+    });
+
+    const persisted = JSON.parse(window.localStorage.getItem('marginalia:provider-sync-preferences') || '{}');
+    expect(persisted.google.selectedTargets).toEqual([]);
+
+    alertSpy.mockRestore();
   });
 
   it('shows a folder tag as inherited on its children and lets an inherited tag be excluded for one of them', async () => {
@@ -874,12 +1046,31 @@ describe('AccountControl', () => {
 
     // Excluding the inherited tag removes it from the child's display without touching the parent's own chip.
     expect(rightPanel.getAllByRole('button', { name: 'Teaching' })).toHaveLength(1);
+    // Clearing the child's last effective tag flashes its + Tags control.
+    expect(rightPanel.getByRole('button', { name: '+ Tags' })).toHaveClass('is-flashing');
+
+    // A replacement own tag is required before Apply — every synced item needs at least one tag.
+    fireEvent.click(rightPanel.getByRole('button', { name: '+ Tags' }));
+
+    await waitFor(() => {
+      expect(screen.getByText('Tags for notes.txt')).toBeInTheDocument();
+    });
+
+    const tagInput = document.getElementById('fileSyncTagInput') as HTMLInputElement;
+    fireEvent.change(tagInput, { target: { value: 'Research Materials' } });
+    fireEvent.keyDown(tagInput, { key: 'Enter' });
+    fireEvent.click(screen.getByRole('button', { name: 'Done' }));
+
+    await waitFor(() => {
+      expect(rightPanel.getByRole('button', { name: 'Research Materials' })).toBeInTheDocument();
+    });
 
     fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
 
     await waitFor(() => {
       const persisted = JSON.parse(window.localStorage.getItem('marginalia:provider-sync-preferences') || '{}');
       expect(persisted.google.selectedTargets[0].tags).toEqual(['Teaching']);
+      expect(persisted.google.selectedTargets[0].itemTags).toEqual({ 'g-file-notes': ['Research Materials'] });
       expect(persisted.google.selectedTargets[0].itemTagExclusions).toEqual({ 'g-file-notes': ['Teaching'] });
     });
   });

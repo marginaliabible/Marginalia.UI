@@ -314,6 +314,97 @@ function computeEffectiveTags(
   return { effectiveTags: Array.from(effective), ownTags: [...(rootSelection.itemTags.get(targetId) ?? [])] };
 }
 
+interface UntaggedSelectionHit {
+  key: string;
+  rootSelectionKey: string;
+  // Ancestor node keys from the root selection down to (but not including) the untagged node.
+  // Used to expand the right-panel accordion so the row is visible before scrolling.
+  ancestorKeys: string[];
+}
+
+function isNodeTaggable(
+  nodeKey: string,
+  rootSelectionKey: string,
+  rootSelection: SelectedFolder,
+  nodes: Record<string, FolderTreeNode>,
+  providerAvailable: boolean
+): boolean {
+  const node = nodes[nodeKey];
+  if (!node || !providerAvailable) {
+    return false;
+  }
+
+  const isRootSelection = nodeKey === rootSelectionKey;
+  if (isRootSelection) {
+    return true;
+  }
+
+  if (rootSelection.excludedItemIds.has(node.id) || hasExcludedAncestor(nodeKey, rootSelectionKey, rootSelection, nodes)) {
+    return false;
+  }
+
+  if (node.kind === 'folder') {
+    return true;
+  }
+
+  return Boolean(getMarkupFileIcon(node.name)?.supported);
+}
+
+// Prefers root selections, then depth-first among already-loaded descendants. Nested items that
+// inherit tags from an ancestor count as tagged; items that exclude every inherited tag do not.
+function findFirstUntaggedSelection(
+  selectedRows: SelectedFolder[],
+  nodes: Record<string, FolderTreeNode>,
+  providerSyncFilesEnabled: Record<FederatedProvider, boolean>,
+  sessions: Record<FederatedProvider, FederatedSession | null>
+): UntaggedSelectionHit | null {
+  const walk = (
+    nodeKey: string,
+    rootSelectionKey: string,
+    rootSelection: SelectedFolder,
+    ancestorKeys: string[]
+  ): UntaggedSelectionHit | null => {
+    const node = nodes[nodeKey];
+    if (!node) {
+      return null;
+    }
+
+    const providerAvailable = providerSyncFilesEnabled[node.provider] && Boolean(sessions[node.provider]);
+    if (isNodeTaggable(nodeKey, rootSelectionKey, rootSelection, nodes, providerAvailable)) {
+      const { effectiveTags } = computeEffectiveTags(
+        nodeKey,
+        rootSelectionKey,
+        rootSelection,
+        nodes,
+        nodeKey === rootSelectionKey
+      );
+      if (effectiveTags.length === 0) {
+        return { key: nodeKey, rootSelectionKey, ancestorKeys };
+      }
+    }
+
+    if (node.kind === 'folder' && node.childrenLoaded) {
+      for (const childKey of node.childKeys) {
+        const found = walk(childKey, rootSelectionKey, rootSelection, [...ancestorKeys, nodeKey]);
+        if (found) {
+          return found;
+        }
+      }
+    }
+
+    return null;
+  };
+
+  for (const row of selectedRows) {
+    const found = walk(row.key, row.key, row, []);
+    if (found) {
+      return found;
+    }
+  }
+
+  return null;
+}
+
 function buildSelectedMapFromPayload(
   payload: Record<FederatedProvider, FolderSelectionTarget[]>
 ): Record<string, SelectedFolder> {
@@ -348,9 +439,11 @@ const FileSyncTagRowTags: React.FC<{
   effectiveTags: string[];
   ownTags: string[];
   tagColors: Map<string, string>;
+  flashAddButton?: boolean;
   onAdd: (event: React.MouseEvent) => void;
   onEditOwn: (event: React.MouseEvent) => void;
-}> = ({ effectiveTags, ownTags, tagColors, onAdd, onEditOwn }) => {
+  onFlashEnd?: () => void;
+}> = ({ effectiveTags, ownTags, tagColors, flashAddButton = false, onAdd, onEditOwn, onFlashEnd }) => {
   const ownTagSet = new Set(ownTags);
 
   return (
@@ -375,8 +468,9 @@ const FileSyncTagRowTags: React.FC<{
       })}
       <button
         type="button"
-        className="btn btn-outline-secondary btn-sm cloud-folder-tag-add-btn"
+        className={`btn btn-outline-secondary btn-sm cloud-folder-tag-add-btn${flashAddButton ? ' is-flashing' : ''}`}
         onClick={onAdd}
+        onAnimationEnd={flashAddButton ? onFlashEnd : undefined}
       >
         {effectiveTags.length === 0 ? '+ Tags' : '+'}
       </button>
@@ -402,9 +496,11 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
   const [highlightServiceProvider, setHighlightServiceProvider] = useState<FederatedProvider | null>(null);
   const [rightExpandedKeyByParent, setRightExpandedKeyByParent] = useState<Record<string, string | null>>({});
   const [tagColors, setTagColors] = useState<Map<string, string>>(() => getStoredResourceTagColors());
+  const [flashTagAddKey, setFlashTagAddKey] = useState<string | null>(null);
   const [tagModalTarget, setTagModalTarget] = useState<{
     rootSelectionKey: string;
     itemId: string | null;
+    itemKey: string;
     itemLabel: string;
     currentTags: string[];
     ownTags: string[];
@@ -414,6 +510,7 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
   const inFlightLoadsRef = useRef<Record<string, Promise<FolderTreeNode[]>>>({});
   const inFlightFolderSizeReadsRef = useRef<Partial<Record<string, Promise<void>>>>({});
   const nodeRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const selectedRowRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const rootRowRefs = useRef<Record<FederatedProvider, HTMLDivElement | null>>({ google: null, microsoft: null });
   const initialSelectionsRef = useRef(initialSelections);
   const hasBootstrappedSelectionsRef = useRef(false);
@@ -809,8 +906,32 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
   }, [isDirty, onDirtyChange]);
 
   const handleApply = useCallback(() => {
+    const untagged = findFirstUntaggedSelection(selectedRows, nodes, providerSyncFilesEnabled, sessions);
+    if (untagged) {
+      window.alert('You must supply tags for all files before saving.');
+
+      setRightExpandedKeyByParent((current) => {
+        if (untagged.key === untagged.rootSelectionKey) {
+          return current;
+        }
+
+        const next = { ...current, [RIGHT_PANEL_TOP_LEVEL_GROUP]: untagged.rootSelectionKey };
+        for (let index = 1; index < untagged.ancestorKeys.length; index += 1) {
+          next[untagged.ancestorKeys[index - 1]] = untagged.ancestorKeys[index];
+        }
+        return next;
+      });
+
+      setFlashTagAddKey(untagged.key);
+      window.setTimeout(() => {
+        selectedRowRefs.current[untagged.key]?.scrollIntoView?.({ block: 'center', behavior: 'smooth' });
+      }, 30);
+      return;
+    }
+
+    setErrorMessage(null);
     onSelectionsChange(toSelectionPayload(selectedRows, nodes));
-  }, [nodes, onSelectionsChange, selectedRows]);
+  }, [nodes, onSelectionsChange, providerSyncFilesEnabled, selectedRows, sessions]);
 
   const handleCancel = useCallback(() => {
     setSelected(buildSelectedMapFromPayload(initialSelectionsRef.current));
@@ -1265,7 +1386,8 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
                         <button
                           type="button"
                           className={`cloud-folder-tree-name${isRoot && highlightServiceProvider === node.provider ? ' is-highlighted' : ''}`}
-                          onClick={() => node.hasChildren && toggleExpanded(key)}
+                          disabled={disabled}
+                          onClick={() => toggleSelected(key)}
                         >
                           {node.name}
                         </button>
@@ -1357,6 +1479,7 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
                   setTagModalTarget({
                     rootSelectionKey: visibleRow.rootSelectionKey,
                     itemId: itemTagId,
+                    itemKey: visibleRow.key,
                     itemLabel: node.name,
                     currentTags: effectiveItemTags,
                     ownTags: ownItemTags,
@@ -1366,6 +1489,9 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
                 return (
                   <li key={visibleRow.key}>
                     <div
+                      ref={(entry) => {
+                        selectedRowRefs.current[visibleRow.key] = entry;
+                      }}
                       className={`cloud-folder-selected-row${canActivateName ? ' is-clickable' : ''}`}
                       style={{ paddingLeft: `${visibleRow.depth * 0.55}rem` }}
                       onClick={canActivateName ? handleNameActivate : undefined}
@@ -1417,8 +1543,12 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
                               effectiveTags={effectiveItemTags}
                               ownTags={ownItemTags}
                               tagColors={tagColors}
+                              flashAddButton={flashTagAddKey === visibleRow.key}
                               onAdd={handleOpenTagModal}
                               onEditOwn={handleOpenTagModal}
+                              onFlashEnd={() => {
+                                setFlashTagAddKey((current) => (current === visibleRow.key ? null : current));
+                              }}
                             />
                           )}
                         </div>
@@ -1428,7 +1558,17 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
                             {displayLabel}
                           </span>
                           {isTaggable && (
-                            <FileSyncTagRowTags effectiveTags={effectiveItemTags} ownTags={ownItemTags} tagColors={tagColors} onAdd={handleOpenTagModal} onEditOwn={handleOpenTagModal} />
+                            <FileSyncTagRowTags
+                              effectiveTags={effectiveItemTags}
+                              ownTags={ownItemTags}
+                              tagColors={tagColors}
+                              flashAddButton={flashTagAddKey === visibleRow.key}
+                              onAdd={handleOpenTagModal}
+                              onEditOwn={handleOpenTagModal}
+                              onFlashEnd={() => {
+                                setFlashTagAddKey((current) => (current === visibleRow.key ? null : current));
+                              }}
+                            />
                           )}
                         </div>
                       )}
@@ -1506,7 +1646,7 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
           itemLabel={tagModalTarget.itemLabel}
           initialTags={tagModalTarget.currentTags}
           onDone={(nextTags) => {
-            const { rootSelectionKey, itemId, currentTags, ownTags } = tagModalTarget;
+            const { rootSelectionKey, itemId, itemKey, currentTags, ownTags } = tagModalTarget;
             // Tags shown only because an ancestor owns them; deselecting one of these adds an
             // exclusion instead of trying to remove a tag this item never actually owned.
             const inheritedOnlyTags = currentTags.filter((tag) => !ownTags.includes(tag));
@@ -1518,6 +1658,14 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
               for (const tag of removedInheritedTags) {
                 excludeInheritedTag(rootSelectionKey, itemId, tag);
               }
+            }
+
+            // Flash only when the user just cleared the last effective tag — not when a newly
+            // added folder starts empty (that path never goes through this modal callback).
+            if (nextTags.length === 0 && currentTags.length > 0) {
+              setFlashTagAddKey(itemKey);
+            } else if (nextTags.length > 0) {
+              setFlashTagAddKey((current) => (current === itemKey ? null : current));
             }
 
             setTagColors(getStoredResourceTagColors());
