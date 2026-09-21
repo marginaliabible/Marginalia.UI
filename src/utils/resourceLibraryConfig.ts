@@ -5,10 +5,13 @@ export const DEFAULT_DOCUMENT_STORE_ADDRESS = 'documents/{documentId}';
 
 export type SourceFileKind = 'library' | 'resources' | 'translations' | 'documents' | 'translation' | 'hyperlinks';
 
+export type DocumentViewerKind = 'pdf' | 'markup';
+
 export interface LibraryFileLike {
   name?: unknown;
   modifiedOn?: unknown;
   documentStoreAddress?: unknown;
+  documentViewer?: unknown;
   source?: unknown;
   sources?: unknown;
 }
@@ -28,13 +31,14 @@ export interface ResourcesFileLike {
   modifiedOn?: unknown;
   name?: unknown;
   documentStoreAddress?: unknown;
+  documentViewer?: unknown;
   documentManifestAddress?: unknown;
   referencesAddress?: unknown;
-  shards?: unknown;
+  shards: unknown[];
 }
 
 export interface DocumentsFileLike {
-  documents?: unknown;
+  documents: unknown[];
 }
 
 // Canonical shape for a single documents.json entry, shared across parsing, caching, and URL building.
@@ -233,11 +237,21 @@ export function validateResourcesFile(payload: unknown, sourceUrl: string): Reso
   if (!readString(payload['modifiedOn'])) {
     throw new Error(`resources.json missing required modifiedOn at ${sourceUrl}`);
   }
-  if (!Array.isArray(payload['shards'])) {
+
+  const shards = payload['shards'];
+  if (!Array.isArray(shards)) {
     throw new Error(`resources.json missing required shards at ${sourceUrl}`);
   }
 
-  return payload;
+  return {
+    modifiedOn: payload['modifiedOn'],
+    name: payload['name'],
+    documentStoreAddress: payload['documentStoreAddress'],
+    documentViewer: payload['documentViewer'],
+    documentManifestAddress: payload['documentManifestAddress'],
+    referencesAddress: payload['referencesAddress'],
+    shards,
+  };
 }
 
 export function validateTranslationsFile(payload: unknown, sourceUrl: string): TranslationsFileLike {
@@ -260,11 +274,12 @@ export function validateDocumentsFile(payload: unknown, sourceUrl: string): Docu
     throw new Error(`documents.json payload is invalid at ${sourceUrl}`);
   }
 
-  if (!Array.isArray(payload['documents'])) {
+  const documents = payload['documents'];
+  if (!Array.isArray(documents)) {
     throw new Error(`documents.json missing required documents at ${sourceUrl}`);
   }
 
-  return payload;
+  return { documents };
 }
 
 export function validateHyperlinksFile(payload: unknown, sourceUrl: string): HyperlinksFileLike {
@@ -380,6 +395,38 @@ export function buildDocumentStorePageUrl(address: string, sourceUrl: string, do
   });
 
   return resolveAddress(output, sourceUrl);
+}
+
+/** Resolve the Markup pages shell URL (…/pages/ → …/pages/index.html). */
+export function buildMarkupDocumentShellUrl(pagesStoreUrl: string): string {
+  const trimmed = pagesStoreUrl.trim();
+  if (!trimmed) {
+    return trimmed;
+  }
+  if (/\/index\.html(?:[?#]|$)/i.test(trimmed)) {
+    return trimmed;
+  }
+  if (trimmed.endsWith('/')) {
+    return `${trimmed}index.html`;
+  }
+  if (/\/pages$/i.test(trimmed)) {
+    return `${trimmed}/index.html`;
+  }
+  return trimmed;
+}
+
+export function readDocumentViewerKind(value: unknown): DocumentViewerKind | null {
+  if (typeof value !== 'string') {
+    return null;
+  }
+  const normalized = value.trim().toLowerCase();
+  if (normalized === 'markup') {
+    return 'markup';
+  }
+  if (normalized === 'pdf') {
+    return 'pdf';
+  }
+  return null;
 }
 
 function isAbsoluteUrl(value: string): boolean {

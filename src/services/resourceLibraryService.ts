@@ -6,13 +6,17 @@ import {
   buildDocumentStorePageUrl,
   buildFetchUrlCandidates,
   isPlainObject,
+  readDocumentViewerKind,
   readResourceDocumentEntry,
   readString,
   resolveAddress,
   validateDocumentsFile,
   validateResourcesFile,
+  type DocumentViewerKind,
   type ResourceDocumentEntry,
+  type ResourcesFileLike,
 } from '../utils/resourceLibraryConfig';
+import { fetchStorageAware } from './storageAuthenticatedFetch';
 
 interface ResourceLibraryDB extends DBSchema {
   resourceShards: {
@@ -42,6 +46,7 @@ interface StoredResourceLibrary {
   resourcesUrl: string;
   documentManifestAddress: string;
   documentStoreAddress: string;
+  documentViewer: DocumentViewerKind | null;
   referencesAddress: string;
   documents: ResourceDocumentEntry[];
   resources: ExportManifestShard[];
@@ -100,6 +105,7 @@ export interface VerseResourceDocumentLink {
   page: number;
   url: string;
   raw?: string;
+  viewer: DocumentViewerKind;
 }
 
 export interface VerseResourceDocument {
@@ -134,10 +140,11 @@ interface ResourceOccurrence {
   raw?: string;
 }
 
+/** Parsed shard verse row — validated at the JSON/IDB boundary before caching. */
 interface ResourceVerseEntry {
-  ref?: unknown;
-  raw?: unknown;
-  occurrences?: unknown;
+  ref: string;
+  raw?: string;
+  occurrences: Array<{ documentId: string; page: number }>;
 }
 
 interface ResolvedResourceLibrary {
@@ -146,6 +153,7 @@ interface ResolvedResourceLibrary {
   resourcesUrl: string;
   documentManifestAddress: string;
   documentStoreAddress: string;
+  documentViewer: DocumentViewerKind | null;
   referencesAddress: string;
   modifiedOn?: string;
   documentsById: Map<string, ResourceDocumentEntry>;
@@ -154,9 +162,15 @@ interface ResolvedResourceLibrary {
 }
 
 interface ResourceLibraryServiceDependencies {
-  fetchSettings: (sourceUrls: string[]) => Promise<FetchSettingsResult>;
+  fetchSettings: (
+    sourceUrls: string[],
+    options?: { forceRefresh?: boolean }
+  ) => Promise<FetchSettingsResult>;
   getDatabase: () => Promise<IDBPDatabase<any>>;
 }
+
+/** Soft TTL so cloud sync updates (empty → sharded resources.json) are noticed without a hard refresh. */
+const RESOURCE_LIBRARY_REVALIDATE_MS = 60_000;
 
 const BOOK_CANONICAL_BY_ALIAS = buildBookCanonicalAliasMap();
 
@@ -167,6 +181,7 @@ export class ResourceLibraryService {
   private sourceTranslationLibraryUrls: string[] = [];
   private resourceLibraryCacheKey: string | null = null;
   private resourceLibrarySourceKey: string | null = null;
+  private resourceLibrariesLoadedAt = 0;
   private hasLoadedResourceLibraries = false;
   private resourceLibrariesLoadSourceKey: string | null = null;
   private resourceLibrariesLoadPromise: Promise<ResolvedResourceLibrary[]> | null = null;
@@ -292,6 +307,7 @@ export class ResourceLibraryService {
             page,
             url: buildDocumentStorePageUrl(library.documentStoreAddress, library.resourcesUrl, document, page),
             raw: rawByPage.get(page),
+            viewer: library.documentViewer === 'markup' ? 'markup' : 'pdf',
           })),
         };
 
@@ -316,8 +332,12 @@ export class ResourceLibraryService {
         .filter((entry) => entry.length > 0)
     )).sort();
     const sourceKey = normalizedSourceUrls.join('|');
+    const cacheAgeMs = Date.now() - this.resourceLibrariesLoadedAt;
+    const cacheFresh = this.hasLoadedResourceLibraries
+      && this.resourceLibrarySourceKey === sourceKey
+      && cacheAgeMs < RESOURCE_LIBRARY_REVALIDATE_MS;
 
-    if (this.hasLoadedResourceLibraries && this.resourceLibrarySourceKey === sourceKey) {
+    if (cacheFresh) {
       return this.resourceLibraries;
     }
 
@@ -326,7 +346,9 @@ export class ResourceLibraryService {
     }
 
     const loadPromise = (async (): Promise<ResolvedResourceLibrary[]> => {
-      const fetched = await this.fetchSettings(normalizedSourceUrls);
+      // forceRefresh so library.json snapshot cache does not stick with empty child resources
+      // after cloud sync fills resources.json (library.modifiedOn may be unchanged).
+      const fetched = await this.fetchSettings(normalizedSourceUrls, { forceRefresh: true });
       this.sourceArtifacts = fetched.artifacts;
       this.sourceTranslationLibraryUrls = fetched.translationLibraryUrls;
 
@@ -337,6 +359,7 @@ export class ResourceLibraryService {
       const nextKey = resourceEntries.map((entry) => `${entry.id}:${entry.source}:${entry.modifiedOn ?? ''}`).join('|');
       if (this.resourceLibraryCacheKey === nextKey && this.resourceLibraries.length > 0) {
         this.resourceLibrarySourceKey = sourceKey;
+        this.resourceLibrariesLoadedAt = Date.now();
         this.hasLoadedResourceLibraries = true;
         return this.resourceLibraries;
       }
@@ -354,6 +377,7 @@ export class ResourceLibraryService {
 
       this.resourceLibrarySourceKey = sourceKey;
       this.resourceLibraryCacheKey = nextKey;
+      this.resourceLibrariesLoadedAt = Date.now();
       this.hasLoadedResourceLibraries = true;
       this.resourceLibraries = resolved;
       this.verseResourceCache.clear();
@@ -384,6 +408,7 @@ export class ResourceLibraryService {
         resourcesUrl: fromDb.resourcesUrl,
         documentManifestAddress: fromDb.documentManifestAddress,
         documentStoreAddress: fromDb.documentStoreAddress,
+        documentViewer: fromDb.documentViewer ?? null,
         referencesAddress: fromDb.referencesAddress,
         modifiedOn: fromDb.modifiedOn,
         documentsById: new Map(fromDb.documents.map((entry) => [entry.documentId, entry] as const)),
@@ -402,6 +427,8 @@ export class ResourceLibraryService {
     const documentStoreAddress = readString(resourcesFile.documentStoreAddress)
       ?? meta.documentStoreAddress
       ?? DEFAULT_DOCUMENT_STORE_ADDRESS;
+    const documentViewer = readDocumentViewerKind(resourcesFile.documentViewer)
+      ?? readDocumentViewerKind(meta.documentViewer);
     const referencesAddress = resolveAddress(readString(resourcesFile.referencesAddress) ?? meta.referencesAddress ?? 'references/', resourcesUrl);
 
     const documentsPayload = await fetchJsonPayload(documentManifestAddress);
@@ -416,6 +443,7 @@ export class ResourceLibraryService {
       resourcesUrl,
       documentManifestAddress,
       documentStoreAddress,
+      documentViewer,
       referencesAddress,
       documents: Array.from(documentsById.values()),
       resources,
@@ -429,6 +457,7 @@ export class ResourceLibraryService {
       resourcesUrl,
       documentManifestAddress,
       documentStoreAddress,
+      documentViewer,
       referencesAddress,
       modifiedOn: meta.modifiedOn,
       documentsById,
@@ -479,9 +508,13 @@ export class ResourceLibraryService {
         continue;
       }
 
-      const raw = readString(entry.raw);
-      const hits = parseOccurrences(entry.occurrences, raw ?? null);
-      occurrences.push(...hits);
+      for (const hit of entry.occurrences) {
+        occurrences.push({
+          documentId: hit.documentId,
+          page: hit.page,
+          raw: entry.raw,
+        });
+      }
     }
 
     return occurrences;
@@ -505,9 +538,7 @@ export class ResourceLibraryService {
       : `${library.referencesAddress}/`;
     const shardUrl = resolveAddress(shardFile, referencesBase);
     const payload = await fetchJsonPayload(shardUrl);
-    const entries = Array.isArray(payload)
-      ? payload.filter((entry) => isPlainObject(entry)) as ResourceVerseEntry[]
-      : [];
+    const entries = parseResourceVerseEntries(payload);
 
     library.shardCache.set(shardFile, entries);
     await this.writeResourceShardToDatabase({
@@ -525,7 +556,15 @@ export class ResourceLibraryService {
   private async readResourceShardFromDatabase(key: string): Promise<StoredResourceShard | null> {
     const db = await this.getDatabase() as IDBPDatabase<ResourceLibraryDB>;
     const stored = await db.get('resourceShards', key);
-    return stored ?? null;
+    if (!stored) {
+      return null;
+    }
+
+    // Re-parse so legacy IndexedDB rows with loose shapes stay type-safe at runtime.
+    return {
+      ...stored,
+      entries: parseResourceVerseEntries(stored.entries),
+    };
   }
 
   private async writeResourceShardToDatabase(stored: StoredResourceShard): Promise<void> {
@@ -539,7 +578,7 @@ async function fetchJsonPayload(sourceUrl: string): Promise<unknown> {
 
   for (const candidate of buildFetchUrlCandidates(sourceUrl)) {
     try {
-      const response = await fetch(candidate, { cache: 'no-store' });
+      const response = await fetchStorageAware(candidate, { cache: 'no-store' });
       if (!response.ok) {
         failures.push(`${candidate} -> ${response.status}`);
         continue;
@@ -602,7 +641,7 @@ function summarizeRepositories(entries: BibleTranslationMeta[]): SourceRepositor
   };
 
   for (const entry of entries) {
-    const repositoryType = entry.repositoryType ?? normalizeRepositoryType(undefined, entry.source);
+    const repositoryType = entry.repositoryType ?? normalizeRepositoryType(entry.source);
     if (repositoryType === 'hosted') {
       summary.hosted += 1;
       continue;
@@ -647,7 +686,7 @@ function buildSourceLibraries(
       label: entry.label,
       source: entry.source,
       configuredSourceUrl: entry.configuredSourceUrl,
-      repositoryType: entry.repositoryType ?? normalizeRepositoryType(undefined, entry.source),
+      repositoryType: entry.repositoryType ?? normalizeRepositoryType(entry.source),
       artifactType,
     });
   }
@@ -663,7 +702,7 @@ function buildSourceLibraries(
       label: prettifyLibraryLabel(trimmed),
       source: trimmed,
       configuredSourceUrl: trimmed,
-      repositoryType: normalizeRepositoryType(undefined, trimmed),
+      repositoryType: normalizeRepositoryType(trimmed),
       artifactType: 'translation-library',
     });
   }
@@ -687,7 +726,7 @@ function buildArtifactInventory(
       label: entry.label,
       source: entry.source,
       configuredSourceUrl: entry.configuredSourceUrl,
-      repositoryType: entry.repositoryType ?? normalizeRepositoryType(undefined, entry.source),
+      repositoryType: entry.repositoryType ?? normalizeRepositoryType(entry.source),
       artifactType: entry.artifactType ?? 'translation',
     }))
     .sort((a, b) => {
@@ -824,12 +863,7 @@ function findBestManifestShard(
   return undefined;
 }
 
-function parseReferenceRef(refValue: unknown): { bookToken: string; chapter: number; verse: number } | null {
-  const ref = readString(refValue);
-  if (!ref) {
-    return null;
-  }
-
+function parseReferenceRef(ref: string): { bookToken: string; chapter: number; verse: number } | null {
   const parts = ref.split('.');
   if (parts.length < 3) {
     return null;
@@ -848,12 +882,38 @@ function parseReferenceRef(refValue: unknown): { bookToken: string; chapter: num
   return { bookToken, chapter, verse };
 }
 
-function parseOccurrences(value: unknown, rawText: string | null): ResourceOccurrence[] {
+function parseResourceVerseEntries(payload: unknown): ResourceVerseEntry[] {
+  if (!Array.isArray(payload)) {
+    return [];
+  }
+
+  const entries: ResourceVerseEntry[] = [];
+  for (const item of payload) {
+    if (!isPlainObject(item)) {
+      continue;
+    }
+
+    const ref = readString(item['ref']);
+    if (!ref) {
+      continue;
+    }
+
+    entries.push({
+      ref,
+      raw: readString(item['raw']),
+      occurrences: parseOccurrenceItems(item['occurrences']),
+    });
+  }
+
+  return entries;
+}
+
+function parseOccurrenceItems(value: unknown): Array<{ documentId: string; page: number }> {
   if (!Array.isArray(value)) {
     return [];
   }
 
-  const occurrences: ResourceOccurrence[] = [];
+  const occurrences: Array<{ documentId: string; page: number }> = [];
   for (const item of value) {
     if (!isPlainObject(item)) {
       continue;
@@ -868,20 +928,16 @@ function parseOccurrences(value: unknown, rawText: string | null): ResourceOccur
     occurrences.push({
       documentId,
       page: Math.floor(page),
-      raw: rawText ?? undefined,
     });
   }
 
   return occurrences;
 }
 
-function parseResourceDocuments(payload: unknown): Map<string, ResourceDocumentEntry> {
+function parseResourceDocuments(documents: unknown[]): Map<string, ResourceDocumentEntry> {
   const map = new Map<string, ResourceDocumentEntry>();
-  if (!Array.isArray(payload)) {
-    return map;
-  }
 
-  for (const item of payload) {
+  for (const item of documents) {
     const entry = readResourceDocumentEntry(item);
     if (!entry) {
       continue;
@@ -893,17 +949,9 @@ function parseResourceDocuments(payload: unknown): Map<string, ResourceDocumentE
   return map;
 }
 
-function parseManifestShards(payload: unknown): ExportManifestShard[] {
-  if (!isPlainObject(payload)) {
-    return [];
-  }
-
-  if (!Array.isArray(payload['shards'])) {
-    return [];
-  }
-
+function parseManifestShards(resourcesFile: ResourcesFileLike): ExportManifestShard[] {
   const shards: ExportManifestShard[] = [];
-  for (const item of payload['shards']) {
+  for (const item of resourcesFile.shards) {
     if (!isPlainObject(item)) {
       continue;
     }
@@ -966,25 +1014,7 @@ function normalizeLookupBookName(value: string): string {
     .trim();
 }
 
-function normalizeRepositoryType(
-  value: unknown,
-  source: string
-): RepositoryType {
-  if (typeof value === 'string') {
-    const normalized = value.trim().toLowerCase();
-    if (normalized === 'local' || normalized === 'hosted' || normalized === 'github-public' || normalized === 'github-private') {
-      return normalized;
-    }
-
-    if (normalized === 'github') {
-      return 'github-public';
-    }
-
-    if (normalized === 'generic-http') {
-      return 'hosted';
-    }
-  }
-
+function normalizeRepositoryType(source: string): RepositoryType {
   if (!/^https?:\/\//i.test(source)) {
     return 'local';
   }

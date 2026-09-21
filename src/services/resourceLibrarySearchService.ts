@@ -6,6 +6,7 @@ import {
   buildFetchUrlCandidates,
   inferSourceFileKindFromPayload,
   inferSourceFileKindFromUrl,
+  readDocumentViewerKind,
   readLibrarySourceAddresses,
   readResourceDocumentEntry,
   readString,
@@ -13,10 +14,12 @@ import {
   validateDocumentsFile,
   validateLibraryFile,
   validateResourcesFile,
+  type DocumentViewerKind,
   type LibraryFileLike,
   type ResourceDocumentEntry,
   type ResourcesFileLike,
 } from '../utils/resourceLibraryConfig';
+import { fetchStorageAware } from './storageAuthenticatedFetch';
 
 const SEARCH_LIMIT = 5000;
 const DEFAULT_LIBRARY_PATH = 'data/library.json';
@@ -30,6 +33,7 @@ export interface ResourceDocumentTitleSearchMatch {
   title: string;
   tags: string[];
   url: string;
+  viewer: DocumentViewerKind;
 }
 
 export interface ResourceDocumentTitleSearchResultSet {
@@ -45,6 +49,7 @@ interface ResourceLibraryCandidate {
   resourcesUrl: string;
   documentManifestAddress: string;
   documentStoreAddress: string;
+  documentViewer: DocumentViewerKind | null;
   documents?: ResourceLibraryIndexDoc[];
 }
 
@@ -54,6 +59,7 @@ interface ResourceLibraryIndexDoc extends ResourceDocumentEntry {
   libraryLabel: string;
   resourcesUrl: string;
   documentStoreAddress: string;
+  documentViewer: DocumentViewerKind | null;
 }
 
 interface ResourceLibrarySearchSnapshot {
@@ -94,7 +100,7 @@ export async function searchResourceDocumentTitles(
 
   const index = new MiniSearch<ResourceLibraryIndexDoc>({
     fields: ['title'],
-    storeFields: ['title', 'documentId', 'libraryId', 'libraryLabel', 'tags', 'resourcesUrl', 'documentStoreAddress', 'hash'],
+    storeFields: ['title', 'documentId', 'libraryId', 'libraryLabel', 'tags', 'resourcesUrl', 'documentStoreAddress', 'documentViewer', 'hash'],
     processTerm: (term: string) => normalizeEnglishTerm(term),
   });
 
@@ -127,6 +133,7 @@ export async function searchResourceDocumentTitles(
     const resourcesUrl = result['resourcesUrl'] as string;
     const documentStoreAddress = result['documentStoreAddress'] as string;
     const hash = typeof result['hash'] === 'string' ? (result['hash'] as string) : undefined;
+    const viewer = readDocumentViewerKind(result['documentViewer']) ?? 'pdf';
 
     return {
       id: `${libraryId}-${documentId}`,
@@ -136,6 +143,7 @@ export async function searchResourceDocumentTitles(
       title,
       tags,
       url: buildDocumentStorePageUrl(documentStoreAddress, resourcesUrl, { documentId, hash }, 1),
+      viewer,
     };
   });
 
@@ -290,9 +298,8 @@ async function loadCandidateDocuments(candidate: ResourceLibraryCandidate): Prom
   const documentsPayload = await fetchJsonPayload(candidate.documentManifestAddress);
   const documentsFile = validateDocumentsFile(documentsPayload, candidate.documentManifestAddress);
   const documents: ResourceLibraryIndexDoc[] = [];
-  const documentEntries = Array.isArray(documentsFile.documents) ? documentsFile.documents : [];
 
-  for (const item of documentEntries) {
+  for (const item of documentsFile.documents) {
     const entry = readResourceDocumentEntry(item);
     if (!entry) {
       continue;
@@ -305,6 +312,7 @@ async function loadCandidateDocuments(candidate: ResourceLibraryCandidate): Prom
       libraryLabel: candidate.label,
       resourcesUrl: candidate.resourcesUrl,
       documentStoreAddress: candidate.documentStoreAddress,
+      documentViewer: candidate.documentViewer,
     });
   }
 
@@ -318,8 +326,10 @@ function buildCandidate(resourcesUrl: string, resources: ResourcesFileLike, libr
   const documentStoreAddress = readString(resources.documentStoreAddress)
     ?? readString(library?.documentStoreAddress)
     ?? DEFAULT_DOCUMENT_STORE_ADDRESS;
+  const documentViewer = readDocumentViewerKind(resources.documentViewer)
+    ?? readDocumentViewerKind(library?.documentViewer);
 
-  return { id, label, resourcesUrl, documentManifestAddress, documentStoreAddress };
+  return { id, label, resourcesUrl, documentManifestAddress, documentStoreAddress, documentViewer };
 }
 
 async function fetchJsonPayload(sourceUrl: string): Promise<unknown> {
@@ -327,7 +337,7 @@ async function fetchJsonPayload(sourceUrl: string): Promise<unknown> {
 
   for (const candidate of buildFetchUrlCandidates(sourceUrl)) {
     try {
-      const response = await fetch(candidate, { cache: 'no-store' });
+      const response = await fetchStorageAware(candidate, { cache: 'no-store' });
       if (!response.ok) {
         failures.push(`${candidate} -> ${response.status}`);
         continue;
