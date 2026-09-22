@@ -11,6 +11,7 @@ import {
   readString,
   validateHyperlinksFile,
 } from '../utils/resourceLibraryConfig';
+import { fetchStorageAware } from './storageAuthenticatedFetch';
 
 export const BUILT_IN_HYPERLINKS_SOURCE = 'data/hyperlinks.json';
 
@@ -139,7 +140,7 @@ export class HyperlinkService {
     let lastStatus = 0;
 
     for (const candidate of buildFetchUrlCandidates(sourceUrl)) {
-      const response = await fetch(candidate, { cache: 'no-store' });
+      const response = await fetchStorageAware(candidate, { cache: 'no-store' });
       if (response.ok) {
         return (await response.json()) as unknown;
       }

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import VerseDisplay from './VerseDisplay';
 import PdfViewerPane from './PdfViewerPane';
+import MarkupDocumentViewer from './MarkupDocumentViewer';
 import { useAppDispatch, useAppSelector } from '../store/hooks';
 import {
   openVerseTabs,
@@ -445,9 +446,9 @@ const WorkspaceMainPane: React.FC<WorkspaceMainPaneProps> = ({
     return () => window.removeEventListener('keydown', handleArrowSelectionKey, true);
   }, [handleArrowSelectionKey]);
 
-  const shouldRenderPdfViewer = pdfViewer.isOpen && !isPanelDetached;
+  const shouldRenderDocumentViewer = pdfViewer.isOpen && !isPanelDetached;
 
-  if (!currentBible && !shouldRenderPdfViewer) {
+  if (!currentBible && !shouldRenderDocumentViewer) {
     return null;
   }
 
@@ -465,8 +466,8 @@ const WorkspaceMainPane: React.FC<WorkspaceMainPaneProps> = ({
     >
       <div className="card border-0 shadow-sm">
         <div className="card-body workspace-scroll pb-4">
-          {shouldRenderPdfViewer ? (
-            <PdfViewerPane />
+          {shouldRenderDocumentViewer ? (
+            pdfViewer.kind === 'markup' ? <MarkupDocumentViewer /> : <PdfViewerPane />
           ) : selectedBook ? (
             <VerseDisplay
               chaptersByTranslation={chaptersByTranslation}

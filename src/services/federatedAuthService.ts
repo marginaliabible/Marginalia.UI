@@ -212,7 +212,15 @@ function clearOAuthQueryParams(): void {
   }
 
   const url = new URL(window.location.href);
-  const paramsToStrip = ['code', 'state', 'error', 'error_description', 'session_state'];
+  const paramsToStrip = [
+    'code',
+    'state',
+    'error',
+    'error_description',
+    'session_state',
+    'microsoft_oauth_ticket',
+    'microsoft_oauth_error',
+  ];
   let changed = false;
 
   for (const name of paramsToStrip) {
@@ -231,22 +239,22 @@ function clearOAuthQueryParams(): void {
   window.history.replaceState(null, '', nextUrl);
 }
 
-function buildTokenExchangeEndpoint(baseUrl: string): string {
+function buildAuthServiceEndpoint(baseUrl: string, relativePath: string): string {
   const endpoint = new URL(baseUrl);
   const normalizedPath = endpoint.pathname.replace(/\/+$/, '');
-  endpoint.pathname = `${normalizedPath}/oauth/token-exchange`;
+  const suffix = relativePath.replace(/^\/+/, '');
+  endpoint.pathname = `${normalizedPath}/${suffix}`;
   endpoint.search = '';
   endpoint.hash = '';
   return endpoint.toString();
 }
 
+function buildTokenExchangeEndpoint(baseUrl: string): string {
+  return buildAuthServiceEndpoint(baseUrl, 'oauth/token-exchange');
+}
+
 function buildTokenRefreshEndpoint(baseUrl: string): string {
-  const endpoint = new URL(baseUrl);
-  const normalizedPath = endpoint.pathname.replace(/\/+$/, '');
-  endpoint.pathname = `${normalizedPath}/oauth/token-refresh`;
-  endpoint.search = '';
-  endpoint.hash = '';
-  return endpoint.toString();
+  return buildAuthServiceEndpoint(baseUrl, 'oauth/token-refresh');
 }
 
 function tryParseOAuthErrorPayload(value: string): OAuthErrorPayload | null {
@@ -432,25 +440,6 @@ function buildGoogleAuthorizeUrl(
   return url.toString();
 }
 
-function buildMicrosoftAuthorizeUrl(
-  clientId: string,
-  redirectUri: string,
-  state: string,
-  challenge: string,
-  scope: string
-): string {
-  const url = new URL('https://login.microsoftonline.com/common/oauth2/v2.0/authorize');
-  url.searchParams.set('client_id', clientId);
-  url.searchParams.set('redirect_uri', redirectUri);
-  url.searchParams.set('response_type', 'code');
-  url.searchParams.set('scope', scope);
-  url.searchParams.set('code_challenge', challenge);
-  url.searchParams.set('code_challenge_method', 'S256');
-  url.searchParams.set('state', state);
-  url.searchParams.set('prompt', 'select_account');
-  return url.toString();
-}
-
 function buildGoogleScope(options: Required<FederatedAuthorizationOptions>): string {
   const scopes = ['openid', 'profile', 'email'];
 
@@ -460,20 +449,6 @@ function buildGoogleScope(options: Required<FederatedAuthorizationOptions>): str
 
   if (options.syncFiles) {
     scopes.push('https://www.googleapis.com/auth/drive.readonly');
-  }
-
-  return scopes.join(' ');
-}
-
-function buildMicrosoftScope(options: Required<FederatedAuthorizationOptions>): string {
-  const scopes = ['openid', 'profile', 'email', 'offline_access', 'User.Read'];
-
-  if (options.syncSettings) {
-    scopes.push('Files.ReadWrite.AppFolder');
-  }
-
-  if (options.syncFiles) {
-    scopes.push('Files.Read', 'Sites.Read.All');
   }
 
   return scopes.join(' ');
@@ -524,40 +499,110 @@ async function exchangeGoogleCode(
   return (await response.json()) as GoogleTokenResponse;
 }
 
-async function exchangeMicrosoftCode(
-  code: string,
-  codeVerifier: string,
-  clientId: string,
-  redirectUri: string
-): Promise<MicrosoftTokenResponse> {
+interface MicrosoftBffStartResponse {
+  authorizeUrl?: string;
+  redirectUri?: string;
+  error?: string;
+  message?: string;
+}
+
+interface MicrosoftBffTicketResponse extends MicrosoftTokenResponse {
+  refresh_token_stored?: boolean;
+  userId?: string;
+  error?: string;
+  message?: string;
+}
+
+async function beginMicrosoftBffAuthorization(
+  options: Required<FederatedAuthorizationOptions>
+): Promise<void> {
   const lambdaBaseUrl = readAwsLambdaBaseUrl();
   if (!lambdaBaseUrl) {
-    throw new Error('Set VITE_AUTH_SERVICE_URL for brokered token exchange before signing in.');
+    throw new Error('Set VITE_AUTH_SERVICE_URL for brokered Microsoft sign-in.');
   }
 
-  const endpoint = buildTokenExchangeEndpoint(lambdaBaseUrl);
+  if (typeof window === 'undefined') {
+    throw new Error('Microsoft sign-in requires a browser window.');
+  }
+
+  const returnUrl = `${window.location.origin}${window.location.pathname}`;
+  const endpoint = buildAuthServiceEndpoint(lambdaBaseUrl, 'oauth/microsoft/start');
   const response = await fetch(endpoint, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      provider: 'microsoft',
-      code,
-      codeVerifier,
-      redirectUri,
-      origin: typeof window !== 'undefined' ? window.location.origin : undefined,
-      clientId,
+      returnUrl,
       userId: readCurrentUserId() || undefined,
+      syncSettings: options.syncSettings,
+      syncFiles: options.syncFiles,
     }),
   });
 
-  if (!response.ok) {
-    const text = await response.text();
-    throw new Error(`Microsoft token exchange failed via broker (${response.status}): ${text}`);
+  const payload = (await response.json()) as MicrosoftBffStartResponse;
+  if (!response.ok || typeof payload.authorizeUrl !== 'string' || !payload.authorizeUrl) {
+    throw new Error(
+      payload.message || payload.error || `Microsoft sign-in start failed (${response.status}).`
+    );
   }
 
-  return (await response.json()) as MicrosoftTokenResponse;
+  window.location.assign(payload.authorizeUrl);
+}
+
+async function redeemMicrosoftOAuthTicket(ticket: string): Promise<MicrosoftBffTicketResponse> {
+  const lambdaBaseUrl = readAwsLambdaBaseUrl();
+  if (!lambdaBaseUrl) {
+    throw new Error('Set VITE_AUTH_SERVICE_URL for brokered Microsoft sign-in.');
+  }
+
+  const endpoint = buildAuthServiceEndpoint(lambdaBaseUrl, 'oauth/microsoft/ticket');
+  const response = await fetch(endpoint, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ ticket }),
+  });
+
+  const payload = (await response.json()) as MicrosoftBffTicketResponse;
+  if (!response.ok || typeof payload.access_token !== 'string') {
+    throw new Error(
+      payload.message || payload.error || `Microsoft ticket redeem failed (${response.status}).`
+    );
+  }
+
+  return payload;
+}
+
+async function materializeFederatedSession(
+  provider: FederatedProvider,
+  tokenPayload: GoogleTokenResponse | MicrosoftTokenResponse
+): Promise<FederatedSession> {
+  const profile = provider === 'google'
+    ? await fetchGoogleProfile(tokenPayload.access_token)
+    : await fetchMicrosoftProfile(tokenPayload.access_token);
+
+  // The broker keeps the refresh token when it can identify the user; otherwise hand it over now
+  // (first link, before a user ID exists) so the browser never has to retain a long-lived credential.
+  let retainedRefreshToken = tokenPayload.refresh_token;
+  if (retainedRefreshToken) {
+    const storeUserId = readCurrentUserId() || profile.email || profile.providerAccountId;
+    if (await persistRefreshToken(provider, storeUserId, retainedRefreshToken)) {
+      retainedRefreshToken = undefined;
+    }
+  }
+
+  const now = Date.now();
+  return {
+    provider,
+    accessToken: tokenPayload.access_token,
+    refreshToken: retainedRefreshToken,
+    grantedAt: now,
+    expiresAt: now + Math.max(300, tokenPayload.expires_in) * 1000,
+    scope: tokenPayload.scope,
+    profile,
+  };
 }
 
 async function refreshProviderToken(
@@ -635,6 +680,7 @@ export async function revokeStoredRefreshToken(provider: FederatedProvider): Pro
     endpoint.pathname = `${endpoint.pathname.replace(/\/$/, '')}/oauth/token-revoke`;
     await fetch(endpoint.toString(), {
       method: 'POST',
+      credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ provider, userId }),
     });
@@ -720,14 +766,21 @@ export async function beginFederatedAuthorization(
   provider: FederatedProvider,
   options?: FederatedAuthorizationOptions
 ): Promise<void> {
-  const clientId = readClientId(provider);
-  if (!clientId) {
-    const envVar = provider === 'google' ? 'VITE_GOOGLE_CLIENT_ID' : 'VITE_MICROSOFT_CLIENT_ID';
-    throw new Error(`Missing ${envVar} in your frontend environment.`);
-  }
+  const authorizationOptions = normalizeAuthorizationOptions(options);
 
   if (!readAwsLambdaBaseUrl()) {
     throw new Error('Missing VITE_AUTH_SERVICE_URL. Federated sign-in requires Lambda token exchange.');
+  }
+
+  if (provider === 'microsoft') {
+    // Confidential Web + PKCE is handled by CCS; the browser only starts and redeems a ticket.
+    await beginMicrosoftBffAuthorization(authorizationOptions);
+    return;
+  }
+
+  const clientId = readClientId(provider);
+  if (!clientId) {
+    throw new Error('Missing VITE_GOOGLE_CLIENT_ID in your frontend environment.');
   }
 
   if (typeof window === 'undefined' || !window.crypto?.subtle) {
@@ -738,10 +791,7 @@ export async function beginFederatedAuthorization(
   const codeVerifier = createRandomHex(64);
   const codeChallenge = await createCodeChallenge(codeVerifier);
   const redirectUri = getRedirectUri();
-  const authorizationOptions = normalizeAuthorizationOptions(options);
-  const scope = provider === 'google'
-    ? buildGoogleScope(authorizationOptions)
-    : buildMicrosoftScope(authorizationOptions);
+  const scope = buildGoogleScope(authorizationOptions);
 
   const pendingRequest: PendingAuthRequest = {
     provider,
@@ -754,11 +804,9 @@ export async function beginFederatedAuthorization(
   map[state] = pendingRequest;
   writePendingRequestMap(map);
 
-  const authorizeUrl = provider === 'google'
-    ? buildGoogleAuthorizeUrl(clientId, redirectUri, state, codeChallenge, scope)
-    : buildMicrosoftAuthorizeUrl(clientId, redirectUri, state, codeChallenge, scope);
-
-  window.location.assign(authorizeUrl);
+  window.location.assign(
+    buildGoogleAuthorizeUrl(clientId, redirectUri, state, codeChallenge, scope)
+  );
 }
 
 export async function completeFederatedAuthorizationFromUrl(): Promise<OAuthCallbackResult> {
@@ -767,6 +815,42 @@ export async function completeFederatedAuthorizationFromUrl(): Promise<OAuthCall
   }
 
   const url = new URL(window.location.href);
+  const microsoftTicket = url.searchParams.get('microsoft_oauth_ticket');
+  const microsoftError = url.searchParams.get('microsoft_oauth_error');
+
+  if (microsoftTicket || microsoftError) {
+    if (microsoftError) {
+      clearOAuthQueryParams();
+      return {
+        handled: true,
+        provider: 'microsoft',
+        error: microsoftError,
+      };
+    }
+
+    try {
+      const tokenPayload = await redeemMicrosoftOAuthTicket(microsoftTicket!);
+      const session = await materializeFederatedSession('microsoft', tokenPayload);
+      const sessions = readStoredSessions();
+      sessions.microsoft = session;
+      writeStoredSessions(sessions);
+      clearOAuthQueryParams();
+      return {
+        handled: true,
+        provider: 'microsoft',
+        session,
+      };
+    } catch (callbackError) {
+      clearOAuthQueryParams();
+      const message = callbackError instanceof Error ? callbackError.message : String(callbackError);
+      return {
+        handled: true,
+        provider: 'microsoft',
+        error: message,
+      };
+    }
+  }
+
   const code = url.searchParams.get('code');
   const state = url.searchParams.get('state');
   const error = url.searchParams.get('error');
@@ -813,44 +897,21 @@ export async function completeFederatedAuthorizationFromUrl(): Promise<OAuthCall
       throw new Error('Client ID is not configured for this provider.');
     }
 
-    const tokenPayload = pending.provider === 'google'
-      ? await exchangeGoogleCode(code, pending.codeVerifier, clientId, redirectUri)
-      : await exchangeMicrosoftCode(code, pending.codeVerifier, clientId, redirectUri);
-
-    const profile = pending.provider === 'google'
-      ? await fetchGoogleProfile(tokenPayload.access_token)
-      : await fetchMicrosoftProfile(tokenPayload.access_token);
-
-    // The broker keeps the refresh token when it can identify the user; otherwise hand it over now
-    // (first link, before a user ID exists) so the browser never has to retain a long-lived credential.
-    let retainedRefreshToken = tokenPayload.refresh_token;
-    if (retainedRefreshToken) {
-      const storeUserId = readCurrentUserId() || profile.email || profile.providerAccountId;
-      if (await persistRefreshToken(pending.provider, storeUserId, retainedRefreshToken)) {
-        retainedRefreshToken = undefined;
-      }
+    if (pending.provider !== 'google') {
+      throw new Error('Microsoft sign-in must complete via the CCS BFF ticket callback.');
     }
 
-    const now = Date.now();
-    const session: FederatedSession = {
-      provider: pending.provider,
-      accessToken: tokenPayload.access_token,
-      refreshToken: retainedRefreshToken,
-      grantedAt: now,
-      expiresAt: now + Math.max(300, tokenPayload.expires_in) * 1000,
-      scope: tokenPayload.scope,
-      profile,
-    };
-
+    const tokenPayload = await exchangeGoogleCode(code, pending.codeVerifier, clientId, redirectUri);
+    const session = await materializeFederatedSession('google', tokenPayload);
     const sessions = readStoredSessions();
-    sessions[pending.provider] = session;
+    sessions.google = session;
     writeStoredSessions(sessions);
 
     clearOAuthQueryParams();
 
     return {
       handled: true,
-      provider: pending.provider,
+      provider: 'google',
       session,
     };
   } catch (callbackError) {

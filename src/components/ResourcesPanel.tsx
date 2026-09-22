@@ -1,7 +1,9 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import type { PanelTab, VerseContext } from '../models/tab';
 import { useAppDispatch, useAppSelector } from '../store/hooks';
-import { openPdfViewer, setResourceHiddenTags } from '../store/slices/uiSlice';
+import { openDocumentViewer, setResourceHiddenTags } from '../store/slices/uiSlice';
+import type { DocumentViewerKind } from '../utils/resourceLibraryConfig';
+import { buildMarkupDocumentShellUrl } from '../utils/resourceLibraryConfig';
 import { bibleService, type VerseResourcesPayload } from '../services/bibleService';
 import { buildPdfProxyUrl } from '../utils/pdfProxy';
 import { getOrAssignResourceTagColors, TAG_COLOR_PALETTE } from '../utils/resourceTagColors';
@@ -156,15 +158,21 @@ const ResourcesPanel: React.FC<ResourcesPanelProps> = ({ tab, isActive }) => {
     url: string,
     page: number,
     title: string,
-    raw?: string
+    raw?: string,
+    viewer: DocumentViewerKind = 'pdf'
   ) => {
     event.preventDefault();
 
     const proxyUrl = buildPdfProxyUrl(url);
     void proxyUrl;
-    // const viewerUrl = proxyUrl || url;
-    const viewerUrl = url;
-    dispatch(openPdfViewer({ sourceUrl: viewerUrl, page, title, matchRaw: raw ?? null }));
+    const viewerUrl = viewer === 'markup' ? buildMarkupDocumentShellUrl(url) : url;
+    dispatch(openDocumentViewer({
+      sourceUrl: viewerUrl,
+      page,
+      title,
+      matchRaw: raw ?? null,
+      kind: viewer,
+    }));
 
     if (isPanelDetached && typeof window !== 'undefined' && window.opener && !window.opener.closed) {
       window.opener.focus();
@@ -272,7 +280,7 @@ const ResourcesPanel: React.FC<ResourcesPanelProps> = ({ tab, isActive }) => {
                             <button
                               type="button"
                               className="resource-page-link btn btn-link btn-sm p-0 align-baseline"
-                              onClick={(event) => handleOpenDocumentPage(event, link.url, link.page, document.title, link.raw)}
+                              onClick={(event) => handleOpenDocumentPage(event, link.url, link.page, document.title, link.raw, link.viewer)}
                             >
                               {link.page}
                             </button>

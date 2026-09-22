@@ -2,6 +2,8 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import SidePanelContent from './SidePanelContent';
 import PdfViewerPane from './PdfViewerPane';
+import MarkupDocumentViewer from './MarkupDocumentViewer';
+import { useAppSelector } from '../store/hooks';
 import WorkspaceDivider from './WorkspaceDivider';
 
 interface DetachedPanelPortalProps {
@@ -19,6 +21,7 @@ const DetachedPanelPortal: React.FC<DetachedPanelPortalProps> = ({
   pdfViewerIsOpen,
   sidePanelContentProps,
 }) => {
+  const { pdfViewer } = useAppSelector((state) => state.ui);
   const detachedWorkspaceRef = useRef<HTMLDivElement | null>(null);
   const [detachedPanelPercent, setDetachedPanelPercent] = useState(54);
   const [isDetachedPanelWide, setIsDetachedPanelWide] = useState(true);
@@ -124,7 +127,7 @@ const DetachedPanelPortal: React.FC<DetachedPanelPortalProps> = ({
         >
           <div className="card border-0 shadow-sm h-100">
             <div className="card-body workspace-scroll pb-3">
-              <PdfViewerPane />
+              {pdfViewer.kind === 'markup' ? <MarkupDocumentViewer /> : <PdfViewerPane />}
             </div>
           </div>
         </section>

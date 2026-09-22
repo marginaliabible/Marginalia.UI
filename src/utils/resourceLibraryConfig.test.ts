@@ -3,8 +3,11 @@ import {
   buildDocumentPageUrl,
   buildDocumentStorePageUrl,
   buildFetchUrlCandidates,
+  buildMarkupDocumentShellUrl,
+  indexResourceDocuments,
   inferSourceFileKindFromPayload,
   inferSourceFileKindFromUrl,
+  readDocumentViewerKind,
   readLibrarySourceAddresses,
   validateDocumentsFile,
   validateHyperlinksFile,
@@ -105,6 +108,22 @@ describe('address helpers', () => {
     expect(result).toBe('data/documents/de/ad/deadbeef/pages/?page=3');
   });
 
+  it('appends index.html for Markup pages directory URLs', () => {
+    expect(buildMarkupDocumentShellUrl('https://cdn.example/documents/ab/cd/hash/pages/'))
+      .toBe('https://cdn.example/documents/ab/cd/hash/pages/index.html');
+    expect(buildMarkupDocumentShellUrl('https://cdn.example/documents/ab/cd/hash/pages'))
+      .toBe('https://cdn.example/documents/ab/cd/hash/pages/index.html');
+    expect(buildMarkupDocumentShellUrl('https://cdn.example/documents/ab/cd/hash/pages/index.html'))
+      .toBe('https://cdn.example/documents/ab/cd/hash/pages/index.html');
+  });
+
+  it('reads explicit documentViewer kinds only', () => {
+    expect(readDocumentViewerKind('markup')).toBe('markup');
+    expect(readDocumentViewerKind('pdf')).toBe('pdf');
+    expect(readDocumentViewerKind('html')).toBeNull();
+    expect(readDocumentViewerKind(undefined)).toBeNull();
+  });
+
   it('prefers CDN candidates for raw GitHub URLs', () => {
     const candidates = buildFetchUrlCandidates('https://raw.githubusercontent.com/owner/repo/main/data/library.json');
 
@@ -147,5 +166,35 @@ describe('hyperlinks sources', () => {
 
   it('rejects payloads without a hyperlinks array', () => {
     expect(() => validateHyperlinksFile({}, 'hyperlinks.json')).toThrow(/missing required hyperlinks/);
+  });
+});
+
+describe('indexResourceDocuments', () => {
+  it('resolves Research shard occurrence ids that use the content hash', () => {
+    const cloudId = '4722B103DE3C61C9!s7612e5b92f724d6dbfadcd185b9151cf';
+    const contentHash = '3560593f53b5b9614cd2125c605bf535c10baf4460e9e3afd25aa5c6df689ab2';
+    const entry = {
+      documentId: cloudId,
+      title: 'Fellowship - Confession of Belief',
+      tags: ['Research Materials'],
+      hash: contentHash,
+    };
+
+    const byId = indexResourceDocuments([entry]);
+
+    expect(byId.get(cloudId)).toEqual(entry);
+    expect(byId.get(contentHash)).toEqual(entry);
+  });
+
+  it('does not duplicate when hash is absent or equals documentId', () => {
+    const entry = {
+      documentId: 'doc-1',
+      title: 'Untitled',
+      tags: [],
+    };
+
+    const byId = indexResourceDocuments([entry]);
+    expect(byId.size).toBe(1);
+    expect(byId.get('doc-1')).toEqual(entry);
   });
 });

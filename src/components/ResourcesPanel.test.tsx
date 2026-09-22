@@ -39,7 +39,7 @@ describe('ResourcesPanel visibility gating', () => {
     (useAppDispatch as unknown as jest.Mock).mockReturnValue(jest.fn());
     (useAppSelector as unknown as jest.Mock).mockImplementation((selector: (state: unknown) => unknown) => (
       selector({
-        ui: { sourceUrls: [], resourceHiddenTags: [], pdfViewer: null },
+        ui: { sourceUrls: [], resourceHiddenTags: [], pdfViewer: { isOpen: false, kind: 'pdf', sourceUrl: null, title: null, page: 1, matchRaw: null, focusNonce: 0 } },
         bible: { currentBible: null, isPanelDetached: false },
       })
     ));

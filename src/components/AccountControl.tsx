@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAppDispatch, useAppSelector } from '../store/hooks';
-import { restoreState, setUserId } from '../store/slices/uiSlice';
+import { addSourceUrl, restoreState, setUserId } from '../store/slices/uiSlice';
 import { loadTranslation, setCurrentBibleFromId } from '../store/slices/bibleSlice';
 import { bibleService } from '../services/bibleService';
 import {
@@ -19,13 +19,20 @@ import {
   writeCloudConfigForSession,
   type SyncedCloudConfig,
 } from '../services/cloudConfigProviderService';
-import { queueCloudFolderSelection } from '../services/cloudControlService';
+import { queueCloudFolderSelection, reportSyncActivity } from '../services/cloudControlService';
+import {
+  clearStorageSession,
+  establishStorageSession,
+  setStorageSessionUserId,
+} from '../services/storageAuthenticatedFetch';
 import type { FederatedProvider, LinkedCloudAccount, MarginaliaState } from '../models/bible';
 import CloudFolderPicker, { type FolderSelectionTarget } from './CloudFolderPicker';
 import './AccountControl.scss';
 
 type SyncState = 'idle' | 'syncing' | 'error';
 const THIRTY_MINUTES_MS = 30 * 60 * 1000;
+const SYNC_ACTIVITY_THROTTLE_MS = 5 * 60 * 1000;
+const SYNC_ACTIVITY_FORCE_GAP_MS = 60 * 60 * 1000;
 const PROVIDERS: FederatedProvider[] = ['google', 'microsoft'];
 const DISCONNECT_FILE_SYNC_CONFIRMATION = 'Your synchronization data will be kept for 30 days. If you reconnect after 30 days than you may incur additional data usage to reprocess your files. Are you sure you wish to disconnect this service from file sync?';
 const UNSAVED_FILE_SYNC_CONFIRMATION = 'You have unapplied File Sync folder changes. Discard them?';
@@ -290,6 +297,7 @@ const AccountControl: React.FC = () => {
   const hasUserActivitySinceReadRef = useRef(false);
   const cloudRefreshInFlightRef = useRef(false);
   const lastCloudReadAtRef = useRef(Date.now());
+  const lastSyncActivityReportAtRef = useRef(0);
   const reconnectPromptSeenRef = useRef<string>('');
 
   const persistedConfigFingerprint = useMemo(() => {
@@ -546,6 +554,8 @@ const AccountControl: React.FC = () => {
     // The first cloud account ever connected becomes the internal User ID reference; no-op once set.
     if (session.profile.email) {
       dispatch(setUserId(session.profile.email));
+      setStorageSessionUserId(session.profile.email);
+      void establishStorageSession(session.profile.email);
     }
 
     const persistedState = bibleService.readState() as MarginaliaState;
@@ -623,6 +633,12 @@ const AccountControl: React.FC = () => {
       .filter((provider) => !currentSessions[provider]);
     setMissingProviderPrompts(missingOnThisDevice);
 
+    const bootUserId = String(saved.userId ?? '').trim();
+    if (bootUserId && getMostRecentlyGrantedSession(currentSessions)) {
+      setStorageSessionUserId(bootUserId);
+      void establishStorageSession(bootUserId);
+    }
+
     void (async () => {
       const refreshedSessions = await getFreshFederatedSessions();
       if (!isMountedRef.current) {
@@ -633,6 +649,11 @@ const AccountControl: React.FC = () => {
       const refreshedMissing = Array.from(new Set(initialLinked.map((entry) => entry.provider)))
         .filter((provider) => !refreshedSessions[provider]);
       setMissingProviderPrompts(refreshedMissing);
+
+      if (bootUserId && getMostRecentlyGrantedSession(refreshedSessions)) {
+        setStorageSessionUserId(bootUserId);
+        void establishStorageSession(bootUserId);
+      }
     })();
 
     hasInitializedCloudStateRef.current = true;
@@ -764,6 +785,29 @@ const AccountControl: React.FC = () => {
       return;
     }
 
+    const hasFileSyncSession = PROVIDERS.some(
+      (provider) => providerSyncPreferences[provider].syncFiles && Boolean(providerSessionByType[provider])
+    );
+
+    const maybeReportSyncActivity = (force = false) => {
+      if (!userId || !hasFileSyncSession) {
+        return;
+      }
+
+      if (document.visibilityState !== 'visible') {
+        return;
+      }
+
+      const now = Date.now();
+      const elapsed = now - lastSyncActivityReportAtRef.current;
+      if (!force && lastSyncActivityReportAtRef.current > 0 && elapsed < SYNC_ACTIVITY_THROTTLE_MS) {
+        return;
+      }
+
+      lastSyncActivityReportAtRef.current = now;
+      void reportSyncActivity({ userId });
+    };
+
     const isEligibleForActivityRefresh = (): boolean => {
       if (document.visibilityState !== 'visible') {
         return false;
@@ -786,19 +830,30 @@ const AccountControl: React.FC = () => {
 
     const markActive = () => {
       hasUserActivitySinceReadRef.current = true;
+      maybeReportSyncActivity(false);
       maybeRefreshFromActivity();
     };
 
     const onVisibilityChange = () => {
       if (document.visibilityState === 'visible') {
+        // First visible after ≥1h since last report: force so idle pending syncs accelerate.
+        const force = lastSyncActivityReportAtRef.current === 0
+          || Date.now() - lastSyncActivityReportAtRef.current >= SYNC_ACTIVITY_FORCE_GAP_MS;
+        maybeReportSyncActivity(force);
         maybeRefreshFromActivity();
       }
     };
 
     const onFocus = () => {
       hasUserActivitySinceReadRef.current = true;
+      const force = lastSyncActivityReportAtRef.current === 0
+        || Date.now() - lastSyncActivityReportAtRef.current >= SYNC_ACTIVITY_FORCE_GAP_MS;
+      maybeReportSyncActivity(force);
       maybeRefreshFromActivity();
     };
+
+    // Startup presence when File Sync is connected.
+    maybeReportSyncActivity(true);
 
     const activityEvents: Array<keyof WindowEventMap> = ['pointerdown', 'keydown', 'scroll'];
     for (const eventName of activityEvents) {
@@ -814,7 +869,7 @@ const AccountControl: React.FC = () => {
       document.removeEventListener('visibilitychange', onVisibilityChange);
       window.removeEventListener('focus', onFocus);
     };
-  }, [ready, refreshCloudSnapshot]);
+  }, [ready, refreshCloudSnapshot, userId, providerSyncPreferences, providerSessionByType]);
 
   const syncNow = useCallback(async () => {
     if (!ready || linkedAccounts.length === 0) {
@@ -932,7 +987,18 @@ const AccountControl: React.FC = () => {
 
     const nextSessions = removeStoredFederatedSession(provider);
     setSessions(nextSessions);
-    void revokeStoredRefreshToken(provider);
+    void (async () => {
+      await revokeStoredRefreshToken(provider);
+      const remaining = getMostRecentlyGrantedSession(nextSessions);
+      const userId = String(bibleService.readState().userId ?? remaining?.profile.email ?? '').trim();
+      if (remaining && userId) {
+        setStorageSessionUserId(userId);
+        await establishStorageSession(userId);
+      } else {
+        setStorageSessionUserId('');
+        await clearStorageSession();
+      }
+    })();
 
     persistCloudState({
       cloudLinkedAccounts: nextLinked,
@@ -1040,6 +1106,7 @@ const AccountControl: React.FC = () => {
     }
 
     // Write marginalia-config.json first (selection SoT), then notify CCS to enumerate from that config.
+    // After CCS returns libraryUrl, register it in sourceUrls and re-write config so Settings Sync keeps it.
     void (async () => {
       const currentSessions = await getFreshFederatedSessions();
       setSessions(currentSessions);
@@ -1080,6 +1147,7 @@ const AccountControl: React.FC = () => {
       });
       setHasPendingSync(false);
 
+      const registeredLibraryUrls = new Set<string>();
       await Promise.all(PROVIDERS.map(async (provider) => {
         const next = nextSelections[provider];
         const previous = previousSelections[provider];
@@ -1109,17 +1177,59 @@ const AccountControl: React.FC = () => {
           return;
         }
 
-        await queueCloudFolderSelection({
+        const result = await queueCloudFolderSelection({
           userId,
           provider,
           removed: [...previousIds].filter((id) => !nextIds.has(id)),
           accessToken: providerSessionByType[provider]?.accessToken,
         });
+        const libraryUrl = String(result?.libraryUrl ?? '').trim();
+        if (libraryUrl) {
+          registeredLibraryUrls.add(libraryUrl);
+        }
       }));
+
+      if (registeredLibraryUrls.size === 0) {
+        return;
+      }
+
+      for (const libraryUrl of registeredLibraryUrls) {
+        dispatch(addSourceUrl(libraryUrl));
+      }
+
+      const nextSourceUrls = Array.from(new Set([
+        ...sourceUrls,
+        ...registeredLibraryUrls,
+      ].map((entry) => entry.trim()).filter((entry) => entry.length > 0)));
+
+      const payloadWithLibrary = toSyncedCloudConfig({
+        ...configSnapshot,
+        sourceUrls: nextSourceUrls,
+        providerFolderSelections: {
+          google: nextGoogleTargets,
+          microsoft: nextMicrosoftTargets,
+        },
+      }, linkedAccounts, syncedAt);
+
+      for (const provider of PROVIDERS) {
+        if (!nextPreferences[provider].syncSettings) {
+          continue;
+        }
+        const session = currentSessions[provider];
+        if (!session) {
+          continue;
+        }
+        try {
+          await writeCloudConfigForSession(session, payloadWithLibrary);
+        } catch (writeError) {
+          setStatusMessage(writeError instanceof Error ? writeError.message : String(writeError));
+          return;
+        }
+      }
     })().catch((error: unknown) => {
       setStatusMessage(error instanceof Error ? error.message : String(error));
     });
-  }, [configSnapshot, linkedAccounts, persistCloudState, providerSessionByType, providerSyncPreferences]);
+  }, [configSnapshot, dispatch, linkedAccounts, persistCloudState, providerSessionByType, providerSyncPreferences, sourceUrls]);
 
   const handleProviderAction = useCallback((provider: FederatedProvider) => {
     const connected = isProviderConnected(provider);

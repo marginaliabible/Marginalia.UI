@@ -6,6 +6,7 @@ import {
   buildDocumentStorePageUrl,
   buildFetchUrlCandidates,
   isPlainObject,
+  indexResourceDocuments,
   readDocumentViewerKind,
   readResourceDocumentEntry,
   readString,
@@ -264,12 +265,14 @@ export class ResourceLibraryService {
     for (const library of libraries) {
       const matches = await this.findResourceOccurrences(library, book, chapter, verse);
       for (const match of matches) {
+        // Research shards tag occurrences by content hash; documents.json keys by cloud id
+        // (with hash as a sibling field). Resolve either form to the same manifest entry.
         const document = library.documentsById.get(match.documentId);
         if (!document) {
           continue;
         }
 
-        const key = `${library.id}:${match.documentId}`;
+        const key = `${library.id}:${document.documentId}`;
         const existing = aggregated.get(key);
         const nextPages = existing
           ? Array.from(new Set([...existing.pages, match.page])).sort((a, b) => a - b)
@@ -299,7 +302,7 @@ export class ResourceLibraryService {
         const nextDoc: VerseResourceDocument = {
           libraryId: library.id,
           libraryLabel: library.label,
-          documentId: match.documentId,
+          documentId: document.documentId,
           title: document.title,
           tags,
           pages: nextPages,
@@ -411,7 +414,7 @@ export class ResourceLibraryService {
         documentViewer: fromDb.documentViewer ?? null,
         referencesAddress: fromDb.referencesAddress,
         modifiedOn: fromDb.modifiedOn,
-        documentsById: new Map(fromDb.documents.map((entry) => [entry.documentId, entry] as const)),
+        documentsById: indexResourceDocuments(fromDb.documents),
         resources: fromDb.resources,
         shardCache: new Map<string, ResourceVerseEntry[]>(),
       };
@@ -433,7 +436,8 @@ export class ResourceLibraryService {
 
     const documentsPayload = await fetchJsonPayload(documentManifestAddress);
     const documentsFile = validateDocumentsFile(documentsPayload, documentManifestAddress);
-    const documentsById = parseResourceDocuments(documentsFile.documents);
+    const documents = parseResourceDocuments(documentsFile.documents);
+    const documentsById = indexResourceDocuments(documents);
     const resources = parseManifestShards(resourcesFile);
 
     await this.writeResourceLibraryToDatabase({
@@ -445,7 +449,7 @@ export class ResourceLibraryService {
       documentStoreAddress,
       documentViewer,
       referencesAddress,
-      documents: Array.from(documentsById.values()),
+      documents,
       resources,
       modifiedOn: meta.modifiedOn,
       fetchedAt: Date.now(),
@@ -934,19 +938,21 @@ function parseOccurrenceItems(value: unknown): Array<{ documentId: string; page:
   return occurrences;
 }
 
-function parseResourceDocuments(documents: unknown[]): Map<string, ResourceDocumentEntry> {
-  const map = new Map<string, ResourceDocumentEntry>();
+function parseResourceDocuments(documents: unknown[]): ResourceDocumentEntry[] {
+  const entries: ResourceDocumentEntry[] = [];
+  const seen = new Set<string>();
 
   for (const item of documents) {
     const entry = readResourceDocumentEntry(item);
-    if (!entry) {
+    if (!entry || seen.has(entry.documentId)) {
       continue;
     }
 
-    map.set(entry.documentId, entry);
+    seen.add(entry.documentId);
+    entries.push(entry);
   }
 
-  return map;
+  return entries;
 }
 
 function parseManifestShards(resourcesFile: ResourcesFileLike): ExportManifestShard[] {

@@ -23,6 +23,7 @@ import {
   resolveGitHubPrivateSourceVersion,
 } from './githubPrivateSourceService';
 import { ResourceLibraryService } from './resourceLibraryService';
+import { fetchStorageAware } from './storageAuthenticatedFetch';
 import {
   buildFetchUrlCandidates,
   inferSourceFileKindFromPayload,
@@ -135,6 +136,7 @@ interface TranslationSettingsEntry {
   publicUrl?: string;
   repoAlias?: string;
   documentStoreAddress?: string;
+  documentViewer?: string;
   documentManifestAddress?: string;
   referencesAddress?: string;
   modifiedOn?: string;
@@ -241,6 +243,7 @@ export interface VerseResourceDocumentLink {
   page: number;
   url: string;
   raw?: string;
+  viewer?: 'pdf' | 'markup';
 }
 
 export interface VerseResourceDocument {
@@ -844,7 +847,7 @@ class BibleService {
     let lastStatus = 0;
 
     for (const candidate of buildFetchUrlCandidates(sourceUrl)) {
-      const response = await fetch(candidate, { cache: 'no-store' });
+      const response = await fetchStorageAware(candidate, { cache: 'no-store' });
       if (response.ok) {
         try {
           return { ok: true, payload: (await response.json()) as unknown };
@@ -1014,12 +1017,18 @@ class BibleService {
       const parsed = await this.parseSourcePayload(childUrl, payloadResult.payload, options);
       parsedChildCount += 1;
       const parentDocumentStoreAddress = readString(library.documentStoreAddress);
+      const parentDocumentViewer = readString(library.documentViewer);
       entries.push(
-        ...parsed.entries.map((entry) => (
-          entry.artifactType === 'resource-library' && parentDocumentStoreAddress && !entry.documentStoreAddress
-            ? { ...entry, documentStoreAddress: parentDocumentStoreAddress }
-            : entry
-        ))
+        ...parsed.entries.map((entry) => {
+          let next = entry;
+          if (entry.artifactType === 'resource-library' && parentDocumentStoreAddress && !entry.documentStoreAddress) {
+            next = { ...next, documentStoreAddress: parentDocumentStoreAddress };
+          }
+          if (entry.artifactType === 'resource-library' && parentDocumentViewer && !entry.documentViewer) {
+            next = { ...next, documentViewer: parentDocumentViewer };
+          }
+          return next;
+        })
       );
       for (const language of parsed.extraLanguages) {
         extraLanguages.set(language.code, language);
@@ -1097,6 +1106,7 @@ class BibleService {
         publicUrl: entry.publicUrl,
         repoAlias: entry.repoAlias,
         documentStoreAddress: entry.documentStoreAddress,
+        documentViewer: entry.documentViewer,
         documentManifestAddress: entry.documentManifestAddress,
         referencesAddress: entry.referencesAddress,
         modifiedOn: entry.modifiedOn,
@@ -1719,7 +1729,7 @@ class BibleService {
 
     for (const source of sources) {
       try {
-        const response = await fetch(source, {
+        const response = await fetchStorageAware(source, {
           cache: 'no-store',
           headers: repositoryType === 'github-private'
             ? createGitHubAuthHeaders()
@@ -1913,6 +1923,7 @@ function buildDirectResourceLibraryEntry(sourceUrl: string, resourcesPayload: Re
     repositoryType: normalizeRepositoryType(undefined, sourceUrl),
     artifactType: 'resource-library',
     documentStoreAddress: readString(resourcesPayload.documentStoreAddress),
+    documentViewer: readString(resourcesPayload.documentViewer),
     documentManifestAddress: readString(resourcesPayload.documentManifestAddress),
     referencesAddress: readString(resourcesPayload.referencesAddress),
     modifiedOn: readString(resourcesPayload.modifiedOn),

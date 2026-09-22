@@ -79,6 +79,20 @@ export function readResourceDocumentEntry(item: unknown): ResourceDocumentEntry 
   };
 }
 
+/** Index by cloud documentId and content hash so Research shard occurrences resolve. */
+export function indexResourceDocuments(documents: ResourceDocumentEntry[]): Map<string, ResourceDocumentEntry> {
+  const map = new Map<string, ResourceDocumentEntry>();
+
+  for (const entry of documents) {
+    map.set(entry.documentId, entry);
+    if (entry.hash && entry.hash !== entry.documentId) {
+      map.set(entry.hash, entry);
+    }
+  }
+
+  return map;
+}
+
 export interface TranslationsFileLike {
   modifiedOn?: unknown;
   name?: unknown;

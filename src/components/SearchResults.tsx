@@ -2,7 +2,8 @@ import React, { useEffect, useRef } from 'react';
 import type { QuickJumpTarget } from '../models/bible';
 import type { PanelTab } from '../models/tab';
 import { useAppDispatch, useAppSelector } from '../store/hooks';
-import { openPdfViewer } from '../store/slices/uiSlice';
+import { openDocumentViewer } from '../store/slices/uiSlice';
+import { buildMarkupDocumentShellUrl } from '../utils/resourceLibraryConfig';
 import { searchResourceDocumentTitles, type ResourceDocumentTitleSearchResultSet } from '../services/resourceLibrarySearchService';
 import { normalizeEnglishTerm } from '../services/searchNormalizer';
 import { isNewTestamentBook } from '../utils/book-aliases';
@@ -167,11 +168,13 @@ const SearchResults: React.FC<SearchResultsProps> = ({ tab, goToReference, onBef
 
   const handleOpenDocument = (match: NonNullable<typeof displayedDocumentMatches>[number]) => {
     onBeforeNavigate?.();
-    dispatch(openPdfViewer({
-      sourceUrl: match.url,
+    const kind = match.viewer === 'markup' ? 'markup' : 'pdf';
+    dispatch(openDocumentViewer({
+      sourceUrl: kind === 'markup' ? buildMarkupDocumentShellUrl(match.url) : match.url,
       page: 1,
       title: match.title,
       matchRaw: null,
+      kind,
     }));
   };
 

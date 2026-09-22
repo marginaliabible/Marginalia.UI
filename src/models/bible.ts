@@ -41,6 +41,7 @@ export interface BibleTranslationMeta {
   authHint?: string;
   orgName?: string;
   documentStoreAddress?: string;
+  documentViewer?: string;
   documentManifestAddress?: string;
   referencesAddress?: string;
   modifiedOn?: string;

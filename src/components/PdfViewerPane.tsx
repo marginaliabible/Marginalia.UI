@@ -1,7 +1,14 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { getDocument, GlobalWorkerOptions, TextLayer, Util } from 'pdfjs-dist';
-import type { PDFDocumentProxy, PDFPageProxy } from 'pdfjs-dist/types/src/display/api';
+import { getDocument, GlobalWorkerOptions } from 'pdfjs-dist';
+import type { PDFDocumentProxy } from 'pdfjs-dist/types/src/display/api';
+import {
+  EventBus,
+  PDFLinkService,
+  PDFViewer,
+  ScrollMode,
+} from 'pdfjs-dist/web/pdf_viewer.mjs';
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
+import 'pdfjs-dist/web/pdf_viewer.css';
 import { useAppDispatch, useAppSelector } from '../store/hooks';
 import { closePdfViewer, setPdfViewerPage } from '../store/slices/uiSlice';
 
@@ -11,80 +18,14 @@ const MIN_SCALE = 0.6;
 const MAX_SCALE = 2.4;
 const SCALE_STEP = 0.2;
 const RANGE_CHUNK_SIZE = 1024 * 1024;
-const POPUP_ANNOTATION_TYPE = 16;
-const WHEEL_PAGE_TURN_COOLDOWN_MS = 280;
-const CANVAS_RENDER_TIMEOUT_MS = 8000;
-const TEXT_LAYER_RENDER_TIMEOUT_MS = 3500;
 const OCR_SPACE_PATTERN = /[\s\u00A0\u1680\u180E\u2000-\u200D\u2028\u2029\u202F\u205F\u2060\u3000\uFEFF\u0000-\u001F]+/g;
 
-interface RenderedAnnotation {
-  id: string;
-  left: number;
-  top: number;
-  width: number;
-  height: number;
-  contents: string;
-  title: string;
-}
-
-interface HighlightBox {
-  left: number;
-  top: number;
-  width: number;
-  height: number;
-}
-
-interface TextContentItemLike {
-  str?: unknown;
-  transform?: unknown;
-  width?: unknown;
-}
-
-interface AnnotationDataLike {
-  id?: unknown;
-  rect?: unknown;
-  title?: unknown;
-  titleObj?: { str?: unknown } | null;
-  contents?: unknown;
-  contentsObj?: { str?: unknown } | null;
-  richText?: { str?: unknown } | null;
-  popupRef?: unknown;
-  annotationType?: unknown;
-}
-
-const isAbortOrCancelled = (error: unknown): boolean => {
-  if (!(error instanceof Error)) {
-    return false;
-  }
-
-  return error.name === 'AbortException' || error.name === 'RenderingCancelledException';
-};
-
 const clampScale = (value: number): number => Math.min(MAX_SCALE, Math.max(MIN_SCALE, Number(value.toFixed(2))));
-
-const withTimeout = async <T,>(promise: Promise<T>, timeoutMs: number, timeoutLabel: string): Promise<T> => {
-  let timeoutId: ReturnType<typeof setTimeout> | null = null;
-
-  const timeoutPromise = new Promise<never>((_, reject) => {
-    timeoutId = setTimeout(() => {
-      reject(new Error(timeoutLabel));
-    }, timeoutMs);
-  });
-
-  try {
-    return await Promise.race([promise, timeoutPromise]);
-  } finally {
-    if (timeoutId !== null) {
-      clearTimeout(timeoutId);
-    }
-  }
-};
 
 const normalizeMatchText = (value: string | null | undefined): string => {
   if (!value) {
     return '';
   }
-
   return value.replace(OCR_SPACE_PATTERN, ' ').trim();
 };
 
@@ -92,7 +33,6 @@ const getTouchDistance = (event: React.TouchEvent<HTMLElement>): number => {
   if (event.touches.length < 2) {
     return 0;
   }
-
   const [a, b] = [event.touches[0], event.touches[1]];
   return Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
 };
@@ -102,705 +42,323 @@ const sanitizeFileName = (value: string): string => {
   return next.length > 0 ? next : 'document';
 };
 
-const readAnnotationString = (value: unknown): string => typeof value === 'string' ? value.trim() : '';
+function clearRawHighlights(root: ParentNode | null | undefined): void {
+  root?.querySelectorAll('.pdf-raw-highlight').forEach((node) => node.remove());
+}
 
-const extractAnnotationText = (annotation: AnnotationDataLike | null | undefined): { title: string; contents: string } => {
-  if (!annotation) {
-    return { title: '', contents: '' };
+function highlightMatchOnPageView(pageViewRoot: HTMLElement, rawMatchText: string): HTMLElement | null {
+  const normalizedNeedle = normalizeMatchText(rawMatchText).toLowerCase();
+  if (!normalizedNeedle) {
+    return null;
   }
 
-  const title = readAnnotationString(annotation.titleObj?.str) || readAnnotationString(annotation.title);
-  const contents = readAnnotationString(annotation.contentsObj?.str)
-    || readAnnotationString(annotation.richText?.str)
-    || readAnnotationString(annotation.contents);
+  clearRawHighlights(pageViewRoot);
 
-  return { title, contents };
-};
+  const textLayer = pageViewRoot.querySelector('.textLayer');
+  if (!textLayer) {
+    return null;
+  }
+
+  const spans = Array.from(textLayer.querySelectorAll<HTMLElement>('span'));
+  if (spans.length === 0) {
+    return null;
+  }
+
+  let haystack = '';
+  const ranges: Array<{ node: HTMLElement; start: number; end: number }> = [];
+  for (const span of spans) {
+    const text = normalizeMatchText(span.textContent ?? '').toLowerCase();
+    if (!text) {
+      continue;
+    }
+    const start = haystack.length;
+    haystack += `${text} `;
+    ranges.push({ node: span, start, end: haystack.length });
+  }
+
+  const matchStart = haystack.indexOf(normalizedNeedle);
+  if (matchStart < 0) {
+    return null;
+  }
+  const matchEnd = matchStart + normalizedNeedle.length;
+
+  let firstHighlight: HTMLElement | null = null;
+  const pageRect = pageViewRoot.getBoundingClientRect();
+
+  for (const range of ranges) {
+    if (range.end <= matchStart || range.start >= matchEnd) {
+      continue;
+    }
+
+    const rect = range.node.getBoundingClientRect();
+    const highlight = pageViewRoot.ownerDocument.createElement('div');
+    highlight.className = 'pdf-raw-highlight';
+    highlight.style.left = `${rect.left - pageRect.left}px`;
+    highlight.style.top = `${rect.top - pageRect.top}px`;
+    highlight.style.width = `${Math.max(rect.width, 2)}px`;
+    highlight.style.height = `${Math.max(rect.height, 2)}px`;
+    pageViewRoot.appendChild(highlight);
+    if (!firstHighlight) {
+      firstHighlight = highlight;
+    }
+  }
+
+  return firstHighlight;
+}
 
 const PdfViewerPane: React.FC = () => {
   const dispatch = useAppDispatch();
   const { pdfViewer } = useAppSelector((state) => state.ui);
-  const stageRef = useRef<HTMLDivElement | null>(null);
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const textLayerRef = useRef<HTMLDivElement | null>(null);
-  const highlightLayerRef = useRef<HTMLDivElement | null>(null);
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const viewerRef = useRef<PDFViewer | null>(null);
+  const eventBusRef = useRef<EventBus | null>(null);
+  const linkServiceRef = useRef<PDFLinkService | null>(null);
   const loadingTaskRef = useRef<{ destroy: () => void } | null>(null);
-  const renderTasksRef = useRef(new Map<string, { cancel: () => void }>());
+  const documentProxyRef = useRef<PDFDocumentProxy | null>(null);
   const pinchStartDistanceRef = useRef(0);
   const pinchStartScaleRef = useRef(1);
-  const lastWheelPageTurnAtRef = useRef(0);
-  const fitScaleRef = useRef(1);
-  const previousNavigationRef = useRef<{ sourceUrl: string | null; page: number }>({
-    sourceUrl: null,
-    page: 1,
-  });
+  const highlightAttemptedRef = useRef(false);
+  const syncingPageFromViewerRef = useRef(false);
 
-  const [documentProxy, setDocumentProxy] = useState<PDFDocumentProxy | null>(null);
   const [pageCount, setPageCount] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
-  const [isRendering, setIsRendering] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [scale, setScale] = useState(1);
-  const [annotations, setAnnotations] = useState<RenderedAnnotation[]>([]);
-  const [activeAnnotationId, setActiveAnnotationId] = useState<string | null>(null);
-  const [useNativePopupFallback, setUseNativePopupFallback] = useState(false);
-  const renderCycleRef = useRef(0);
+  const [viewerReady, setViewerReady] = useState(false);
 
   const activeSourceUrl = pdfViewer.sourceUrl;
   const activePage = Math.max(1, pdfViewer.page);
   const matchRaw = normalizeMatchText(pdfViewer.matchRaw);
-
-  const adjustScale = (direction: 1 | -1) => {
-    setScale((current) => clampScale(current + (direction * SCALE_STEP)));
-  };
-
-  const getViewerWindow = (): Window => {
-    return stageRef.current?.ownerDocument.defaultView ?? window;
-  };
-
-  const getViewerDocument = (): Document => {
-    return stageRef.current?.ownerDocument ?? document;
-  };
-
-  useEffect(() => {
-    setUseNativePopupFallback(false);
-  }, [activeSourceUrl]);
-
-  const computeFitScaleForPageFrame = (pageWidth: number, pageHeight: number): number => {
-    const stage = stageRef.current;
-    if (!stage) {
-      return 1;
-    }
-
-    const computed = getViewerWindow().getComputedStyle(stage);
-    const horizontalPadding = Number.parseFloat(computed.paddingLeft || '0') + Number.parseFloat(computed.paddingRight || '0');
-    const verticalPadding = Number.parseFloat(computed.paddingTop || '0') + Number.parseFloat(computed.paddingBottom || '0');
-    const availableWidth = Math.max(1, stage.clientWidth - horizontalPadding);
-    const availableHeight = Math.max(1, stage.clientHeight - verticalPadding);
-    const widthScale = availableWidth / Math.max(1, pageWidth);
-    const heightScale = availableHeight / Math.max(1, pageHeight);
-    return clampScale(Math.min(widthScale, heightScale));
-  };
-
-  const isClippedByWidth = (): boolean => {
-    const stage = stageRef.current;
-    if (!stage) {
-      return false;
-    }
-
-    return stage.scrollWidth > stage.clientWidth + 1;
-  };
-
-  const resetZoomIfClipped = (): void => {
-    const fitScale = fitScaleRef.current;
-    if (scale <= fitScale) {
-      return;
-    }
-
-    if (!isClippedByWidth()) {
-      return;
-    }
-
-    setScale(fitScale);
-  };
-
-  const resetZoomToFitFrame = async (): Promise<void> => {
-    if (!documentProxy) {
-      setScale(fitScaleRef.current);
-      return;
-    }
-
-    try {
-      const pageNumber = Math.min(Math.max(1, activePage), documentProxy.numPages);
-      const page = await documentProxy.getPage(pageNumber);
-      const baseViewport = page.getViewport({ scale: 1 });
-      const fitScale = computeFitScaleForPageFrame(baseViewport.width, baseViewport.height);
-      fitScaleRef.current = fitScale;
-      setScale(fitScale);
-    } catch {
-      setScale(fitScaleRef.current);
-    }
-  };
-
-  const isScrolledToTop = (): boolean => {
-    const stage = stageRef.current;
-    if (!stage) {
-      return true;
-    }
-
-    return stage.scrollTop <= 1;
-  };
-
-  const isScrolledToBottom = (): boolean => {
-    const stage = stageRef.current;
-    if (!stage) {
-      return true;
-    }
-
-    return stage.scrollTop + stage.clientHeight >= stage.scrollHeight - 1;
-  };
-
-  const closeOpenAnnotation = () => {
-    setActiveAnnotationId(null);
-  };
-
-  const goToPage = (pageNumber: number) => {
-    const next = Math.max(1, Math.min(pageCount || 1, pageNumber));
-    if (next !== activePage) {
-      resetZoomIfClipped();
-    }
-    closeOpenAnnotation();
-    dispatch(setPdfViewerPage(next));
-  };
-
-  const renderHighlights = (
-    highlightLayer: HTMLDivElement,
-    textContent: unknown,
-    viewport: ReturnType<PDFPageProxy['getViewport']>,
-    rawMatchText: string
-  ): boolean => {
-    highlightLayer.innerHTML = '';
-
-    if (!rawMatchText) {
-      return false;
-    }
-
-    const itemsRaw = (textContent as { items?: unknown[] } | undefined)?.items;
-    const items = Array.isArray(itemsRaw) ? itemsRaw as TextContentItemLike[] : [];
-    const normalizedSegments: Array<{ start: number; end: number; item: TextContentItemLike }> = [];
-
-    let normalizedPageText = '';
-    let cursor = 0;
-
-    for (const item of items) {
-      const rawStr = typeof item.str === 'string' ? item.str : '';
-      const normalized = rawStr.replace(OCR_SPACE_PATTERN, ' ').trim();
-      if (!normalized) {
-        continue;
-      }
-
-      if (normalizedPageText.length > 0) {
-        normalizedPageText += ' ';
-        cursor += 1;
-      }
-
-      const start = cursor;
-      normalizedPageText += normalized;
-      cursor += normalized.length;
-      normalizedSegments.push({ start, end: cursor, item });
-    }
-
-    const matchStart = normalizedPageText.indexOf(rawMatchText);
-    if (matchStart < 0) {
-      return false;
-    }
-
-    const matchEnd = matchStart + rawMatchText.length;
-    const boxes: HighlightBox[] = [];
-
-    for (const segment of normalizedSegments) {
-      if (segment.end <= matchStart || segment.start >= matchEnd) {
-        continue;
-      }
-
-      const transform = Array.isArray(segment.item.transform) ? segment.item.transform as number[] : null;
-      const widthRaw = typeof segment.item.width === 'number' ? segment.item.width : 0;
-      if (!transform || transform.length < 6 || widthRaw <= 0) {
-        continue;
-      }
-
-      const mapped = Util.transform(viewport.transform, transform);
-      const height = Math.max(1, Math.hypot(mapped[2], mapped[3]));
-      const width = Math.max(1, widthRaw * viewport.scale);
-      boxes.push({
-        left: mapped[4],
-        top: mapped[5] - height,
-        width,
-        height,
-      });
-    }
-
-    for (const box of boxes) {
-      const marker = document.createElement('div');
-      marker.className = 'pdf-raw-highlight';
-      marker.style.left = `${box.left}px`;
-      marker.style.top = `${box.top}px`;
-      marker.style.width = `${box.width}px`;
-      marker.style.height = `${box.height}px`;
-      highlightLayer.appendChild(marker);
-    }
-
-    return boxes.length > 0;
-  };
-
-  const buildAnnotations = (
-    viewport: ReturnType<PDFPageProxy['getViewport']>,
-    rawAnnotations: unknown[]
-  ): RenderedAnnotation[] => {
-    const annotationsData = rawAnnotations as AnnotationDataLike[];
-    const popupAnnotations = new Map<string, AnnotationDataLike>();
-
-    for (const annotation of annotationsData) {
-      if (Number(annotation.annotationType) === POPUP_ANNOTATION_TYPE && annotation.id != null) {
-        popupAnnotations.set(String(annotation.id), annotation);
-      }
-    }
-
-    const output: RenderedAnnotation[] = [];
-    const seen = new Set<string>();
-
-    for (const annotation of annotationsData) {
-      if (Number(annotation.annotationType) === POPUP_ANNOTATION_TYPE) {
-        continue;
-      }
-
-      const rect = Array.isArray(annotation.rect) ? annotation.rect as number[] : null;
-      if (!rect || rect.length < 4) {
-        continue;
-      }
-
-      const popupRef = annotation.popupRef != null ? String(annotation.popupRef) : '';
-      const popupAnnotation = popupRef ? popupAnnotations.get(popupRef) ?? null : null;
-      const popupText = extractAnnotationText(popupAnnotation);
-      const ownText = extractAnnotationText(annotation);
-      const title = popupText.title || ownText.title;
-      const contents = popupText.contents || ownText.contents;
-
-      if (!title && !contents && !popupRef) {
-        continue;
-      }
-
-      const viewportRect = viewport.convertToViewportRectangle(rect);
-      const left = Math.min(viewportRect[0], viewportRect[2]);
-      const top = Math.min(viewportRect[1], viewportRect[3]);
-      const width = Math.max(14, Math.abs(viewportRect[0] - viewportRect[2]));
-      const height = Math.max(14, Math.abs(viewportRect[1] - viewportRect[3]));
-      const id = String(annotation.id ?? `${left}:${top}:${width}:${height}`);
-
-      if (seen.has(id)) {
-        continue;
-      }
-
-      seen.add(id);
-      output.push({ id, left, top, width, height, title, contents });
-    }
-
-    return output;
-  };
-
-  useEffect(() => {
-    if (!pdfViewer.isOpen) {
-      previousNavigationRef.current = { sourceUrl: activeSourceUrl, page: activePage };
-      return;
-    }
-
-    const previous = previousNavigationRef.current;
-    const hasNavigated = previous.sourceUrl !== activeSourceUrl || previous.page !== activePage;
-    if (hasNavigated) {
-      resetZoomIfClipped();
-    }
-
-    previousNavigationRef.current = { sourceUrl: activeSourceUrl, page: activePage };
-  }, [pdfViewer.isOpen, activeSourceUrl, activePage, scale]);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    const loadDocument = async () => {
-      if (!pdfViewer.isOpen || !activeSourceUrl) {
-        loadingTaskRef.current?.destroy();
-        loadingTaskRef.current = null;
-        setDocumentProxy(null);
-        setPageCount(0);
-        setAnnotations([]);
-        closeOpenAnnotation();
-        setError(null);
-        return;
-      }
-
-      setIsLoading(true);
-      setError(null);
-
-      try {
-        loadingTaskRef.current?.destroy();
-        const ownerDocument = getViewerDocument();
-        const loadingTask = getDocument({
-          url: activeSourceUrl,
-          disableAutoFetch: true,
-          disableStream: true,
-          disableRange: false,
-          rangeChunkSize: RANGE_CHUNK_SIZE,
-          ownerDocument,
-        });
-        loadingTaskRef.current = loadingTask;
-
-        const nextDocument = await loadingTask.promise;
-        if (cancelled) {
-          loadingTaskRef.current = null;
-          await nextDocument.destroy();
-          return;
-        }
-
-        loadingTaskRef.current = null;
-        setDocumentProxy(nextDocument);
-        setPageCount(nextDocument.numPages);
-        setAnnotations([]);
-        closeOpenAnnotation();
-
-        const pageForFit = Math.min(Math.max(1, activePage), nextDocument.numPages);
-        const fitPage = await nextDocument.getPage(pageForFit);
-        const baseViewport = fitPage.getViewport({ scale: 1 });
-        const fitScale = computeFitScaleForPageFrame(baseViewport.width, baseViewport.height);
-        fitScaleRef.current = fitScale;
-        setScale(fitScale);
-
-        if (activePage > nextDocument.numPages) {
-          dispatch(setPdfViewerPage(nextDocument.numPages));
-        }
-      } catch (loadError) {
-        if (cancelled) {
-          return;
-        }
-
-        loadingTaskRef.current = null;
-        setDocumentProxy(null);
-        setPageCount(0);
-        setError(loadError instanceof Error ? loadError.message : 'Unable to load PDF document.');
-      } finally {
-        if (!cancelled) {
-          setIsLoading(false);
-        }
-      }
-    };
-
-    void loadDocument();
-
-    return () => {
-      cancelled = true;
-      loadingTaskRef.current?.destroy();
-      loadingTaskRef.current = null;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pdfViewer.isOpen, activeSourceUrl, dispatch]);
-
-  useEffect(() => {
-    return () => {
-      if (documentProxy) {
-        void documentProxy.destroy();
-      }
-    };
-  }, [documentProxy]);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    const renderCurrentPage = async () => {
-      if (!documentProxy || !pdfViewer.isOpen || !canvasRef.current || !textLayerRef.current || !highlightLayerRef.current) {
-        return;
-      }
-
-      const renderCycle = renderCycleRef.current + 1;
-      renderCycleRef.current = renderCycle;
-      setIsRendering(true);
-      setError(null);
-      closeOpenAnnotation();
-      setAnnotations([]);
-
-      if (textLayerRef.current) {
-        textLayerRef.current.innerHTML = '';
-      }
-
-      if (highlightLayerRef.current) {
-        highlightLayerRef.current.innerHTML = '';
-      }
-
-      const selection = getViewerDocument().getSelection();
-      if (selection && stageRef.current && stageRef.current.contains(selection.anchorNode)) {
-        selection.removeAllRanges();
-      }
-
-      try {
-        const pageNumber = Math.min(Math.max(1, activePage), documentProxy.numPages);
-        const page = await documentProxy.getPage(pageNumber);
-        if (cancelled || !canvasRef.current || !textLayerRef.current || !highlightLayerRef.current) {
-          return;
-        }
-
-        const baseViewport = page.getViewport({ scale: 1 });
-        fitScaleRef.current = computeFitScaleForPageFrame(baseViewport.width, baseViewport.height);
-
-        const viewport = page.getViewport({ scale });
-        const viewerWindow = getViewerWindow();
-        const outputScale = viewerWindow.devicePixelRatio || 1;
-        const canvas = canvasRef.current;
-        const context = canvas.getContext('2d');
-        if (!context) {
-          throw new Error('PDF canvas rendering context is unavailable.');
-        }
-
-        canvas.width = Math.floor(viewport.width * outputScale);
-        canvas.height = Math.floor(viewport.height * outputScale);
-        canvas.style.width = `${Math.floor(viewport.width)}px`;
-        canvas.style.height = `${Math.floor(viewport.height)}px`;
-        context.setTransform(outputScale, 0, 0, outputScale, 0, 0);
-
-        const canvasTaskKey = 'canvas';
-        renderTasksRef.current.get(canvasTaskKey)?.cancel();
-        const canvasTask = page.render({ canvasContext: context, viewport });
-        renderTasksRef.current.set(canvasTaskKey, canvasTask);
-        await withTimeout(
-          canvasTask.promise,
-          CANVAS_RENDER_TIMEOUT_MS,
-          'Canvas render timed out.'
-        );
-
-        const textLayer = textLayerRef.current;
-        const highlightLayer = highlightLayerRef.current;
-        const textContent = await page.getTextContent();
-
-        textLayer.innerHTML = '';
-        textLayer.style.width = `${Math.floor(viewport.width)}px`;
-        textLayer.style.height = `${Math.floor(viewport.height)}px`;
-        textLayer.style.color = 'transparent';
-        textLayer.style.lineHeight = '1';
-        textLayer.style.setProperty('-webkit-text-fill-color', 'transparent');
-        textLayer.style.position = 'absolute';
-        textLayer.style.inset = '0';
-
-        const textTaskKey = 'text';
-        renderTasksRef.current.get(textTaskKey)?.cancel();
-        const textTask = new TextLayer({
-          textContentSource: textContent,
-          container: textLayer,
-          viewport,
-        });
-        renderTasksRef.current.set(textTaskKey, textTask);
-        try {
-          await withTimeout(
-            textTask.render(),
-            TEXT_LAYER_RENDER_TIMEOUT_MS,
-            'Text layer render timed out.'
-          );
-        } catch (textLayerError) {
-          textTask.cancel();
-          if (!cancelled && isAbortOrCancelled(textLayerError)) {
-            return;
-          }
-          textLayer.innerHTML = '';
-        }
-
-        highlightLayer.style.width = `${Math.floor(viewport.width)}px`;
-        highlightLayer.style.height = `${Math.floor(viewport.height)}px`;
-        renderHighlights(highlightLayer, textContent, viewport, matchRaw);
-
-        const nextAnnotations = buildAnnotations(viewport, await page.getAnnotations({ intent: 'display' }) as unknown[]);
-        if (!cancelled) {
-          setAnnotations(nextAnnotations);
-        }
-      } catch (renderError) {
-        if (!cancelled && !isAbortOrCancelled(renderError)) {
-          const timedOut = renderError instanceof Error && renderError.message === 'Canvas render timed out.';
-          if (timedOut && getViewerWindow() !== window) {
-            setUseNativePopupFallback(true);
-            setError(null);
-            return;
-          }
-
-          setError(renderError instanceof Error ? renderError.message : 'Unable to render PDF page.');
-        }
-      } finally {
-        if (!cancelled && renderCycleRef.current === renderCycle) {
-          setIsRendering(false);
-        }
-      }
-    };
-
-    void renderCurrentPage();
-
-    return () => {
-      cancelled = true;
-      for (const task of renderTasksRef.current.values()) {
-        task.cancel();
-      }
-      renderTasksRef.current.clear();
-    };
-  }, [documentProxy, activePage, scale, pdfViewer.isOpen, matchRaw]);
-
-  useEffect(() => {
-    const stage = stageRef.current;
-    if (!stage || !pdfViewer.isOpen) {
-      return;
-    }
-
-    stage.scrollTo({ top: 0, left: 0, behavior: 'auto' });
-  }, [activeSourceUrl, activePage, scale, pdfViewer.isOpen]);
-
-  useEffect(() => {
-    if (!pdfViewer.isOpen) {
-      return;
-    }
-
-    const viewerWindow = getViewerWindow();
-
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (!event.ctrlKey && !event.metaKey) {
-        return;
-      }
-
-      const isZoomIn = event.key === '=' || event.key === '+' || event.code === 'NumpadAdd';
-      const isZoomOut = event.key === '-' || event.key === '_' || event.code === 'NumpadSubtract';
-
-      if (isZoomIn) {
-        event.preventDefault();
-        adjustScale(1);
-        return;
-      }
-
-      if (isZoomOut) {
-        event.preventDefault();
-        adjustScale(-1);
-      }
-    };
-
-    viewerWindow.addEventListener('keydown', handleKeyDown, { capture: true });
-    return () => {
-      viewerWindow.removeEventListener('keydown', handleKeyDown, { capture: true });
-    };
-  }, [pdfViewer.isOpen]);
-
-  useEffect(() => {
-    const stage = stageRef.current;
-    if (!stage || !pdfViewer.isOpen) {
-      return;
-    }
-
-    const handleWheel = (event: WheelEvent) => {
-      if (event.ctrlKey) {
-        event.preventDefault();
-        if (event.deltaY < 0) {
-          adjustScale(1);
-        } else if (event.deltaY > 0) {
-          adjustScale(-1);
-        }
-        return;
-      }
-
-      const hasOverflowScrollbars = stage.scrollWidth > stage.clientWidth + 1 || stage.scrollHeight > stage.clientHeight + 1;
-      if (hasOverflowScrollbars) {
-        return;
-      }
-
-      const now = Date.now();
-      const atTop = stage.scrollTop <= 1;
-      const atBottom = stage.scrollTop + stage.clientHeight >= stage.scrollHeight - 1;
-      const largeEnoughDelta = Math.abs(event.deltaY) >= 20;
-
-      if (!largeEnoughDelta || now - lastWheelPageTurnAtRef.current < WHEEL_PAGE_TURN_COOLDOWN_MS) {
-        return;
-      }
-
-      if (event.deltaY < 0 && atTop && activePage > 1) {
-        event.preventDefault();
-        lastWheelPageTurnAtRef.current = now;
-        goToPage(activePage - 1);
-        return;
-      }
-
-      if (event.deltaY > 0 && atBottom && activePage < pageCount) {
-        event.preventDefault();
-        lastWheelPageTurnAtRef.current = now;
-        goToPage(activePage + 1);
-      }
-    };
-
-    stage.addEventListener('wheel', handleWheel, { passive: false });
-    return () => {
-      stage.removeEventListener('wheel', handleWheel);
-    };
-  }, [activePage, pageCount, pdfViewer.isOpen]);
-
-  useEffect(() => {
-    const stage = stageRef.current;
-    if (!stage || !pdfViewer.isOpen) {
-      return;
-    }
-
-    const handleArrowPaging = (event: KeyboardEvent) => {
-      if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) {
-        return;
-      }
-
-      if (event.key === 'ArrowDown') {
-        if (!isScrolledToBottom() || activePage >= pageCount) {
-          return;
-        }
-
-        event.preventDefault();
-        goToPage(activePage + 1);
-        return;
-      }
-
-      if (event.key === 'ArrowUp') {
-        if (!isScrolledToTop() || activePage <= 1) {
-          return;
-        }
-
-        event.preventDefault();
-        goToPage(activePage - 1);
-      }
-    };
-
-    stage.addEventListener('keydown', handleArrowPaging);
-    return () => {
-      stage.removeEventListener('keydown', handleArrowPaging);
-    };
-  }, [activePage, pageCount, pdfViewer.isOpen]);
-
-  useEffect(() => {
-    if (!activeAnnotationId) {
-      return;
-    }
-
-    const viewerWindow = getViewerWindow();
-
-    const handlePointerDown = (event: PointerEvent) => {
-      const target = event.target as HTMLElement | null;
-      if (!target) {
-        closeOpenAnnotation();
-        return;
-      }
-
-      if (target.closest('.pdf-annotation-popup') || target.closest('.pdf-annotation-marker')) {
-        return;
-      }
-
-      closeOpenAnnotation();
-    };
-
-    const handleEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        closeOpenAnnotation();
-      }
-    };
-
-    viewerWindow.addEventListener('pointerdown', handlePointerDown, true);
-    viewerWindow.addEventListener('keydown', handleEscape, true);
-
-    return () => {
-      viewerWindow.removeEventListener('pointerdown', handlePointerDown, true);
-      viewerWindow.removeEventListener('keydown', handleEscape, true);
-    };
-  }, [activeAnnotationId]);
+  const focusNonce = pdfViewer.focusNonce || 0;
 
   const title = useMemo(() => {
     if (pdfViewer.title && pdfViewer.title.trim().length > 0) {
       return pdfViewer.title;
     }
-
     return 'Document Viewer';
   }, [pdfViewer.title]);
 
-  if (!pdfViewer.isOpen) {
+  const goToPage = (pageNumber: number) => {
+    const next = Math.max(1, pageCount > 0 ? Math.min(pageCount, pageNumber) : pageNumber);
+    dispatch(setPdfViewerPage(next));
+  };
+
+  const adjustScale = (direction: -1 | 1) => {
+    setScale((current) => clampScale(current + direction * SCALE_STEP));
+  };
+
+  // Create viewer once container mounts.
+  useEffect(() => {
+    if (!pdfViewer.isOpen || pdfViewer.kind === 'markup') {
+      return;
+    }
+
+    const container = containerRef.current;
+    if (!container) {
+      return;
+    }
+
+    const eventBus = new EventBus();
+    const linkService = new PDFLinkService({ eventBus });
+    const pdfViewerInstance = new PDFViewer({
+      container,
+      eventBus,
+      linkService,
+      textLayerMode: 1,
+      annotationMode: 2,
+      removePageBorders: false,
+    });
+    linkService.setViewer(pdfViewerInstance);
+    pdfViewerInstance.scrollMode = ScrollMode.VERTICAL;
+
+    eventBusRef.current = eventBus;
+    linkServiceRef.current = linkService;
+    viewerRef.current = pdfViewerInstance;
+    setViewerReady(true);
+
+    const onPageChanging = (evt: { pageNumber?: number }) => {
+      if (typeof evt.pageNumber !== 'number') {
+        return;
+      }
+      syncingPageFromViewerRef.current = true;
+      dispatch(setPdfViewerPage(evt.pageNumber));
+      queueMicrotask(() => {
+        syncingPageFromViewerRef.current = false;
+      });
+    };
+    eventBus.on('pagechanging', onPageChanging);
+
+    return () => {
+      eventBus.off('pagechanging', onPageChanging);
+      try {
+        // pdf.js cleanup path accepts null at runtime.
+        (pdfViewerInstance as { setDocument: (doc: PDFDocumentProxy | null) => void }).setDocument(null);
+      } catch {
+        // ignore
+      }
+      viewerRef.current = null;
+      eventBusRef.current = null;
+      linkServiceRef.current = null;
+      setViewerReady(false);
+      container.replaceChildren();
+    };
+  }, [pdfViewer.isOpen, pdfViewer.kind, dispatch]);
+
+  // Load document when source changes.
+  useEffect(() => {
+    if (!pdfViewer.isOpen || pdfViewer.kind === 'markup' || !viewerReady || !activeSourceUrl) {
+      return;
+    }
+
+    const viewer = viewerRef.current;
+    const linkService = linkServiceRef.current;
+    if (!viewer || !linkService) {
+      return;
+    }
+
+    let cancelled = false;
+    setIsLoading(true);
+    setError(null);
+    setPageCount(0);
+    highlightAttemptedRef.current = false;
+
+    const previousTask = loadingTaskRef.current;
+    loadingTaskRef.current = null;
+    previousTask?.destroy();
+    documentProxyRef.current?.destroy().catch(() => undefined);
+    documentProxyRef.current = null;
+
+    const loadingTask = getDocument({
+      url: activeSourceUrl,
+      rangeChunkSize: RANGE_CHUNK_SIZE,
+      disableAutoFetch: true,
+      disableStream: false,
+    });
+    loadingTaskRef.current = loadingTask;
+
+    void (async () => {
+      try {
+        const pdfDocument = await loadingTask.promise;
+        if (cancelled) {
+          await pdfDocument.destroy();
+          return;
+        }
+        documentProxyRef.current = pdfDocument;
+        setPageCount(pdfDocument.numPages);
+        viewer.setDocument(pdfDocument);
+        linkService.setDocument(pdfDocument, null);
+        viewer.currentScale = scale;
+        viewer.currentPageNumber = activePage;
+        setIsLoading(false);
+      } catch (loadError) {
+        if (cancelled) {
+          return;
+        }
+        setError(loadError instanceof Error ? loadError.message : String(loadError));
+        setIsLoading(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      loadingTask.destroy();
+      if (loadingTaskRef.current === loadingTask) {
+        loadingTaskRef.current = null;
+      }
+    };
+    // intentionally omit activePage/scale — applied in dedicated effects after load
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pdfViewer.isOpen, pdfViewer.kind, viewerReady, activeSourceUrl]);
+
+  useEffect(() => {
+    const viewer = viewerRef.current;
+    if (!viewer || !viewer.pdfDocument || syncingPageFromViewerRef.current) {
+      return;
+    }
+    // Always apply on focusNonce so re-clicking the same Resources page scrolls back.
+    viewer.currentPageNumber = activePage;
+    highlightAttemptedRef.current = false;
+  }, [activePage, focusNonce, viewerReady, activeSourceUrl]);
+
+  useEffect(() => {
+    const viewer = viewerRef.current;
+    if (!viewer || !viewer.pdfDocument) {
+      return;
+    }
+    if (Math.abs(viewer.currentScale - scale) > 0.001) {
+      viewer.currentScale = scale;
+    }
+  }, [scale, viewerReady, activeSourceUrl]);
+
+  useEffect(() => {
+    if (!matchRaw || isLoading || !viewerReady) {
+      return;
+    }
+
+    const viewer = viewerRef.current;
+    const container = containerRef.current;
+    if (!viewer || !container) {
+      return;
+    }
+
+    let cancelled = false;
+    let attempts = 0;
+
+    const tryHighlight = () => {
+      if (cancelled) {
+        return;
+      }
+      attempts += 1;
+      const pageView = viewer.getPageView(activePage - 1) as { div?: HTMLElement } | undefined;
+      const pageRoot = pageView?.div;
+      if (!pageRoot || !pageRoot.querySelector('.textLayer span')) {
+        if (attempts < 40) {
+          window.setTimeout(tryHighlight, 150);
+        }
+        return;
+      }
+
+      const highlight = highlightMatchOnPageView(pageRoot, matchRaw);
+      highlightAttemptedRef.current = true;
+      if (highlight) {
+        highlight.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
+      } else {
+        pageRoot.scrollIntoView({ behavior: 'smooth', block: 'start', inline: 'nearest' });
+      }
+    };
+
+    tryHighlight();
+    return () => {
+      cancelled = true;
+    };
+  }, [matchRaw, activePage, isLoading, viewerReady, activeSourceUrl]);
+
+  useEffect(() => {
+    if (!pdfViewer.isOpen || pdfViewer.kind === 'markup') {
+      return;
+    }
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented) {
+        return;
+      }
+      const meta = event.ctrlKey || event.metaKey;
+      if (meta && (event.key === '=' || event.key === '+')) {
+        event.preventDefault();
+        adjustScale(1);
+        return;
+      }
+      if (meta && event.key === '-') {
+        event.preventDefault();
+        adjustScale(-1);
+      }
+    };
+
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [pdfViewer.isOpen, pdfViewer.kind]);
+
+  if (!pdfViewer.isOpen || pdfViewer.kind === 'markup') {
     return null;
   }
 
@@ -811,7 +369,6 @@ const PdfViewerPane: React.FC = () => {
     if (event.touches.length < 2) {
       return;
     }
-
     pinchStartDistanceRef.current = getTouchDistance(event);
     pinchStartScaleRef.current = scale;
   };
@@ -820,17 +377,14 @@ const PdfViewerPane: React.FC = () => {
     if (event.touches.length < 2 || pinchStartDistanceRef.current <= 0) {
       return;
     }
-
     const currentDistance = getTouchDistance(event);
     if (currentDistance <= 0) {
       return;
     }
-
     const distanceRatio = currentDistance / pinchStartDistanceRef.current;
     if (!Number.isFinite(distanceRatio) || Math.abs(distanceRatio - 1) < 0.02) {
       return;
     }
-
     event.preventDefault();
     setScale(clampScale(pinchStartScaleRef.current * distanceRatio));
   };
@@ -839,6 +393,14 @@ const PdfViewerPane: React.FC = () => {
     if (event.touches.length < 2) {
       pinchStartDistanceRef.current = 0;
     }
+  };
+
+  const handleWheel = (event: React.WheelEvent<HTMLDivElement>) => {
+    if (!(event.ctrlKey || event.metaKey)) {
+      return;
+    }
+    event.preventDefault();
+    adjustScale(event.deltaY < 0 ? 1 : -1);
   };
 
   return (
@@ -885,7 +447,6 @@ const PdfViewerPane: React.FC = () => {
               if (!activeSourceUrl) {
                 return;
               }
-
               const anchor = document.createElement('a');
               anchor.href = activeSourceUrl;
               anchor.download = `${sanitizeFileName(title)}.pdf`;
@@ -913,13 +474,11 @@ const PdfViewerPane: React.FC = () => {
             <button
               type="button"
               className="btn btn-outline-secondary"
-              onClick={() => {
-                void resetZoomToFitFrame();
-              }}
-              title="fit to frame"
-              aria-label="fit to frame"
+              onClick={() => setScale(1)}
+              title="reset zoom"
+              aria-label="reset zoom"
             >
-              <i className="fa-solid fa-up-right-and-down-left-from-center" aria-hidden="true"></i>
+              {Math.round(scale * 100)}%
             </button>
             <button
               type="button"
@@ -932,93 +491,24 @@ const PdfViewerPane: React.FC = () => {
               <i className="fa-solid fa-magnifying-glass-plus" aria-hidden="true"></i>
             </button>
           </div>
-
-          <span className="small text-body-secondary">{Math.round(scale * 100)}%</span>
         </div>
       </div>
 
-      {error && <p className="text-danger small mb-2">{error}</p>}
+      {error && (
+        <div className="alert alert-danger" role="alert">{error}</div>
+      )}
 
-      {useNativePopupFallback && activeSourceUrl ? (
-        <div className="d-flex flex-column flex-grow-1 min-h-0">
-          <div className="small text-body-secondary mb-2">
-            The PDF had trouble rendering. Falling back to browser's PDF viewer.
-          </div>
-          <iframe
-            key={`${activeSourceUrl}:${activePage}`}
-            title={title}
-            src={`${activeSourceUrl}#page=${activePage}`}
-            className="w-100 flex-grow-1 border rounded"
-          />
-        </div>
-      ) : (
       <div
-        className={`pdf-viewer-stage flex-grow-1${isRendering ? ' is-rendering' : ''}`}
-        ref={stageRef}
+        className="pdf-viewer-stage pdf-viewer-continuous flex-grow-1"
         tabIndex={0}
         aria-label="PDF viewer"
-        onPointerDown={() => stageRef.current?.focus({ preventScroll: true })}
+        onWheel={handleWheel}
         onTouchStart={handleTouchStart}
         onTouchMove={handleTouchMove}
         onTouchEnd={handleTouchEnd}
       >
-        <div className="pdf-page-shell">
-          <div className="pdf-page-inner">
-            <canvas ref={canvasRef} className="pdf-viewer-canvas" />
-            <div ref={textLayerRef} className="pdf-page-text-layer"></div>
-            <div ref={highlightLayerRef} className="pdf-page-highlight-layer"></div>
-
-            <div className="pdf-page-annotation-layer">
-              {annotations.map((annotation) => {
-                const isOpen = activeAnnotationId === annotation.id;
-
-                return (
-                  <React.Fragment key={annotation.id}>
-                    <button
-                      type="button"
-                      className="pdf-annotation-marker"
-                      style={{
-                        left: `${annotation.left}px`,
-                        top: `${annotation.top}px`,
-                        width: `${annotation.width}px`,
-                        height: `${annotation.height}px`,
-                      }}
-                      aria-label={annotation.title || annotation.contents || 'Open annotation'}
-                      title={annotation.title || ''}
-                      onClick={() => {
-                        if (isOpen) {
-                          closeOpenAnnotation();
-                          return;
-                        }
-
-                        setActiveAnnotationId(annotation.id);
-                      }}
-                    ></button>
-
-                    {isOpen && (
-                      <div
-                        className="pdf-annotation-popup"
-                        style={{
-                          left: `${annotation.left + annotation.width + 8}px`,
-                          top: `${annotation.top}px`,
-                        }}
-                      >
-                        {annotation.title && <div className="pdf-annotation-popup-title">{annotation.title}</div>}
-                        {annotation.contents && <div className="pdf-annotation-popup-body">{annotation.contents}</div>}
-                        <button
-                          type="button"
-                          className="btn btn-sm btn-outline-secondary mt-2"
-                          onClick={closeOpenAnnotation}
-                        >
-                          Close
-                        </button>
-                      </div>
-                    )}
-                  </React.Fragment>
-                );
-              })}
-            </div>
-          </div>
+        <div ref={containerRef} className="pdf-viewer-container">
+          <div className="pdfViewer" />
         </div>
 
         {isLoading && (
@@ -1027,12 +517,7 @@ const PdfViewerPane: React.FC = () => {
             <span>Loading document...</span>
           </div>
         )}
-
-        {isRendering && (
-          <div className="pdf-viewer-rendering-badge small text-body-secondary">Rendering page...</div>
-        )}
       </div>
-      )}
     </div>
   );
 };

@@ -21,10 +21,13 @@ interface UiState {
   resourceHiddenTags: string[];
   pdfViewer: {
     isOpen: boolean;
+    kind: 'pdf' | 'markup';
     sourceUrl: string | null;
     title: string | null;
     page: number;
     matchRaw: string | null;
+    /** Bumps on every open so re-clicking the same page still triggers scroll-into-view. */
+    focusNonce: number;
   };
   theme: ThemePreference;
   ready: boolean;
@@ -47,10 +50,12 @@ const initialState: UiState = {
   resourceHiddenTags: [],
   pdfViewer: {
     isOpen: false,
+    kind: 'pdf',
     sourceUrl: null,
     title: null,
     page: 1,
     matchRaw: null,
+    focusNonce: 0,
   },
   theme: 'light',
   ready: false,
@@ -138,6 +143,7 @@ const uiSlice = createSlice({
         title?: string;
         page?: number;
         matchRaw?: string | null;
+        kind?: 'pdf' | 'markup';
       }>
     ) => {
       const nextPage = typeof action.payload.page === 'number' && Number.isFinite(action.payload.page)
@@ -146,13 +152,42 @@ const uiSlice = createSlice({
 
       state.pdfViewer = {
         isOpen: true,
+        kind: action.payload.kind === 'markup' ? 'markup' : 'pdf',
         sourceUrl: action.payload.sourceUrl,
         title: action.payload.title?.trim() || null,
         page: nextPage,
         matchRaw: action.payload.matchRaw?.trim() || null,
+        focusNonce: (state.pdfViewer.focusNonce || 0) + 1,
+      };
+    },
+    openDocumentViewer: (
+      state,
+      action: PayloadAction<{
+        sourceUrl: string;
+        title?: string;
+        page?: number;
+        matchRaw?: string | null;
+        kind?: 'pdf' | 'markup';
+      }>
+    ) => {
+      const nextPage = typeof action.payload.page === 'number' && Number.isFinite(action.payload.page)
+        ? Math.max(1, Math.floor(action.payload.page))
+        : 1;
+
+      state.pdfViewer = {
+        isOpen: true,
+        kind: action.payload.kind === 'markup' ? 'markup' : 'pdf',
+        sourceUrl: action.payload.sourceUrl,
+        title: action.payload.title?.trim() || null,
+        page: nextPage,
+        matchRaw: action.payload.matchRaw?.trim() || null,
+        focusNonce: (state.pdfViewer.focusNonce || 0) + 1,
       };
     },
     closePdfViewer: (state) => {
+      state.pdfViewer.isOpen = false;
+    },
+    closeDocumentViewer: (state) => {
       state.pdfViewer.isOpen = false;
     },
     setPdfViewerPage: (state, action: PayloadAction<number>) => {
@@ -238,11 +273,18 @@ const uiSlice = createSlice({
     restoreState: (state, action: PayloadAction<Partial<UiState>>) => {
       // A user ID, once established, must never be replaced by a restore (local or cloud-originated).
       const nextUserId = state.userId || action.payload.userId || null;
-      return {
+      const next = {
         ...state,
         ...action.payload,
         userId: nextUserId,
       };
+      if (next.pdfViewer && next.pdfViewer.kind !== 'markup' && next.pdfViewer.kind !== 'pdf') {
+        next.pdfViewer = { ...next.pdfViewer, kind: 'pdf' };
+      }
+      if (next.pdfViewer && typeof next.pdfViewer.focusNonce !== 'number') {
+        next.pdfViewer = { ...next.pdfViewer, focusNonce: 0 };
+      }
+      return next;
     },
     setTranslationRecords: (state, action: PayloadAction<TranslationRecord[]>) => {
       const records = action.payload
@@ -351,7 +393,9 @@ export const {
   setSourceUrls,
   setResourceHiddenTags,
   openPdfViewer,
+  openDocumentViewer,
   closePdfViewer,
+  closeDocumentViewer,
   setPdfViewerPage,
   toggleResourceHiddenTag,
   addSourceUrl,

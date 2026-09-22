@@ -14,6 +14,8 @@ import {
   readCloudConfigForSession,
   writeCloudConfigForSession,
 } from '../services/cloudConfigProviderService';
+import { queueCloudFolderSelection } from '../services/cloudControlService';
+import { addSourceUrl } from '../store/slices/uiSlice';
 
 jest.mock('../store/hooks', () => ({
   useAppDispatch: jest.fn(),
@@ -26,6 +28,7 @@ jest.mock('../store/slices/bibleSlice', () => ({
 }));
 
 jest.mock('../store/slices/uiSlice', () => ({
+  addSourceUrl: jest.fn((payload: unknown) => ({ type: 'ui/addSourceUrl', payload })),
   restoreState: jest.fn((payload: unknown) => ({ type: 'ui/restoreState', payload })),
   setUserId: jest.fn((payload: unknown) => ({ type: 'ui/setUserId', payload })),
 }));
@@ -54,6 +57,7 @@ jest.mock('../services/federatedAuthService', () => ({
 
 jest.mock('../services/cloudControlService', () => ({
   queueCloudFolderSelection: jest.fn(),
+  reportSyncActivity: jest.fn(),
 }));
 
 jest.mock('../services/cloudConfigProviderService', () => ({
@@ -76,6 +80,8 @@ const mockListFolderChildrenForSession = listFolderChildrenForSession as jest.Mo
 const mockComputeSupportedFolderSizeForSession = computeSupportedFolderSizeForSession as jest.Mock;
 const mockReadCloudConfigForSession = readCloudConfigForSession as jest.Mock;
 const mockWriteCloudConfigForSession = writeCloudConfigForSession as jest.Mock;
+const mockQueueCloudFolderSelection = queueCloudFolderSelection as jest.Mock;
+const mockAddSourceUrl = addSourceUrl as jest.Mock;
 
 const baseUiState = {
   selectedTranslationId: 'KJV',
@@ -198,6 +204,7 @@ describe('AccountControl', () => {
     mockComputeSupportedFolderSizeForSession.mockResolvedValue(0);
     mockReadCloudConfigForSession.mockResolvedValue(null);
     mockWriteCloudConfigForSession.mockResolvedValue(undefined);
+    mockQueueCloudFolderSelection.mockResolvedValue(null);
     mockGetFreshSessions.mockResolvedValue({});
     mockGetStoredSessions.mockReturnValue({});
     mockReadState.mockReturnValue({
@@ -646,6 +653,94 @@ describe('AccountControl', () => {
           tags: ['Teaching'],
         },
       ]);
+    });
+  });
+
+  it('registers the cloud libraryUrl from CCS on Apply and persists it in sourceUrls', async () => {
+    const libraryUrl = 'https://documents.example.com/users/user-cloud-1/library.json';
+    const dispatch = jest.fn();
+    mockUseAppDispatch.mockReturnValue(dispatch);
+    mockQueueCloudFolderSelection.mockResolvedValue({
+      ok: true,
+      libraryUrl,
+    });
+
+    mockReadState.mockReturnValue({
+      userId: 'user-cloud-1',
+      lastTranslationId: 'KJV',
+      lastTranslationIds: ['KJV'],
+      cloudLinkedAccounts: [
+        {
+          provider: 'google',
+          providerAccountId: 'g-user-1',
+          email: 'g@example.com',
+          linkedAt: Date.now() - 5000,
+        },
+      ],
+      cloudConfigUpdatedAt: Date.now() - 10_000,
+      cloudConfigLastSyncedAt: Date.now() - 10_000,
+    });
+
+    window.localStorage.setItem('marginalia:provider-sync-preferences', JSON.stringify({
+      google: {
+        syncSettings: true,
+        syncFiles: true,
+        selectedTargets: [],
+      },
+      microsoft: {
+        syncSettings: false,
+        syncFiles: false,
+        selectedTargets: [],
+      },
+    }));
+
+    mockGetStoredSessions.mockReturnValue({ google: googleSession });
+    mockGetFreshSessions.mockResolvedValue({ google: googleSession });
+    mockComputeSupportedFolderSizeForSession.mockResolvedValue(24 * 1024 * 1024);
+    mockListFolderChildrenForSession.mockResolvedValue([
+      {
+        id: 'g-folder-1',
+        name: 'Bible Notes Folder',
+        kind: 'folder',
+        sizeBytes: 24 * 1024 * 1024,
+        hasChildren: false,
+      },
+    ]);
+
+    await renderAccountControl();
+    openAccountModal();
+    expandProvider('Google');
+
+    await waitFor(() => {
+      expect(screen.getByText('Google Drive')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByLabelText('Expand Google Drive'));
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('Google Drive/Bible Notes Folder')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByLabelText('Google Drive/Bible Notes Folder'));
+    await assignFileSyncTag('Bible Notes Folder');
+    fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
+
+    await waitFor(() => {
+      expect(mockQueueCloudFolderSelection).toHaveBeenCalledWith(expect.objectContaining({
+        userId: 'user-cloud-1',
+        provider: 'google',
+      }));
+    });
+
+    await waitFor(() => {
+      expect(mockAddSourceUrl).toHaveBeenCalledWith(libraryUrl);
+      expect(dispatch).toHaveBeenCalledWith({ type: 'ui/addSourceUrl', payload: libraryUrl });
+    });
+
+    await waitFor(() => {
+      const writes = mockWriteCloudConfigForSession.mock.calls.map((call) => call[1]);
+      expect(writes.some((payload) => Array.isArray(payload?.config?.sourceUrls)
+        && payload.config.sourceUrls.includes(libraryUrl))).toBe(true);
     });
   });
 
