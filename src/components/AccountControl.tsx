@@ -61,6 +61,7 @@ interface ProviderSyncTarget {
   path?: string;
   sizeBytes?: number;
   sizeKnown?: boolean;
+  driveId?: string;
   excludedItemIds?: string[];
   tags?: string[];
   itemTags?: Record<string, string[]>;
@@ -96,6 +97,7 @@ function isProviderSyncTarget(value: unknown): value is ProviderSyncTarget {
     && (typeof candidate.path === 'undefined' || typeof candidate.path === 'string')
     && (typeof candidate.sizeBytes === 'undefined' || typeof candidate.sizeBytes === 'number')
     && (typeof candidate.sizeKnown === 'undefined' || typeof candidate.sizeKnown === 'boolean')
+    && (typeof candidate.driveId === 'undefined' || typeof candidate.driveId === 'string')
     && (typeof candidate.excludedItemIds === 'undefined' || Array.isArray(candidate.excludedItemIds))
     && (typeof candidate.tags === 'undefined' || Array.isArray(candidate.tags))
     && (typeof candidate.itemTags === 'undefined' || (typeof candidate.itemTags === 'object' && candidate.itemTags !== null))
@@ -1067,6 +1069,7 @@ const AccountControl: React.FC = () => {
       path: target.path,
       sizeBytes: target.sizeBytes,
       sizeKnown: target.sizeKnown,
+      driveId: target.driveId,
       excludedItemIds: target.excludedItemIds,
       tags: target.tags,
       itemTags: target.itemTags,
@@ -1079,6 +1082,7 @@ const AccountControl: React.FC = () => {
       path: target.path,
       sizeBytes: target.sizeBytes,
       sizeKnown: target.sizeKnown,
+      driveId: target.driveId,
       excludedItemIds: target.excludedItemIds,
       tags: target.tags,
       itemTags: target.itemTags,

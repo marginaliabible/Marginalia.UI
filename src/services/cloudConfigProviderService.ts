@@ -31,11 +31,27 @@ function googleDriveUploadFileUrl(fileId?: string): string {
     : `${GOOGLE_DRIVE_UPLOAD_API_BASE}/files?uploadType=multipart`;
 }
 
-function microsoftDriveChildrenUrl(parentId: string = 'root', select?: string): string {
-  const base = parentId === 'root'
-    ? `${MICROSOFT_GRAPH_DRIVE_API_BASE}/root/children`
-    : `${MICROSOFT_GRAPH_DRIVE_API_BASE}/items/${encodeURIComponent(parentId)}/children`;
+function microsoftDriveChildrenUrl(
+  parentId: string = 'root',
+  select?: string,
+  driveId?: string
+): string {
+  // Shared/remote folder stubs must be listed via /drives/{driveId}/items/{id}/children.
+  // Using /me/drive/items/{localStubId}/children returns getChildrenOnNonFolder.
+  const base = driveId
+    ? `https://graph.microsoft.com/v1.0/drives/${encodeURIComponent(driveId)}/items/${encodeURIComponent(parentId)}/children`
+    : parentId === 'root'
+      ? `${MICROSOFT_GRAPH_DRIVE_API_BASE}/root/children`
+      : `${MICROSOFT_GRAPH_DRIVE_API_BASE}/items/${encodeURIComponent(parentId)}/children`;
   return select ? `${base}?$select=${select}` : base;
+}
+
+function isMicrosoftGetChildrenOnNonFolderError(status: number, bodyText: string): boolean {
+  if (status !== 400 && status !== 422) {
+    return false;
+  }
+
+  return /getChildrenOnNonFolder|Children cannot be listed from an item that is not a folder/i.test(bodyText);
 }
 
 function microsoftDriveItemUrl(itemId: string, select?: string): string {
@@ -64,6 +80,11 @@ export interface CloudFolderEntry {
   kind: 'file' | 'folder';
   sizeBytes: number;
   hasChildren: boolean;
+  /**
+   * Microsoft Graph drive id for shared/remote folders that must be listed via
+   * `/drives/{driveId}/items/{id}/children` instead of `/me/drive/items/{id}/children`.
+   */
+  driveId?: string;
 }
 
 export interface CloudFolderLineageEntry {
@@ -80,6 +101,7 @@ export interface SyncedCloudFolderSelection {
   path?: string;
   sizeBytes?: number;
   sizeKnown?: boolean;
+  driveId?: string;
   // Cloud item IDs (folders or files, any depth) explicitly excluded from sync within this selection.
   excludedItemIds?: string[];
   tags?: string[];
@@ -421,12 +443,105 @@ async function listGoogleFolderChildren(
   return allFolders;
 }
 
-async function listMicrosoftFolderChildren(
+type MicrosoftDriveListItem = {
+  id?: string;
+  name?: string;
+  size?: number;
+  folder?: { childCount?: number };
+  file?: unknown;
+  remoteItem?: {
+    id?: string;
+    name?: string;
+    size?: number;
+    folder?: { childCount?: number };
+    file?: unknown;
+    parentReference?: {
+      driveId?: string;
+    };
+  };
+};
+
+function mapMicrosoftDriveListItem(item: MicrosoftDriveListItem): CloudFolderEntry | null {
+  const localFolder = item.folder;
+  const remoteFolder = item.remoteItem?.folder;
+  const folderFacet = localFolder ?? remoteFolder;
+  const fileFacet = item.file ?? item.remoteItem?.file;
+
+  // Shared folder stubs often lack a local `folder` facet and only expose `remoteItem.folder`.
+  // Listing `/me/drive/items/{localStubId}/children` then fails with getChildrenOnNonFolder; use the
+  // remote drive id + remote item id instead.
+  const remoteDriveId = typeof item.remoteItem?.parentReference?.driveId === 'string'
+    ? item.remoteItem.parentReference.driveId.trim()
+    : '';
+  const remoteItemId = typeof item.remoteItem?.id === 'string' ? item.remoteItem.id.trim() : '';
+  const isRemoteOnlyFolder = !localFolder && Boolean(remoteFolder) && Boolean(remoteItemId) && Boolean(remoteDriveId);
+
+  const itemId = isRemoteOnlyFolder
+    ? remoteItemId
+    : (item.id ?? item.remoteItem?.id);
+  const itemName = item.name ?? item.remoteItem?.name;
+  const itemSize = item.size ?? item.remoteItem?.size;
+
+  if ((!folderFacet && !fileFacet) || typeof itemId !== 'string' || itemId.trim().length === 0) {
+    return null;
+  }
+
+  const entry: CloudFolderEntry = {
+    id: itemId,
+    name: typeof itemName === 'string' && itemName.trim().length > 0 ? itemName : 'Untitled',
+    kind: folderFacet ? 'folder' : 'file',
+    sizeBytes: typeof itemSize === 'number' && Number.isFinite(itemSize) ? itemSize : 0,
+    hasChildren: folderFacet ? Number(folderFacet.childCount || 0) > 0 : false,
+  };
+
+  if (isRemoteOnlyFolder) {
+    entry.driveId = remoteDriveId;
+  }
+
+  return entry;
+}
+
+async function resolveMicrosoftRemoteFolderListingTarget(
   session: FederatedSession,
-  parentId: string
-): Promise<CloudFolderEntry[]> {
+  itemId: string
+): Promise<{ id: string; driveId: string } | null> {
+  const response = await fetch(
+    microsoftDriveItemUrl(itemId, 'id,folder,remoteItem'),
+    {
+      headers: {
+        Authorization: `Bearer ${session.accessToken}`,
+      },
+    }
+  );
+
+  if (!response.ok) {
+    return null;
+  }
+
+  const payload = (await response.json()) as MicrosoftDriveListItem;
+  if (payload.folder) {
+    // Local folder facet is present; /children should have worked. Treat as non-listable.
+    return null;
+  }
+
+  const remoteId = typeof payload.remoteItem?.id === 'string' ? payload.remoteItem.id.trim() : '';
+  const remoteDriveId = typeof payload.remoteItem?.parentReference?.driveId === 'string'
+    ? payload.remoteItem.parentReference.driveId.trim()
+    : '';
+
+  if (!payload.remoteItem?.folder || !remoteId || !remoteDriveId) {
+    return null;
+  }
+
+  return { id: remoteId, driveId: remoteDriveId };
+}
+
+async function listMicrosoftFolderChildrenFromUrl(
+  session: FederatedSession,
+  startUrl: string
+): Promise<{ entries: CloudFolderEntry[]; status: number; bodyText: string }> {
   const seenById = new Set<string>();
-  let nextUrl = microsoftDriveChildrenUrl(parentId, 'id,name,folder,file,size,remoteItem');
+  let nextUrl = startUrl;
   const allFolders: CloudFolderEntry[] = [];
 
   while (nextUrl) {
@@ -438,52 +553,23 @@ async function listMicrosoftFolderChildren(
 
     if (!response.ok) {
       const text = await response.text();
-      throw new Error(`Microsoft folder listing failed (${response.status}): ${text}`);
+      return { entries: [], status: response.status, bodyText: text };
     }
 
     const payload = (await response.json()) as {
-      value?: Array<{
-        id?: string;
-        name?: string;
-        size?: number;
-        folder?: { childCount?: number };
-        file?: unknown;
-        remoteItem?: {
-          id?: string;
-          name?: string;
-          size?: number;
-          folder?: { childCount?: number };
-          file?: unknown;
-        };
-      }>;
+      value?: MicrosoftDriveListItem[];
       '@odata.nextLink'?: string;
     };
 
     const items = Array.isArray(payload.value) ? payload.value : [];
     for (const item of items) {
-      const folderFacet = item.folder ?? item.remoteItem?.folder;
-      const fileFacet = item.file ?? item.remoteItem?.file;
-      const itemId = item.id ?? item.remoteItem?.id;
-      const itemName = item.name ?? item.remoteItem?.name;
-      const itemSize = item.size ?? item.remoteItem?.size;
-
-      if ((!folderFacet && !fileFacet) || typeof itemId !== 'string' || itemId.trim().length === 0) {
+      const mapped = mapMicrosoftDriveListItem(item);
+      if (!mapped || seenById.has(mapped.id)) {
         continue;
       }
 
-      if (seenById.has(itemId)) {
-        continue;
-      }
-
-      seenById.add(itemId);
-
-      allFolders.push({
-        id: itemId,
-        name: typeof itemName === 'string' && itemName.trim().length > 0 ? itemName : 'Untitled',
-        kind: folderFacet ? 'folder' : 'file',
-        sizeBytes: typeof itemSize === 'number' && Number.isFinite(itemSize) ? itemSize : 0,
-        hasChildren: folderFacet ? Number(folderFacet.childCount || 0) > 0 : false,
-      });
+      seenById.add(mapped.id);
+      allFolders.push(mapped);
     }
 
     nextUrl = typeof payload['@odata.nextLink'] === 'string' && payload['@odata.nextLink'].trim().length > 0
@@ -491,43 +577,82 @@ async function listMicrosoftFolderChildren(
       : '';
   }
 
-  if (parentId === 'root' && !allFolders.some((entry) => entry.kind === 'folder' && entry.name.trim().toLowerCase() === 'documents')) {
-    const specialDocumentsResponse = await fetch(microsoftDriveSpecialUrl('documents', 'id,name,folder,size'), {
-      headers: {
-        Authorization: `Bearer ${session.accessToken}`,
-      },
-    });
+  return { entries: allFolders, status: 200, bodyText: '' };
+}
 
-    if (specialDocumentsResponse.ok) {
-      const specialDocuments = (await specialDocumentsResponse.json()) as {
-        id?: string;
-        name?: string;
-        size?: number;
-        folder?: { childCount?: number };
-      };
+async function listMicrosoftFolderChildren(
+  session: FederatedSession,
+  parentId: string,
+  driveId?: string
+): Promise<CloudFolderEntry[]> {
+  const select = 'id,name,folder,file,size,remoteItem';
+  const initial = await listMicrosoftFolderChildrenFromUrl(
+    session,
+    microsoftDriveChildrenUrl(parentId, select, driveId)
+  );
 
-      if (
-        specialDocuments.folder
-        && typeof specialDocuments.id === 'string'
-        && specialDocuments.id.trim().length > 0
-        && !seenById.has(specialDocuments.id)
-      ) {
-        allFolders.push({
-          id: specialDocuments.id,
-          name: typeof specialDocuments.name === 'string' && specialDocuments.name.trim().length > 0
-            ? specialDocuments.name
-            : 'Documents',
-          kind: 'folder',
-          sizeBytes: typeof specialDocuments.size === 'number' && Number.isFinite(specialDocuments.size)
-            ? specialDocuments.size
-            : 0,
-          hasChildren: Number(specialDocuments.folder.childCount || 0) > 0,
-        });
+  if (initial.status === 200) {
+    const allFolders = initial.entries;
+
+    if (parentId === 'root' && !driveId && !allFolders.some((entry) => entry.kind === 'folder' && entry.name.trim().toLowerCase() === 'documents')) {
+      const specialDocumentsResponse = await fetch(microsoftDriveSpecialUrl('documents', 'id,name,folder,size'), {
+        headers: {
+          Authorization: `Bearer ${session.accessToken}`,
+        },
+      });
+
+      if (specialDocumentsResponse.ok) {
+        const specialDocuments = (await specialDocumentsResponse.json()) as {
+          id?: string;
+          name?: string;
+          size?: number;
+          folder?: { childCount?: number };
+        };
+
+        if (
+          specialDocuments.folder
+          && typeof specialDocuments.id === 'string'
+          && specialDocuments.id.trim().length > 0
+          && !allFolders.some((entry) => entry.id === specialDocuments.id)
+        ) {
+          allFolders.push({
+            id: specialDocuments.id,
+            name: typeof specialDocuments.name === 'string' && specialDocuments.name.trim().length > 0
+              ? specialDocuments.name
+              : 'Documents',
+            kind: 'folder',
+            sizeBytes: typeof specialDocuments.size === 'number' && Number.isFinite(specialDocuments.size)
+              ? specialDocuments.size
+              : 0,
+            hasChildren: Number(specialDocuments.folder.childCount || 0) > 0,
+          });
+        }
       }
     }
+
+    return allFolders;
   }
 
-  return allFolders;
+  // Left-panel subfolder peeks and shared-folder stubs can hit this for non-folder / remote items.
+  // Prefer resolving via remoteItem; otherwise return [] so UI probing stays quiet.
+  if (!driveId && isMicrosoftGetChildrenOnNonFolderError(initial.status, initial.bodyText)) {
+    const remoteTarget = await resolveMicrosoftRemoteFolderListingTarget(session, parentId);
+    if (remoteTarget) {
+      const retry = await listMicrosoftFolderChildrenFromUrl(
+        session,
+        microsoftDriveChildrenUrl(remoteTarget.id, select, remoteTarget.driveId)
+      );
+      if (retry.status === 200) {
+        return retry.entries;
+      }
+
+      throw new Error(`Microsoft folder listing failed (${retry.status}): ${retry.bodyText}`);
+    }
+
+    return [];
+  }
+
+  throw new Error(`Microsoft folder listing failed (${initial.status}): ${initial.bodyText}`);
 }
 
 async function readMicrosoftFolderLineage(
@@ -592,36 +717,38 @@ async function readMicrosoftFolderLineage(
 
 export async function listFolderChildrenForSession(
   session: FederatedSession,
-  parentId: string
+  parentId: string,
+  driveId?: string
 ): Promise<CloudFolderEntry[]> {
   if (session.provider === 'google') {
     return listGoogleFolderChildren(session, parentId);
   }
 
-  return listMicrosoftFolderChildren(session, parentId);
+  return listMicrosoftFolderChildren(session, parentId, driveId);
 }
 
 export async function computeSupportedFolderSizeForSession(
   session: FederatedSession,
-  folderId: string
+  folderId: string,
+  driveId?: string
 ): Promise<number> {
   const visitedFolderIds = new Set<string>([folderId]);
-  let currentLevelIds: string[] = [folderId];
+  let currentLevel: Array<{ id: string; driveId?: string }> = [{ id: folderId, driveId }];
   let totalBytes = 0;
 
   // Fetch each BFS level concurrently instead of one folder at a time so large trees resolve quickly.
-  while (currentLevelIds.length > 0) {
+  while (currentLevel.length > 0) {
     const levelChildren = await Promise.all(
-      currentLevelIds.map((currentFolderId) => listFolderChildrenForSession(session, currentFolderId))
+      currentLevel.map((currentFolder) => listFolderChildrenForSession(session, currentFolder.id, currentFolder.driveId))
     );
 
-    const nextLevelIds: string[] = [];
+    const nextLevel: Array<{ id: string; driveId?: string }> = [];
     for (const children of levelChildren) {
       for (const child of children) {
         if (child.kind === 'folder') {
           if (!visitedFolderIds.has(child.id)) {
             visitedFolderIds.add(child.id);
-            nextLevelIds.push(child.id);
+            nextLevel.push({ id: child.id, driveId: child.driveId });
           }
 
           continue;
@@ -633,7 +760,7 @@ export async function computeSupportedFolderSizeForSession(
       }
     }
 
-    currentLevelIds = nextLevelIds;
+    currentLevel = nextLevel;
   }
 
   return totalBytes;

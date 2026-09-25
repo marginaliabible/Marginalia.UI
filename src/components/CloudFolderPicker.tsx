@@ -26,6 +26,8 @@ export interface FolderSelectionTarget {
   path?: string;
   sizeBytes?: number;
   sizeKnown?: boolean;
+  // Microsoft shared/remote folder drive id; required to list the folder via /drives/{driveId}/items/{id}.
+  driveId?: string;
   // Cloud item IDs (folders or files, any depth) explicitly excluded from sync within this selection.
   excludedItemIds?: string[];
   // Tags assigned to this root selection item itself.
@@ -56,6 +58,8 @@ interface FolderTreeNode {
   sizeBytes: number;
   sizeKnown: boolean;
   hasChildren: boolean;
+  /** Microsoft shared/remote folder drive id for Graph /drives/{id}/items/... listing. */
+  driveId?: string;
   parentKey: string | null;
   childKeys: string[];
   childrenLoaded: boolean;
@@ -69,6 +73,7 @@ interface SelectedFolder {
   id: string;
   name: string;
   path: string;
+  driveId?: string;
   excludedItemIds: Set<string>;
   tags: string[];
   itemTags: Map<string, string[]>;
@@ -155,6 +160,7 @@ function toSelectionPayload(
       path: row.path,
       sizeBytes: node?.sizeKnown ? node.sizeBytes : undefined,
       sizeKnown: node?.sizeKnown ?? false,
+      driveId: row.driveId ?? node?.driveId,
       excludedItemIds: row.excludedItemIds.size > 0 ? Array.from(row.excludedItemIds).sort() : undefined,
       tags: row.tags.length > 0 ? [...row.tags].sort() : undefined,
       itemTags: itemTagsRecord.length > 0 ? Object.fromEntries(itemTagsRecord.map(([id, tags]) => [id, [...tags].sort()])) : undefined,
@@ -424,6 +430,7 @@ function buildSelectedMapFromPayload(
         id: target.id,
         name: target.name || target.id,
         path: target.path || `${ROOT_LABEL[provider]}/${target.name || target.id}`,
+        driveId: target.driveId,
         excludedItemIds: new Set(target.excludedItemIds || []),
         tags: [...(target.tags || [])],
         itemTags: new Map(Object.entries(target.itemTags || {}).map(([id, tags]) => [id, [...tags]])),
@@ -612,7 +619,7 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
 
     const loadPromise = (async () => {
       try {
-        const children = await listFolderChildrenForSession(session, node.id);
+        const children = await listFolderChildrenForSession(session, node.id, node.driveId);
         // Subfolders are listed before files within a folder.
         const sortedChildren = [...children].sort((left, right) => {
           if (left.kind === right.kind) {
@@ -629,7 +636,7 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
           const folderChildren = sortedChildren.filter((child) => child.kind === 'folder');
           const checks = await Promise.all(folderChildren.map(async (child) => {
             try {
-              const grandchildren = await listFolderChildrenForSession(session, child.id);
+              const grandchildren = await listFolderChildrenForSession(session, child.id, child.driveId);
               return [child.id, grandchildren.some((entry) => entry.kind === 'folder')] as const;
             } catch {
               return [child.id, child.hasChildren] as const;
@@ -667,6 +674,7 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
               sizeBytes: child.sizeBytes,
               sizeKnown: existingChild?.sizeKnown ?? child.kind === 'file',
               hasChildren,
+              driveId: child.driveId,
               parentKey: nodeKey,
               childKeys: existingChild?.childKeys || [],
               childrenLoaded: existingChild?.childrenLoaded || false,
@@ -772,6 +780,7 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
           sizeBytes: 0,
           sizeKnown: false,
           hasChildren: true,
+          driveId: selection.driveId,
           parentKey: null,
           childKeys: [],
           childrenLoaded: false,
@@ -883,6 +892,7 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
         id: node.id,
         name: node.name,
         path: node.path,
+        driveId: node.driveId,
         excludedItemIds: new Set<string>(),
         tags: [],
         itemTags: new Map<string, string[]>(),
@@ -1270,7 +1280,7 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
 
       const readPromise = (async () => {
         try {
-          const computedSize = await computeSupportedFolderSizeForSession(session, node.id);
+          const computedSize = await computeSupportedFolderSizeForSession(session, node.id, node.driveId);
           updateNodes((current) => {
             const existing = current[visibleRow.key];
             if (!existing) {

@@ -60,6 +60,12 @@ jest.mock('../services/cloudControlService', () => ({
   reportSyncActivity: jest.fn(),
 }));
 
+jest.mock('../services/storageAuthenticatedFetch', () => ({
+  clearStorageSession: jest.fn(),
+  establishStorageSession: jest.fn(),
+  setStorageSessionUserId: jest.fn(),
+}));
+
 jest.mock('../services/cloudConfigProviderService', () => ({
   listFolderChildrenForSession: jest.fn(),
   mergeLinkedAccounts: jest.requireActual('../services/cloudConfigProviderService').mergeLinkedAccounts,
