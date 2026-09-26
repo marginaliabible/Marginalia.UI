@@ -1,5 +1,7 @@
 import { render, screen } from '@testing-library/react';
 import {
+  formatVerseHtml,
+  formatVersePlain,
   markupFlagsFromBible,
   renderVerseMarkers,
   stripVerseMarkers,
@@ -65,6 +67,39 @@ describe('renderVerseMarkers', () => {
       </div>
     );
     expect(screen.getByTestId('verse').textContent).toBe('darkness [was] upon');
+  });
+});
+
+describe('formatVersePlain / formatVerseHtml', () => {
+  it('formats clipboard plain text with settings', () => {
+    expect(formatVersePlain('# And darkness [was] upon', optedIn, settingsOn)).toBe(
+      '¶ And darkness was upon'
+    );
+    expect(formatVersePlain('# And darkness [was] upon', optedIn, settingsOff)).toBe(
+      'And darkness was upon'
+    );
+  });
+
+  it('formats clipboard HTML with italics when enabled', () => {
+    expect(formatVerseHtml('# And darkness [was] upon', optedIn, settingsOn)).toBe(
+      '¶ And darkness <i>was</i> upon'
+    );
+    expect(formatVerseHtml('# And darkness [was] upon', optedIn, settingsOff)).toBe(
+      'And darkness was upon'
+    );
+  });
+
+  it('leaves literal brackets when the translation does not opt in', () => {
+    expect(formatVersePlain('# And darkness [was] upon', {}, settingsOn)).toBe(
+      '# And darkness [was] upon'
+    );
+    expect(formatVerseHtml('# And darkness [was] upon', {}, settingsOn)).toBe(
+      '# And darkness [was] upon'
+    );
+  });
+
+  it('escapes HTML special characters outside markup', () => {
+    expect(formatVerseHtml('A & B <C>', {}, settingsOn)).toBe('A &amp; B &lt;C&gt;');
   });
 });
 

@@ -13,7 +13,7 @@ export interface VerseMarkupSettings {
 const BRACKET_TOKEN = /(\[[^\]]+\])/;
 const BRACKET_CONTENTS = /^\[([^\]]+)\]$/;
 
-/** Remove opted-in translator markers for plain-text consumers (search, copy). */
+/** Remove opted-in translator markers for plain-text consumers (search). */
 export function stripVerseMarkers(text: string, flags: VerseMarkupFlags = {}): string {
   let result = text;
   if (flags.paragraphMarks) {
@@ -23,6 +23,88 @@ export function stripVerseMarkers(text: string, flags: VerseMarkupFlags = {}): s
     result = result.replace(/\[([^\]]+)\]/g, '$1');
   }
   return result;
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+/**
+ * Plain-text verse for clipboard: unwrap brackets; include ¶ only when opted in and enabled.
+ */
+export function formatVersePlain(
+  text: string,
+  flags: VerseMarkupFlags = {},
+  settings: VerseMarkupSettings
+): string {
+  let remaining = text;
+  let prefix = '';
+
+  if (flags.paragraphMarks && remaining.startsWith('#')) {
+    remaining = remaining.slice(1).replace(/^\s*/, '');
+    if (settings.paragraphMarks) {
+      prefix = '¶ ';
+    }
+  }
+
+  if (flags.italiciseBrackets) {
+    remaining = remaining.replace(/\[([^\]]+)\]/g, '$1');
+  }
+
+  return `${prefix}${remaining}`;
+}
+
+/**
+ * HTML verse for clipboard: italicize bracket words and include ¶ when opted in and enabled.
+ */
+export function formatVerseHtml(
+  text: string,
+  flags: VerseMarkupFlags = {},
+  settings: VerseMarkupSettings
+): string {
+  const interpretBrackets = Boolean(flags.italiciseBrackets);
+  const interpretParagraphs = Boolean(flags.paragraphMarks);
+
+  if (!interpretBrackets && !interpretParagraphs) {
+    return escapeHtml(text);
+  }
+
+  let remaining = text;
+  let html = '';
+
+  if (interpretParagraphs && remaining.startsWith('#')) {
+    remaining = remaining.slice(1).replace(/^\s*/, '');
+    if (settings.paragraphMarks) {
+      html += '¶ ';
+    }
+  }
+
+  if (!interpretBrackets) {
+    return `${html}${escapeHtml(remaining)}`;
+  }
+
+  const parts = remaining.split(BRACKET_TOKEN);
+  for (const part of parts) {
+    if (!part) {
+      continue;
+    }
+
+    const match = BRACKET_CONTENTS.exec(part);
+    if (match) {
+      const words = escapeHtml(match[1]);
+      html += settings.italics ? `<i>${words}</i>` : words;
+      continue;
+    }
+
+    html += escapeHtml(part);
+  }
+
+  return html;
 }
 
 /**
