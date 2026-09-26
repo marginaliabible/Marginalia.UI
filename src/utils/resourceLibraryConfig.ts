@@ -1,5 +1,7 @@
 // Shared helpers for parsing library/resource source files and building document URLs.
 
+import type { FederatedProvider } from '../models/bible';
+
 export const DEFAULT_DOCUMENT_URL_TEMPLATE = '{baseUrl}/documents/{documentId}?page={page}';
 export const DEFAULT_DOCUMENT_STORE_ADDRESS = 'documents/{documentId}';
 
@@ -427,6 +429,36 @@ export function buildMarkupDocumentShellUrl(pagesStoreUrl: string): string {
     return `${trimmed}/index.html`;
   }
   return trimmed;
+}
+
+const CLOUD_SYNC_PROVIDER_BY_FOLDER: Record<string, FederatedProvider> = {
+  googledrive: 'google',
+  onedrive: 'microsoft',
+};
+
+/**
+ * Cloud Service Sync publishes one resources.json per provider at
+ * `users/{userId}/{GoogleDrive|OneDrive}/resources.json`; any other layout is not a synced library.
+ */
+export function readCloudSyncProviderFromResourcesUrl(resourcesUrl: string): FederatedProvider | null {
+  let pathname: string;
+  try {
+    pathname = new URL(resourcesUrl).pathname;
+  } catch {
+    pathname = resourcesUrl.split(/[?#]/)[0] ?? '';
+  }
+
+  const segments = pathname.split('/').filter(Boolean);
+  if (segments.length < 4) {
+    return null;
+  }
+
+  const [usersSegment, , providerFolder, fileName] = segments.slice(-4);
+  if (usersSegment !== 'users' || fileName.toLowerCase() !== 'resources.json') {
+    return null;
+  }
+
+  return CLOUD_SYNC_PROVIDER_BY_FOLDER[providerFolder.toLowerCase()] ?? null;
 }
 
 export function readDocumentViewerKind(value: unknown): DocumentViewerKind | null {

@@ -3,6 +3,7 @@ import { useAppDispatch, useAppSelector } from '../store/hooks';
 import { closeDocumentViewer, setPdfViewerPage } from '../store/slices/uiSlice';
 import { buildMarkupDocumentShellUrl } from '../utils/resourceLibraryConfig';
 import { fetchStorageAware } from '../services/storageAuthenticatedFetch';
+import FileSyncExclusionButton from './FileSyncExclusionButton';
 
 const MIN_SCALE = 0.6;
 const MAX_SCALE = 2.4;
@@ -1025,6 +1026,8 @@ const MarkupDocumentViewer: React.FC = () => {
         <div className="pdf-viewer-title fw-semibold text-truncate" title={title}>{title}</div>
 
         <div className="ms-auto d-flex align-items-center gap-2">
+          <FileSyncExclusionButton syncItem={pdfViewer.syncItem} documentLabel={title} />
+
           <button
             type="button"
             className="btn btn-sm btn-outline-primary"

@@ -1,9 +1,15 @@
 import { createSlice, type PayloadAction } from '@reduxjs/toolkit';
-import type { ThemePreference } from '../../models/bible';
+import type { FederatedProvider, ThemePreference } from '../../models/bible';
 
 export interface TranslationRecord {
   id: string;
   starred: boolean;
+}
+
+/** Cloud item a viewed document was synced from (File Sync exclusions are keyed by this id). */
+export interface DocumentSyncItem {
+  provider: FederatedProvider;
+  itemId: string;
 }
 
 interface UiState {
@@ -28,6 +34,7 @@ interface UiState {
     matchRaw: string | null;
     /** Bumps on every open so re-clicking the same page still triggers scroll-into-view. */
     focusNonce: number;
+    syncItem: DocumentSyncItem | null;
   };
   theme: ThemePreference;
   ready: boolean;
@@ -56,6 +63,7 @@ const initialState: UiState = {
     page: 1,
     matchRaw: null,
     focusNonce: 0,
+    syncItem: null,
   },
   theme: 'light',
   ready: false,
@@ -144,6 +152,7 @@ const uiSlice = createSlice({
         page?: number;
         matchRaw?: string | null;
         kind?: 'pdf' | 'markup';
+        syncItem?: DocumentSyncItem | null;
       }>
     ) => {
       const nextPage = typeof action.payload.page === 'number' && Number.isFinite(action.payload.page)
@@ -158,6 +167,7 @@ const uiSlice = createSlice({
         page: nextPage,
         matchRaw: action.payload.matchRaw?.trim() || null,
         focusNonce: (state.pdfViewer.focusNonce || 0) + 1,
+        syncItem: action.payload.syncItem ?? null,
       };
     },
     openDocumentViewer: (
@@ -168,6 +178,7 @@ const uiSlice = createSlice({
         page?: number;
         matchRaw?: string | null;
         kind?: 'pdf' | 'markup';
+        syncItem?: DocumentSyncItem | null;
       }>
     ) => {
       const nextPage = typeof action.payload.page === 'number' && Number.isFinite(action.payload.page)
@@ -182,6 +193,7 @@ const uiSlice = createSlice({
         page: nextPage,
         matchRaw: action.payload.matchRaw?.trim() || null,
         focusNonce: (state.pdfViewer.focusNonce || 0) + 1,
+        syncItem: action.payload.syncItem ?? null,
       };
     },
     closePdfViewer: (state) => {
@@ -283,6 +295,9 @@ const uiSlice = createSlice({
       }
       if (next.pdfViewer && typeof next.pdfViewer.focusNonce !== 'number') {
         next.pdfViewer = { ...next.pdfViewer, focusNonce: 0 };
+      }
+      if (next.pdfViewer && typeof next.pdfViewer.syncItem === 'undefined') {
+        next.pdfViewer = { ...next.pdfViewer, syncItem: null };
       }
       return next;
     },

@@ -175,6 +175,7 @@ const SearchResults: React.FC<SearchResultsProps> = ({ tab, goToReference, onBef
       title: match.title,
       matchRaw: null,
       kind,
+      syncItem: match.cloudProvider ? { provider: match.cloudProvider, itemId: match.documentId } : null,
     }));
   };
 

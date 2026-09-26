@@ -1,4 +1,5 @@
 import MiniSearch from 'minisearch';
+import type { FederatedProvider } from '../models/bible';
 import { normalizeEnglishTerm } from './searchNormalizer';
 import {
   DEFAULT_DOCUMENT_STORE_ADDRESS,
@@ -6,6 +7,7 @@ import {
   buildFetchUrlCandidates,
   inferSourceFileKindFromPayload,
   inferSourceFileKindFromUrl,
+  readCloudSyncProviderFromResourcesUrl,
   readDocumentViewerKind,
   readLibrarySourceAddresses,
   readResourceDocumentEntry,
@@ -30,6 +32,7 @@ export interface ResourceDocumentTitleSearchMatch {
   libraryId: string;
   libraryLabel: string;
   documentId: string;
+  cloudProvider: FederatedProvider | null;
   title: string;
   tags: string[];
   url: string;
@@ -140,6 +143,7 @@ export async function searchResourceDocumentTitles(
       libraryId,
       libraryLabel,
       documentId,
+      cloudProvider: readCloudSyncProviderFromResourcesUrl(resourcesUrl),
       title,
       tags,
       url: buildDocumentStorePageUrl(documentStoreAddress, resourcesUrl, { documentId, hash }, 1),

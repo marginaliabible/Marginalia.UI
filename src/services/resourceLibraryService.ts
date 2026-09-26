@@ -1,5 +1,5 @@
 import type { DBSchema, IDBPDatabase } from 'idb';
-import type { BibleTranslationMeta, ArtifactType, RepositoryType } from '../models/bible';
+import type { BibleTranslationMeta, ArtifactType, FederatedProvider, RepositoryType } from '../models/bible';
 import { BOOK_ALIAS_CONFIG, normalizeBookName } from '../utils/book-aliases';
 import {
   DEFAULT_DOCUMENT_STORE_ADDRESS,
@@ -7,6 +7,7 @@ import {
   buildFetchUrlCandidates,
   isPlainObject,
   indexResourceDocuments,
+  readCloudSyncProviderFromResourcesUrl,
   readDocumentViewerKind,
   readResourceDocumentEntry,
   readString,
@@ -113,6 +114,8 @@ export interface VerseResourceDocument {
   libraryId: string;
   libraryLabel: string;
   documentId: string;
+  /** Set when the document comes from a Cloud Service Sync library; documentId is then the cloud item id. */
+  cloudProvider: FederatedProvider | null;
   title: string;
   tags: string[];
   pages: number[];
@@ -303,6 +306,7 @@ export class ResourceLibraryService {
           libraryId: library.id,
           libraryLabel: library.label,
           documentId: document.documentId,
+          cloudProvider: readCloudSyncProviderFromResourcesUrl(library.resourcesUrl),
           title: document.title,
           tags,
           pages: nextPages,

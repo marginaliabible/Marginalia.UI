@@ -5,6 +5,7 @@ import type {
   BibleData,
   ArtifactType,
   ExtraLanguageMeta,
+  FederatedProvider,
   RepositoryType,
   BibleTranslationMeta,
   MarginaliaState,
@@ -250,6 +251,7 @@ export interface VerseResourceDocument {
   libraryId: string;
   libraryLabel: string;
   documentId: string;
+  cloudProvider?: FederatedProvider | null;
   title: string;
   tags: string[];
   pages: number[];

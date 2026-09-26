@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import type { PanelTab, VerseContext } from '../models/tab';
 import { useAppDispatch, useAppSelector } from '../store/hooks';
-import { openDocumentViewer, setResourceHiddenTags } from '../store/slices/uiSlice';
+import { openDocumentViewer, setResourceHiddenTags, type DocumentSyncItem } from '../store/slices/uiSlice';
 import type { DocumentViewerKind } from '../utils/resourceLibraryConfig';
 import { buildMarkupDocumentShellUrl } from '../utils/resourceLibraryConfig';
 import { bibleService, type VerseResourcesPayload } from '../services/bibleService';
@@ -159,7 +159,8 @@ const ResourcesPanel: React.FC<ResourcesPanelProps> = ({ tab, isActive }) => {
     page: number,
     title: string,
     raw?: string,
-    viewer: DocumentViewerKind = 'pdf'
+    viewer: DocumentViewerKind = 'pdf',
+    syncItem: DocumentSyncItem | null = null
   ) => {
     event.preventDefault();
 
@@ -172,6 +173,7 @@ const ResourcesPanel: React.FC<ResourcesPanelProps> = ({ tab, isActive }) => {
       title,
       matchRaw: raw ?? null,
       kind: viewer,
+      syncItem,
     }));
 
     if (isPanelDetached && typeof window !== 'undefined' && window.opener && !window.opener.closed) {
@@ -280,7 +282,15 @@ const ResourcesPanel: React.FC<ResourcesPanelProps> = ({ tab, isActive }) => {
                             <button
                               type="button"
                               className="resource-page-link btn btn-link btn-sm p-0 align-baseline"
-                              onClick={(event) => handleOpenDocumentPage(event, link.url, link.page, document.title, link.raw, link.viewer)}
+                              onClick={(event) => handleOpenDocumentPage(
+                                event,
+                                link.url,
+                                link.page,
+                                document.title,
+                                link.raw,
+                                link.viewer,
+                                document.cloudProvider ? { provider: document.cloudProvider, itemId: document.documentId } : null
+                              )}
                             >
                               {link.page}
                             </button>

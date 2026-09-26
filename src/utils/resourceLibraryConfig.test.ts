@@ -7,6 +7,7 @@ import {
   indexResourceDocuments,
   inferSourceFileKindFromPayload,
   inferSourceFileKindFromUrl,
+  readCloudSyncProviderFromResourcesUrl,
   readDocumentViewerKind,
   readLibrarySourceAddresses,
   validateDocumentsFile,
@@ -166,6 +167,19 @@ describe('hyperlinks sources', () => {
 
   it('rejects payloads without a hyperlinks array', () => {
     expect(() => validateHyperlinksFile({}, 'hyperlinks.json')).toThrow(/missing required hyperlinks/);
+  });
+});
+
+describe('readCloudSyncProviderFromResourcesUrl', () => {
+  it('maps Cloud Service Sync provider folders to federated providers', () => {
+    expect(readCloudSyncProviderFromResourcesUrl('https://storage.example/users/a%40b.com/GoogleDrive/resources.json')).toBe('google');
+    expect(readCloudSyncProviderFromResourcesUrl('https://storage.example/users/a%40b.com/OneDrive/resources.json')).toBe('microsoft');
+  });
+
+  it('ignores resources outside the per-user provider layout', () => {
+    expect(readCloudSyncProviderFromResourcesUrl('https://example.com/data/resources.json')).toBeNull();
+    expect(readCloudSyncProviderFromResourcesUrl('https://example.com/libs/x/OneDrive/resources.json')).toBeNull();
+    expect(readCloudSyncProviderFromResourcesUrl('https://storage.example/users/u/Dropbox/resources.json')).toBeNull();
   });
 });
 

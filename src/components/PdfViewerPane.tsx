@@ -11,6 +11,7 @@ import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import 'pdfjs-dist/web/pdf_viewer.css';
 import { useAppDispatch, useAppSelector } from '../store/hooks';
 import { closePdfViewer, setPdfViewerPage } from '../store/slices/uiSlice';
+import FileSyncExclusionButton from './FileSyncExclusionButton';
 
 GlobalWorkerOptions.workerSrc = workerUrl;
 
@@ -418,6 +419,8 @@ const PdfViewerPane: React.FC = () => {
         <div className="pdf-viewer-title fw-semibold text-truncate" title={title}>{title}</div>
 
         <div className="ms-auto d-flex align-items-center gap-2">
+          <FileSyncExclusionButton syncItem={pdfViewer.syncItem} documentLabel={title} />
+
           <button
             type="button"
             className="btn btn-sm btn-outline-primary"
