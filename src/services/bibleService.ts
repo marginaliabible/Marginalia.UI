@@ -13,6 +13,7 @@ import type {
 } from '../models/bible';
 import { SearchMatch } from '../models/bible';
 import { BOOK_ALIAS_CONFIG, normalizeBookName } from '../utils/book-aliases';
+import { markupFlagsFromBible, stripVerseMarkers } from '../utils/verseMarkup';
 import {
   buildGitHubContentsUrl,
   createGitHubAuthHeaders,
@@ -1260,6 +1261,7 @@ class BibleService {
     }
 
     const lower = normalized.toLowerCase();
+    const markupFlags = markupFlagsFromBible(bible);
     let totalMatches = 0;
     const matches: SearchMatch[] = [];
 
@@ -1270,11 +1272,12 @@ class BibleService {
             continue;
           }
 
-          if (verse.text.toLowerCase().includes(lower)) {
+          const plainText = stripVerseMarkers(verse.text, markupFlags);
+          if (plainText.toLowerCase().includes(lower)) {
             totalMatches += 1;
             if (matches.length < SEARCH_LIMIT) {
               matches.push(
-                new SearchMatch(book.name, chapter.chapter, verse.verse, verse.text)
+                new SearchMatch(book.name, chapter.chapter, verse.verse, plainText)
               );
             }
           }
@@ -1521,10 +1524,13 @@ class BibleService {
 
   private async getDatabase(): Promise<IDBPDatabase<BibleDB>> {
     if (!this.dbPromise) {
-      this.dbPromise = openDB<BibleDB>('marginalia-db', 5, {
-        upgrade(db) {
+      this.dbPromise = openDB<BibleDB>('marginalia-db', 6, {
+        upgrade(db, oldVersion, _newVersion, transaction) {
           if (!db.objectStoreNames.contains('translations')) {
             db.createObjectStore('translations');
+          } else if (oldVersion < 6) {
+            // Local KJV (and other cached translations) must reload after markup opt-in fields.
+            transaction.objectStore('translations').clear();
           }
 
           if (!db.objectStoreNames.contains('settingsSnapshots')) {

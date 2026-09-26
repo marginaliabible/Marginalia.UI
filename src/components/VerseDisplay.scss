@@ -425,6 +425,19 @@
   transition: border-color 120ms ease, background-color 120ms ease;
 }
 
+.verse-italics {
+  font-style: italic;
+  color: var(--bs-secondary-color);
+}
+
+.verse-paragraph-mark {
+  font-style: normal;
+  font-weight: normal;
+  margin-inline-end: 0.15em;
+  color: var(--bs-secondary-color);
+  user-select: none;
+}
+
 .verse-text.is-selected {
   background: color-mix(in srgb, var(--bs-primary-bg-subtle) 56%, transparent);
   border-color: color-mix(in srgb, var(--bs-primary) 28%, var(--bs-border-color));

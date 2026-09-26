@@ -2,7 +2,9 @@ import React, { useState, useMemo, useEffect } from 'react';
 import type { PanelTab, VerseContext } from '../models/tab';
 import type { BibleTranslationMeta, TranslationRecord } from '../models/bible';
 import { bibleService } from '../services/bibleService';
+import { useAppSelector } from '../store/hooks';
 import { versesFromContext } from '../utils/selectedVerseContext';
+import { markupFlagsFromBible } from '../utils/verseMarkup';
 import { VerseReferenceLabel, VerseTextList } from './VersePreview';
 
 interface TranslationsPanelProps {
@@ -31,6 +33,12 @@ const TranslationsPanel: React.FC<TranslationsPanelProps> = ({
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
   const [translationFilter, setTranslationFilter] = useState('');
   const [verseTextByTranslation, setVerseTextByTranslation] = useState<Map<string, Array<{ verse: number; text: string }>>>(new Map());
+  const [markupFlagsByTranslation, setMarkupFlagsByTranslation] = useState<Map<string, ReturnType<typeof markupFlagsFromBible>>>(new Map());
+  const { translatorItalics, translatorParagraphMarks } = useAppSelector((state) => state.ui);
+  const verseMarkupSettings = useMemo(() => ({
+    italics: translatorItalics,
+    paragraphMarks: translatorParagraphMarks,
+  }), [translatorItalics, translatorParagraphMarks]);
   const verseContext = tab.verseContext as VerseContext | undefined;
   const selectedVerseNumbers = verseContext ? versesFromContext(verseContext) : [];
 
@@ -57,6 +65,7 @@ const TranslationsPanel: React.FC<TranslationsPanelProps> = ({
       if (!verseContext) {
         if (!cancelled) {
           setVerseTextByTranslation(new Map());
+          setMarkupFlagsByTranslation(new Map());
         }
         return;
       }
@@ -65,18 +74,22 @@ const TranslationsPanel: React.FC<TranslationsPanelProps> = ({
       const verseNumbers = versesFromContext(verseContext);
       const entries = await Promise.all(
         translationRecords.map(async (record) => {
-          const verseTexts = await Promise.all(
-            verseNumbers.map(async (verse) => ({
-              verse,
-              text: await bibleService.loadVerseText(record.id, book, chapter, verse),
-            }))
-          );
-          return [record.id, verseTexts] as const;
+          const [verseTexts, bible] = await Promise.all([
+            Promise.all(
+              verseNumbers.map(async (verse) => ({
+                verse,
+                text: await bibleService.loadVerseText(record.id, book, chapter, verse),
+              }))
+            ),
+            bibleService.loadTranslation(record.id),
+          ]);
+          return [record.id, verseTexts, markupFlagsFromBible(bible)] as const;
         })
       );
 
       if (!cancelled) {
-        setVerseTextByTranslation(new Map(entries));
+        setVerseTextByTranslation(new Map(entries.map(([id, verses]) => [id, verses])));
+        setMarkupFlagsByTranslation(new Map(entries.map(([id, , flags]) => [id, flags])));
       }
     };
 
@@ -216,7 +229,11 @@ const TranslationsPanel: React.FC<TranslationsPanelProps> = ({
 
                         <div className="text-body text-small lh-base">
                           {hasAnyVerseText ? (
-                            <VerseTextList verses={verseTexts} />
+                            <VerseTextList
+                              verses={verseTexts}
+                              markupFlags={markupFlagsByTranslation.get(record.id) ?? {}}
+                              verseMarkupSettings={verseMarkupSettings}
+                            />
                           ) : (
                             <span
                               className="text-muted"

@@ -4,6 +4,19 @@
   gap: 0.2rem;
 }
 
+.verse-italics {
+  font-style: italic;
+  color: var(--bs-secondary-color);
+}
+
+.verse-paragraph-mark {
+  font-style: normal;
+  font-weight: normal;
+  margin-inline-end: 0.15em;
+  color: var(--bs-secondary-color);
+  user-select: none;
+}
+
 .verse-text-list-number {
   color: var(--bs-secondary-color);
   font-variant-numeric: tabular-nums;

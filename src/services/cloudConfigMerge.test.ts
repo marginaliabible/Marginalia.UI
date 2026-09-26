@@ -20,6 +20,8 @@ const defaultConfig: SyncedConfig = {
   sourceUrls: [],
   resourceHiddenTags: [],
   theme: 'light',
+  translatorItalics: true,
+  translatorParagraphMarks: true,
   providerFolderSelections: { google: [], microsoft: [] },
 };
 

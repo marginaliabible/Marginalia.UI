@@ -14,6 +14,7 @@ import { buildPdfProxyUrl } from '../utils/pdfProxy';
 import { getOrAssignResourceTagColors, TAG_COLOR_PALETTE } from '../utils/resourceTagColors';
 import { versesFromContext } from '../utils/selectedVerseContext';
 import { mergeVerseResourcePayloads, type ResourceVerseMatchMode } from '../utils/verseResources';
+import { markupFlagsFromBible } from '../utils/verseMarkup';
 import { VerseReferenceLabel, VerseTextList } from './VersePreview';
 
 interface ResourcesPanelProps {
@@ -28,8 +29,19 @@ const ResourcesPanel: React.FC<ResourcesPanelProps> = ({ tab, isActive }) => {
     [verseContext]
   );
   const dispatch = useAppDispatch();
-  const { sourceUrls, resourceHiddenTags, resourceVerseMatchMode, pdfViewer } = useAppSelector((state) => state.ui);
+  const {
+    sourceUrls,
+    resourceHiddenTags,
+    resourceVerseMatchMode,
+    pdfViewer,
+    translatorItalics,
+    translatorParagraphMarks,
+  } = useAppSelector((state) => state.ui);
   const { currentBible, isPanelDetached } = useAppSelector((state) => state.bible);
+  const verseMarkupSettings = useMemo(() => ({
+    italics: translatorItalics,
+    paragraphMarks: translatorParagraphMarks,
+  }), [translatorItalics, translatorParagraphMarks]);
 
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -258,7 +270,11 @@ const ResourcesPanel: React.FC<ResourcesPanelProps> = ({ tab, isActive }) => {
             )}
           </div>
           <div className="small">
-            <VerseTextList verses={verseTexts} />
+            <VerseTextList
+              verses={verseTexts}
+              markupFlags={markupFlagsFromBible(currentBible)}
+              verseMarkupSettings={verseMarkupSettings}
+            />
           </div>
         </div>
 

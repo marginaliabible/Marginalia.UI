@@ -20,6 +20,7 @@ import {
   removeLoadedTranslations,
 } from './store/slices/bibleSlice';
 import { resolveSelectedVerseContext } from './utils/selectedVerseContext';
+import { formatVerseHtml, formatVersePlain, markupFlagsFromBible } from './utils/verseMarkup';
 import {
   setSelectedTranslationId,
   setSelectedTranslationIds,
@@ -32,6 +33,8 @@ import {
   removeSourceUrl,
   removeTranslationsByIds,
   setTheme,
+  setTranslatorItalics,
+  setTranslatorParagraphMarks,
   setReady,
   restoreState,
   addTranslationRecord,
@@ -152,6 +155,8 @@ function App() {
     resourceHiddenTags,
     pdfViewer,
     theme,
+    translatorItalics,
+    translatorParagraphMarks,
     ready,
     userId,
   } = useAppSelector((state) => state.ui);
@@ -218,13 +223,22 @@ function App() {
       return;
     }
 
+    const markupFlags = markupFlagsFromBible(sourceBible);
+    const verseMarkupSettings = {
+      italics: translatorItalics,
+      paragraphMarks: translatorParagraphMarks,
+    };
     const normalizedVerses = Array.from(new Set(chosenVerses)).sort((left, right) => left - right);
     const verseTexts = normalizedVerses
-      .map((verseNumber) => ({
-        verseNumber,
-        text: chapter.verses.find((verse) => verse.verse === verseNumber)?.text ?? '',
-      }))
-      .filter((entry) => entry.text.length > 0);
+      .map((verseNumber) => {
+        const raw = chapter.verses.find((verse) => verse.verse === verseNumber)?.text ?? '';
+        return {
+          verseNumber,
+          plain: formatVersePlain(raw, markupFlags, verseMarkupSettings),
+          html: formatVerseHtml(raw, markupFlags, verseMarkupSettings),
+        };
+      })
+      .filter((entry) => entry.plain.length > 0);
 
     if (verseTexts.length === 0) {
       return;
@@ -259,8 +273,8 @@ function App() {
 
     const header = `${selectedBook} ${selectedChapter}:${referenceSuffix}`;
     const body = verseTexts.length === 1
-      ? verseTexts[0].text
-      : verseTexts.map((entry) => `${entry.verseNumber}\u00A0 ${entry.text}`).join('\n');
+      ? verseTexts[0].plain
+      : verseTexts.map((entry) => `${entry.verseNumber}\u00A0 ${entry.plain}`).join('\n');
     const copyText = `${header}\n${body}`;
 
     const escapeHtml = (value: string): string => {
@@ -274,10 +288,10 @@ function App() {
 
     const referenceHtml = `<span>${escapeHtml(header)}</span><br/>`;
     const bodyHtml = verseTexts.length === 1
-      ? `${escapeHtml(verseTexts[0].text)}`
+      ? verseTexts[0].html
       : verseTexts
         .map((entry) => (
-          `<span style="color:#808080;">${entry.verseNumber}</span> ${escapeHtml(entry.text)}`
+          `<span style="color:#808080;">${entry.verseNumber}</span> ${entry.html}`
         ))
         .join('<br/>');
     const copyHtml = `<div style="font-family:Calibri, Arial, sans-serif; font-size:11pt;">${referenceHtml}${bodyHtml}</div>`;
@@ -327,7 +341,16 @@ function App() {
     fallback.select();
     document.execCommand('copy');
     document.body.removeChild(fallback);
-  }, [currentBible, loadedTranslations, selectedBook, selectedChapter, selectedVerses, selectedVerseTranslationId]);
+  }, [
+    currentBible,
+    loadedTranslations,
+    selectedBook,
+    selectedChapter,
+    selectedVerses,
+    selectedVerseTranslationId,
+    translatorItalics,
+    translatorParagraphMarks,
+  ]);
 
   // Ctrl/Cmd+K to focus search input; Ctrl+C to copy selected verses from the focused main pane.
   useEffect(() => {
@@ -432,6 +455,10 @@ function App() {
         selectedBook: initialBook,
         selectedChapter: initialChapter,
         theme: savedState?.theme ?? detectPreferredTheme(),
+        translatorItalics: typeof savedState?.translatorItalics === 'boolean' ? savedState.translatorItalics : true,
+        translatorParagraphMarks: typeof savedState?.translatorParagraphMarks === 'boolean'
+          ? savedState.translatorParagraphMarks
+          : true,
         selectedLanguages: finalLanguages,
         sourceUrls: Array.isArray(savedState?.sourceUrls) ? savedState.sourceUrls : [],
         resourceHiddenTags: Array.isArray(savedState?.resourceHiddenTags) ? savedState.resourceHiddenTags : [],
@@ -469,6 +496,8 @@ function App() {
       lastVerse: undefined,
       lastSearch: undefined,
       theme,
+      translatorItalics,
+      translatorParagraphMarks,
       languages: safeSelectedLanguages,
       sourceUrls,
       resourceHiddenTags,
@@ -481,6 +510,8 @@ function App() {
     selectedBook,
     selectedChapter,
     theme,
+    translatorItalics,
+    translatorParagraphMarks,
     safeSelectedLanguages,
     sourceUrls,
     resourceHiddenTags,
@@ -652,6 +683,14 @@ function App() {
 
   const handleThemeToggle = (e: ChangeEvent<HTMLInputElement>) => {
     dispatch(setTheme(e.target.checked ? 'dark' : 'light'));
+  };
+
+  const handleTranslatorItalicsToggle = (e: ChangeEvent<HTMLInputElement>) => {
+    dispatch(setTranslatorItalics(e.target.checked));
+  };
+
+  const handleTranslatorParagraphMarksToggle = (e: ChangeEvent<HTMLInputElement>) => {
+    dispatch(setTranslatorParagraphMarks(e.target.checked));
   };
 
   const handleLanguagesChange = (selected: string[]) => {
@@ -971,6 +1010,10 @@ function App() {
         <SettingsModal
           theme={theme}
           handleThemeToggle={handleThemeToggle}
+          translatorItalics={translatorItalics}
+          handleTranslatorItalicsToggle={handleTranslatorItalicsToggle}
+          translatorParagraphMarks={translatorParagraphMarks}
+          handleTranslatorParagraphMarksToggle={handleTranslatorParagraphMarksToggle}
           selectedLanguages={safeSelectedLanguages}
           handleLanguagesChange={handleLanguagesChange}
           languageOptions={languageOptions}

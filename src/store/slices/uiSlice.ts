@@ -39,6 +39,8 @@ interface UiState {
     syncItem: DocumentSyncItem | null;
   };
   theme: ThemePreference;
+  translatorItalics: boolean;
+  translatorParagraphMarks: boolean;
   ready: boolean;
   // Email of the first cloud account ever connected; internal reference only.
   userId: string | null;
@@ -69,6 +71,8 @@ const initialState: UiState = {
     syncItem: null,
   },
   theme: 'light',
+  translatorItalics: true,
+  translatorParagraphMarks: true,
   ready: false,
   userId: null
 };
@@ -280,6 +284,12 @@ const uiSlice = createSlice({
     setTheme: (state, action: PayloadAction<ThemePreference>) => {
       state.theme = action.payload;
     },
+    setTranslatorItalics: (state, action: PayloadAction<boolean>) => {
+      state.translatorItalics = action.payload;
+    },
+    setTranslatorParagraphMarks: (state, action: PayloadAction<boolean>) => {
+      state.translatorParagraphMarks = action.payload;
+    },
     setUserId: (state, action: PayloadAction<string>) => {
       if (!state.userId) {
         state.userId = action.payload;
@@ -307,6 +317,12 @@ const uiSlice = createSlice({
       }
       if (next.resourceVerseMatchMode !== 'any' && next.resourceVerseMatchMode !== 'all') {
         next.resourceVerseMatchMode = 'all';
+      }
+      if (typeof next.translatorItalics !== 'boolean') {
+        next.translatorItalics = true;
+      }
+      if (typeof next.translatorParagraphMarks !== 'boolean') {
+        next.translatorParagraphMarks = true;
       }
       return next;
     },
@@ -427,6 +443,8 @@ export const {
   removeSourceUrl,
   removeTranslationsByIds,
   setTheme,
+  setTranslatorItalics,
+  setTranslatorParagraphMarks,
   setUserId,
   setReady,
   restoreState,
