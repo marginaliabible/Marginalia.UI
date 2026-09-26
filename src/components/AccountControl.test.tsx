@@ -554,7 +554,7 @@ describe('AccountControl', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Disconnect' }));
 
     expect(confirmSpy).toHaveBeenCalledWith(
-      'Your synchronization data will be kept for 30 days. If you reconnect after 30 days than you may incur additional data usage to reprocess your files. Are you sure you wish to disconnect this service from file sync?'
+      'Your synchronization data will be kept for 10 days. If you reconnect after 10 days than you may incur additional data usage to reprocess your files. Are you sure you wish to disconnect this service from file sync?'
     );
 
     expect(mockPersistState).not.toHaveBeenCalledWith(expect.objectContaining({
