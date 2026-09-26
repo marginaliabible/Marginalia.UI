@@ -112,6 +112,28 @@ describe('useVerseTabContextSync', () => {
     expect(activeTab?.verseContext?.verse).toBe(4);
   });
 
+  it('updates the active verse panel when the selection expands to multiple verses', () => {
+    const store = mountAtGenesis1();
+
+    act(() => {
+      store.dispatch(setVerseSelection({
+        translationId: 'KJV',
+        verses: [1, 2, 3],
+        anchorVerse: 1,
+      }));
+    });
+
+    const activeTab = store.getState().bible.tabs.find((tab) => (
+      tab.id === store.getState().bible.activeTabId
+    ));
+    expect(activeTab?.verseContext).toEqual({
+      book: 'Genesis',
+      chapter: 1,
+      verse: 1,
+      verses: [1, 2, 3],
+    });
+  });
+
   it('does not clear verse context when selection is cleared in the same chapter', () => {
     const store = mountAtGenesis1();
     const activeTabId = store.getState().bible.activeTabId;

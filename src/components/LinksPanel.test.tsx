@@ -59,7 +59,10 @@ describe('LinksPanel visibility gating', () => {
       isActive={false}
     />);
 
-    expect(hyperlinkService.getHyperlinksForVerse).not.toHaveBeenCalledWith(nextVerse, []);
+    expect(hyperlinkService.getHyperlinksForVerse).not.toHaveBeenCalledWith({
+      ...nextVerse,
+      verses: [9],
+    }, []);
   });
 
   it('fetches the selected verse when the tab becomes active', async () => {
@@ -77,7 +80,26 @@ describe('LinksPanel visibility gating', () => {
     />);
 
     await waitFor(() => {
-      expect(hyperlinkService.getHyperlinksForVerse).toHaveBeenCalledWith(selected, []);
+      expect(hyperlinkService.getHyperlinksForVerse).toHaveBeenCalledWith({
+        ...selected,
+        verses: [9],
+      }, []);
     });
+  });
+
+  it('resolves hyperlinks against the first selected verse', async () => {
+    const range = { book: 'Genesis', chapter: 1, verse: 1, verses: [1, 2, 3] } as const;
+    const { findByText } = render(<LinksPanel tab={{ ...linksTab, verseContext: range }} isActive={true} />);
+
+    await waitFor(() => {
+      expect(hyperlinkService.getHyperlinksForVerse).toHaveBeenCalledWith({
+        book: 'Genesis',
+        chapter: 1,
+        verse: 1,
+        verses: [1],
+      }, []);
+    });
+
+    expect(await findByText('Genesis 1:1-3')).toBeTruthy();
   });
 });

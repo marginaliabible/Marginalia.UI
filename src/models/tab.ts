@@ -4,6 +4,8 @@ export interface VerseContext {
   book: string;
   chapter: number;
   verse: number;
+  /** All selected verses in this chapter. Defaults to `[verse]` when omitted. */
+  verses?: number[];
 }
 
 export interface PanelTab {

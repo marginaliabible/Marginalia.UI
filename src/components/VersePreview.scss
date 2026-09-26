@@ -1,0 +1,10 @@
+.verse-text-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.verse-text-list-number {
+  color: var(--bs-secondary-color);
+  font-variant-numeric: tabular-nums;
+}

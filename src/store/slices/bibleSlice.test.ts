@@ -141,4 +141,22 @@ describe('bibleSlice verse tab context', () => {
     expect(closed.activeTabId).toBe(resourcesTab!.id);
     expect(closed.tabs.find((tab) => tab.type === 'resources')?.verseContext).toEqual(romansTenNine);
   });
+
+  it('updateActiveVerseTabContext applies a multi-verse range even when the first verse is unchanged', () => {
+    const opened = withVerseTabs();
+    const updated = reducer(opened, updateActiveVerseTabContext({
+      book: 'Genesis',
+      chapter: 1,
+      verse: 1,
+      verses: [1, 2, 3],
+    }));
+
+    const activeTab = updated.tabs.find((tab) => tab.id === updated.activeTabId);
+    expect(activeTab?.verseContext).toEqual({
+      book: 'Genesis',
+      chapter: 1,
+      verse: 1,
+      verses: [1, 2, 3],
+    });
+  });
 });

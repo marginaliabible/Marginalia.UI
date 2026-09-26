@@ -1,25 +1,13 @@
 import { useEffect, useRef } from 'react';
 import { useAppDispatch, useAppSelector } from '../store/hooks';
 import { clearVerseTabContexts, updateActiveVerseTabContext } from '../store/slices/bibleSlice';
-import { resolveSelectedVerseContext } from '../utils/selectedVerseContext';
-import type { VerseContext } from '../models/tab';
+import { resolveSelectedVerseContext, sameVerseContext } from '../utils/selectedVerseContext';
 
 const isVersePanelTabType = (type: string): boolean => (
   type === 'translations' || type === 'resources' || type === 'links'
 );
 
 const locationKeyFor = (book: string | null, chapter: number): string => `${book ?? ''}::${chapter}`;
-
-const sameVerseContext = (
-  left: VerseContext | null | undefined,
-  right: VerseContext | null | undefined
-): boolean => (
-  Boolean(left)
-  && Boolean(right)
-  && left!.book === right!.book
-  && left!.chapter === right!.chapter
-  && left!.verse === right!.verse
-);
 
 /**
  * Drive the active verse panel tab from the current verse selection.

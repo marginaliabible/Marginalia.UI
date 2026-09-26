@@ -1,5 +1,6 @@
 import { createSlice, type PayloadAction } from '@reduxjs/toolkit';
 import type { ThemePreference } from '../../models/bible';
+import type { ResourceVerseMatchMode } from '../../utils/verseResources';
 
 export interface TranslationRecord {
   id: string;
@@ -19,6 +20,7 @@ interface UiState {
   selectedLanguages: string[];
   sourceUrls: string[];
   resourceHiddenTags: string[];
+  resourceVerseMatchMode: ResourceVerseMatchMode;
   pdfViewer: {
     isOpen: boolean;
     kind: 'pdf' | 'markup';
@@ -48,6 +50,7 @@ const initialState: UiState = {
   selectedLanguages: [],
   sourceUrls: [],
   resourceHiddenTags: [],
+  resourceVerseMatchMode: 'all',
   pdfViewer: {
     isOpen: false,
     kind: 'pdf',
@@ -135,6 +138,9 @@ const uiSlice = createSlice({
           .map((entry) => entry.trim())
           .filter((entry) => entry.length > 0)
       ));
+    },
+    setResourceVerseMatchMode: (state, action: PayloadAction<ResourceVerseMatchMode>) => {
+      state.resourceVerseMatchMode = action.payload === 'any' ? 'any' : 'all';
     },
     openPdfViewer: (
       state,
@@ -284,6 +290,9 @@ const uiSlice = createSlice({
       if (next.pdfViewer && typeof next.pdfViewer.focusNonce !== 'number') {
         next.pdfViewer = { ...next.pdfViewer, focusNonce: 0 };
       }
+      if (next.resourceVerseMatchMode !== 'any' && next.resourceVerseMatchMode !== 'all') {
+        next.resourceVerseMatchMode = 'all';
+      }
       return next;
     },
     setTranslationRecords: (state, action: PayloadAction<TranslationRecord[]>) => {
@@ -392,6 +401,7 @@ export const {
   setSelectedLanguages,
   setSourceUrls,
   setResourceHiddenTags,
+  setResourceVerseMatchMode,
   openPdfViewer,
   openDocumentViewer,
   closePdfViewer,

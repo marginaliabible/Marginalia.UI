@@ -1,4 +1,4 @@
-import reducer, { restoreState, setUserId } from './uiSlice';
+import reducer, { restoreState, setResourceVerseMatchMode, setUserId } from './uiSlice';
 
 describe('uiSlice userId guard', () => {
   it('setUserId establishes the user ID once and ignores later attempts to change it', () => {
@@ -24,5 +24,15 @@ describe('uiSlice userId guard', () => {
   it('restoreState adopts an incoming userId only when none is set locally yet', () => {
     const afterRestore = reducer(undefined, restoreState({ userId: 'from-cloud@example.com' }));
     expect(afterRestore.userId).toBe('from-cloud@example.com');
+  });
+});
+
+describe('uiSlice resource verse match mode', () => {
+  it('defaults to ALL and can switch to ANY', () => {
+    const initial = reducer(undefined, { type: 'unknown' });
+    expect(initial.resourceVerseMatchMode).toBe('all');
+
+    const afterAny = reducer(initial, setResourceVerseMatchMode('any'));
+    expect(afterAny.resourceVerseMatchMode).toBe('any');
   });
 });
