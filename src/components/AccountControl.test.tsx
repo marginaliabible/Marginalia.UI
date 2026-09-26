@@ -15,6 +15,7 @@ import {
   writeCloudConfigForSession,
 } from '../services/cloudConfigProviderService';
 import { queueCloudFolderSelection } from '../services/cloudControlService';
+import { getFileSyncExclusionSnapshot, requestFileSyncExclusionToggle } from '../services/fileSyncExclusionService';
 import { addSourceUrl } from '../store/slices/uiSlice';
 
 jest.mock('../store/hooks', () => ({
@@ -180,6 +181,16 @@ async function assignFileSyncTag(itemLabel: string, tagName = 'Teaching') {
   });
 }
 
+// Reads return whatever was last written, like the real per-provider marginalia-config.json.
+function installFakeCloud(initial: Partial<Record<'google' | 'microsoft', any>> = {}) {
+  const cloud: Record<'google' | 'microsoft', any> = { google: null, microsoft: null, ...initial };
+  mockReadCloudConfigForSession.mockImplementation(async (session: { provider: 'google' | 'microsoft' }) => cloud[session.provider]);
+  mockWriteCloudConfigForSession.mockImplementation(async (session: { provider: 'google' | 'microsoft' }, payload: unknown) => {
+    cloud[session.provider] = JSON.parse(JSON.stringify(payload));
+  });
+  return cloud;
+}
+
 async function renderAccountControl() {
   let view: ReturnType<typeof render> | null = null;
   await act(async () => {
@@ -222,7 +233,7 @@ describe('AccountControl', () => {
     });
   });
 
-  it('auto-opens reconnect modal when linked providers include one missing on this device', async () => {
+  it('shows a passive reconnect notice without auto-opening the modal when a linked provider is missing on this device', async () => {
     mockReadState.mockReturnValue({
       lastTranslationId: 'KJV',
       lastTranslationIds: ['KJV'],
@@ -235,6 +246,13 @@ describe('AccountControl', () => {
     mockGetFreshSessions.mockResolvedValue({ microsoft: msSession });
 
     await renderAccountControl();
+
+    await waitFor(() => {
+      expect(mockGetFreshSessions).toHaveBeenCalled();
+    });
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+
+    openAccountModal();
 
     await waitFor(() => {
       expect(screen.getByText('Reconnect required')).toBeInTheDocument();
@@ -242,7 +260,7 @@ describe('AccountControl', () => {
     });
   });
 
-  it('expands the accordion for the provider that requires reconnect', async () => {
+  it('offers Reconnect for the missing provider once its accordion is expanded', async () => {
     mockReadState.mockReturnValue({
       lastTranslationId: 'KJV',
       lastTranslationIds: ['KJV'],
@@ -255,17 +273,17 @@ describe('AccountControl', () => {
     mockGetFreshSessions.mockResolvedValue({ microsoft: msSession });
 
     await renderAccountControl();
+    openAccountModal();
 
-    await waitFor(() => {
-      expect(screen.getByRole('button', { name: /Connected to Google/i })).toHaveAttribute('aria-expanded', 'true');
-    });
+    expect(screen.getByRole('button', { name: /Connected to Google/i })).toHaveAttribute('aria-expanded', 'false');
+    expandProvider('Google');
 
+    expect(screen.getByRole('button', { name: /Connected to Google/i })).toHaveAttribute('aria-expanded', 'true');
     expect(screen.getByRole('button', { name: 'Reconnect' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Connected to Microsoft/i })).toHaveAttribute('aria-expanded', 'false');
   });
 
-  it('shows reconnect modal again after remount when a linked provider is still missing', async () => {
-
+  it('does not auto-open the reconnect modal after remount when a linked provider is still missing', async () => {
     mockReadState.mockReturnValue({
       lastTranslationId: 'KJV',
       lastTranslationIds: ['KJV'],
@@ -279,14 +297,18 @@ describe('AccountControl', () => {
 
     const first = await renderAccountControl();
     await waitFor(() => {
-      expect(screen.getByText(/Reconnect Google on this device/i)).toBeInTheDocument();
+      expect(mockGetFreshSessions).toHaveBeenCalled();
     });
     first.unmount();
 
     await renderAccountControl();
     await waitFor(() => {
-      expect(screen.getByText(/Reconnect Google on this device/i)).toBeInTheDocument();
+      expect(mockGetFreshSessions.mock.calls.length).toBeGreaterThan(1);
     });
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+
+    openAccountModal();
+    expect(screen.getByText(/Reconnect Google on this device/i)).toBeInTheDocument();
   });
 
   it('pushes merged linked-account metadata to all active linked providers after second provider sign-in', async () => {
@@ -333,7 +355,7 @@ describe('AccountControl', () => {
       session: msSession,
     });
 
-    mockReadCloudConfigForSession.mockResolvedValue({
+    const googleOnlyCopy = {
       schemaVersion: 1,
       updatedAt: Date.now() - 20_000,
       linkedAccounts: [
@@ -355,7 +377,8 @@ describe('AccountControl', () => {
         resourceHiddenTags: [],
         theme: 'light',
       },
-    });
+    };
+    const cloud = installFakeCloud({ google: googleOnlyCopy, microsoft: googleOnlyCopy });
 
     await renderAccountControl();
 
@@ -368,20 +391,176 @@ describe('AccountControl', () => {
     });
 
     await waitFor(() => {
-      expect(mockWriteCloudConfigForSession).toHaveBeenCalledTimes(2);
+      for (const provider of ['google', 'microsoft'] as const) {
+        const linkedProviders = cloud[provider].linkedAccounts
+          .map((entry: { provider: string }) => entry.provider)
+          .sort();
+        expect(linkedProviders).toEqual(['google', 'microsoft']);
+      }
     });
 
-    const providersWritten = mockWriteCloudConfigForSession.mock.calls
-      .map((call) => call[0].provider)
-      .sort();
-    expect(providersWritten).toEqual(['google', 'microsoft']);
+    const providersWritten = new Set(mockWriteCloudConfigForSession.mock.calls.map((call) => call[0].provider));
+    expect(providersWritten).toEqual(new Set(['google', 'microsoft']));
+  });
 
-    const writePayload = mockWriteCloudConfigForSession.mock.calls[0][1];
-    const linkedProviders = writePayload.linkedAccounts
-      .map((entry: { provider: string }) => entry.provider)
-      .sort();
+  it('merges divergent provider copies on sign-in and writes the same result to both', async () => {
+    jest.useFakeTimers();
+    let uiState: any = baseUiState;
+    const dispatch = jest.fn((action: { type: string; payload?: any }) => {
+      if (action.type === 'ui/restoreState') {
+        uiState = { ...uiState, ...action.payload };
+      }
+    });
+    mockUseAppDispatch.mockReturnValue(dispatch);
+    mockUseAppSelector.mockImplementation((selector: (state: any) => any) => selector({ ui: uiState }));
 
-    expect(linkedProviders).toEqual(['google', 'microsoft']);
+    window.localStorage.setItem('marginalia:provider-sync-preferences', JSON.stringify({
+      google: { syncSettings: true, syncFiles: false, selectedTargets: [] },
+      microsoft: { syncSettings: true, syncFiles: false, selectedTargets: [] },
+    }));
+
+    const localStamp = Date.now() - 60_000;
+    mockReadState.mockReturnValue({
+      lastTranslationId: 'KJV',
+      lastTranslationIds: ['KJV'],
+      cloudLinkedAccounts: [
+        { provider: 'google', providerAccountId: 'g-user-1', email: 'g@example.com', linkedAt: localStamp },
+      ],
+      cloudConfigUpdatedAt: localStamp,
+      cloudConfigLastSyncedAt: localStamp,
+    });
+
+    const baseConfig = {
+      lastTranslationId: 'KJV',
+      lastTranslationIds: ['KJV'],
+      translationRecords: [{ id: 'KJV', starred: true }],
+      lastBook: 'John',
+      lastChapter: 3,
+      languages: [],
+      sourceUrls: ['https://a.example/library.json'],
+      resourceHiddenTags: [],
+      theme: 'light',
+    };
+    const oldStamp = Date.now() - 120_000;
+    const allFieldsAt = (stamp: number) => ({
+      lastTranslationId: stamp,
+      lastTranslationIds: stamp,
+      translationRecords: stamp,
+      position: stamp,
+      languages: stamp,
+      resourceHiddenTags: stamp,
+      theme: stamp,
+      userId: stamp,
+      'folders.google': stamp,
+      'folders.microsoft': stamp,
+    });
+    // PC #2 changed the theme through Google; mobile moved to Ruth 2 through OneDrive.
+    const cloud = installFakeCloud({
+      google: {
+        schemaVersion: 1,
+        updatedAt: Date.now() - 5_000,
+        linkedAccounts: [],
+        config: { ...baseConfig, theme: 'dark', sourceUrls: [...baseConfig.sourceUrls, 'https://b.example/library.json'] },
+        fieldUpdatedAt: { ...allFieldsAt(oldStamp), theme: Date.now() - 5_000 },
+      },
+      microsoft: {
+        schemaVersion: 1,
+        updatedAt: Date.now() - 4_000,
+        linkedAccounts: [],
+        config: { ...baseConfig, lastBook: 'Ruth', lastChapter: 2 },
+        fieldUpdatedAt: { ...allFieldsAt(oldStamp), position: Date.now() - 4_000 },
+      },
+    });
+
+    mockGetStoredSessions.mockReturnValue({ google: googleSession });
+    mockGetFreshSessions.mockResolvedValue({ google: googleSession, microsoft: msSession });
+    mockCompleteAuth.mockResolvedValue({ handled: true, provider: 'microsoft', session: msSession });
+
+    await renderAccountControl();
+
+    await act(async () => {
+      jest.advanceTimersByTime(1500);
+    });
+
+    await waitFor(() => {
+      expect(cloud.google?.config.theme).toBe('dark');
+      expect(cloud.google?.config.lastBook).toBe('Ruth');
+      expect(cloud.microsoft?.config).toEqual(cloud.google?.config);
+    });
+
+    expect(cloud.google.config.lastChapter).toBe(2);
+    expect(cloud.google.config.sourceUrls).toEqual(expect.arrayContaining([
+      'https://a.example/library.json',
+      'https://b.example/library.json',
+    ]));
+    expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'ui/restoreState',
+      payload: expect.objectContaining({ theme: 'dark', selectedBook: 'Ruth', selectedChapter: 2 }),
+    }));
+  });
+
+  it('queues CloudControlService when a merge changes a provider\'s own folder selection', async () => {
+    window.localStorage.setItem('marginalia:provider-sync-preferences', JSON.stringify({
+      google: { syncSettings: true, syncFiles: false, selectedTargets: [] },
+      microsoft: { syncSettings: true, syncFiles: true, selectedTargets: [] },
+    }));
+
+    const localStamp = Date.now() - 60_000;
+    mockReadState.mockReturnValue({
+      userId: 'user-cloud-1',
+      lastTranslationId: 'KJV',
+      lastTranslationIds: ['KJV'],
+      cloudLinkedAccounts: linkedBothProviders(),
+      cloudConfigUpdatedAt: localStamp,
+      cloudConfigLastSyncedAt: localStamp,
+    });
+
+    const msTarget = { id: 'ms-documents', kind: 'folder', name: 'Documents', path: 'OneDrive/Documents', tags: ['Teaching'] };
+    const config = {
+      lastTranslationId: 'KJV',
+      lastTranslationIds: ['KJV'],
+      translationRecords: [{ id: 'KJV', starred: true }],
+      lastBook: 'John',
+      lastChapter: 3,
+      languages: [],
+      sourceUrls: [],
+      resourceHiddenTags: [],
+      theme: 'light',
+    };
+    // The OneDrive folder change reached only the Google copy; CCS reads OneDrive selections from OneDrive.
+    installFakeCloud({
+      google: {
+        schemaVersion: 1,
+        updatedAt: Date.now() - 1_000,
+        linkedAccounts: linkedBothProviders(),
+        config: { ...config, providerFolderSelections: { google: [], microsoft: [msTarget] } },
+        fieldUpdatedAt: { 'folders.microsoft': Date.now() - 1_000 },
+      },
+      microsoft: {
+        schemaVersion: 1,
+        updatedAt: localStamp,
+        linkedAccounts: linkedBothProviders(),
+        config: { ...config, providerFolderSelections: { google: [], microsoft: [] } },
+      },
+    });
+
+    mockGetStoredSessions.mockReturnValue({ google: googleSession, microsoft: msSession });
+    mockGetFreshSessions.mockResolvedValue({ google: googleSession, microsoft: msSession });
+
+    await renderAccountControl();
+
+    await waitFor(() => {
+      expect(mockQueueCloudFolderSelection).toHaveBeenCalledWith({
+        userId: 'user-cloud-1',
+        provider: 'microsoft',
+        removed: [],
+        accessToken: msSession.accessToken,
+      });
+    });
+    expect(mockQueueCloudFolderSelection).not.toHaveBeenCalledWith(expect.objectContaining({ provider: 'google' }));
+
+    const persisted = JSON.parse(window.localStorage.getItem('marginalia:provider-sync-preferences') || '{}');
+    expect(persisted.microsoft.selectedTargets).toEqual([msTarget]);
   });
 
   it('writes only to available sessions when another linked provider is missing on this device', async () => {
@@ -415,7 +594,7 @@ describe('AccountControl', () => {
       provider: 'microsoft',
       session: msSession,
     });
-    mockReadCloudConfigForSession.mockResolvedValue(null);
+    const cloud = installFakeCloud();
 
     await renderAccountControl();
 
@@ -428,10 +607,94 @@ describe('AccountControl', () => {
     });
 
     await waitFor(() => {
-      expect(mockWriteCloudConfigForSession).toHaveBeenCalledTimes(1);
+      expect(cloud.microsoft).not.toBeNull();
     });
 
-    expect(mockWriteCloudConfigForSession.mock.calls[0][0].provider).toBe('microsoft');
+    expect(cloud.google).toBeNull();
+    expect(mockWriteCloudConfigForSession.mock.calls.every((call) => call[0].provider === 'microsoft')).toBe(true);
+    expect(screen.queryByText(/not signed in on this device/i)).not.toBeInTheDocument();
+  });
+
+  it('restores cloud folder selections instead of overwriting them when a never-synced device connects', async () => {
+    jest.useFakeTimers();
+
+    window.localStorage.setItem('marginalia:provider-sync-preferences', JSON.stringify({
+      google: {
+        syncSettings: false,
+        syncFiles: false,
+        selectedTargets: [],
+      },
+      microsoft: {
+        syncSettings: true,
+        syncFiles: true,
+        selectedTargets: [],
+      },
+    }));
+
+    mockReadState.mockReturnValue({
+      lastTranslationId: 'KJV',
+      lastTranslationIds: ['KJV'],
+    });
+
+    mockGetStoredSessions.mockReturnValue({});
+    mockGetFreshSessions.mockResolvedValue({ microsoft: msSession });
+    mockCompleteAuth.mockResolvedValue({
+      handled: true,
+      provider: 'microsoft',
+      session: msSession,
+    });
+
+    const remoteTarget = {
+      id: 'ms-documents',
+      kind: 'folder',
+      name: 'Documents',
+      path: 'OneDrive/Documents',
+      tags: ['Teaching'],
+    };
+    mockReadCloudConfigForSession.mockResolvedValue({
+      schemaVersion: 1,
+      updatedAt: Date.now() - 7 * 24 * 60 * 60 * 1000,
+      linkedAccounts: [
+        {
+          provider: 'microsoft',
+          providerAccountId: 'ms-user-1',
+          email: 'ms@example.com',
+          linkedAt: Date.now() - 7 * 24 * 60 * 60 * 1000,
+        },
+      ],
+      config: {
+        lastTranslationId: 'KJV',
+        lastTranslationIds: ['KJV'],
+        translationRecords: [{ id: 'KJV', starred: true }],
+        languages: [],
+        sourceUrls: [],
+        resourceHiddenTags: [],
+        theme: 'light',
+        providerFolderSelections: {
+          google: [],
+          microsoft: [remoteTarget],
+        },
+      },
+    });
+
+    await renderAccountControl();
+
+    await waitFor(() => {
+      const persisted = JSON.parse(window.localStorage.getItem('marginalia:provider-sync-preferences') || '{}');
+      expect(persisted.microsoft.selectedTargets).toEqual([remoteTarget]);
+    });
+
+    await act(async () => {
+      jest.advanceTimersByTime(1500);
+    });
+
+    await waitFor(() => {
+      expect(mockWriteCloudConfigForSession).toHaveBeenCalled();
+    });
+
+    for (const [, payload] of mockWriteCloudConfigForSession.mock.calls) {
+      expect(payload.config.providerFolderSelections.microsoft).toEqual([remoteTarget]);
+    }
   });
 
   it('does not attempt cloud writes when no linked accounts exist', async () => {
@@ -484,13 +747,14 @@ describe('AccountControl', () => {
     mockGetStoredSessions.mockReturnValue({});
     mockGetFreshSessions.mockResolvedValue({});
 
-    render(<AccountControl />);
+    await renderAccountControl();
+    openAccountModal();
 
     await waitFor(() => {
       expect(screen.getByText(/Reconnect Google on this device/i)).toBeInTheDocument();
     });
 
-    // The reconnect flow auto-expands the affected provider's accordion.
+    expandProvider('Google');
     const syncSettingsCheckbox = getProviderCheckbox('google-sync-settings');
     const syncFilesCheckbox = getProviderCheckbox('google-sync-files');
 
@@ -554,7 +818,7 @@ describe('AccountControl', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Disconnect' }));
 
     expect(confirmSpy).toHaveBeenCalledWith(
-      'Your synchronization data will be kept for 10 days. If you reconnect after 10 days than you may incur additional data usage to reprocess your files. Are you sure you wish to disconnect this service from file sync?'
+      'Your synchronization data will be kept for 10 days. If you reconnect after 10 days then you may incur additional data usage to reprocess your files. Are you sure you wish to disconnect this service from file sync?'
     );
 
     expect(mockPersistState).not.toHaveBeenCalledWith(expect.objectContaining({
@@ -659,6 +923,68 @@ describe('AccountControl', () => {
           tags: ['Teaching'],
         },
       ]);
+    });
+  });
+
+  it('applies a document viewer exclusion toggle to every root selection of that provider', async () => {
+    mockReadState.mockReturnValue({
+      lastTranslationId: 'KJV',
+      lastTranslationIds: ['KJV'],
+      cloudLinkedAccounts: [
+        {
+          provider: 'google',
+          providerAccountId: 'g-user-1',
+          email: 'g@example.com',
+          linkedAt: Date.now() - 5000,
+        },
+      ],
+      cloudConfigUpdatedAt: Date.now() - 10_000,
+      cloudConfigLastSyncedAt: Date.now() - 10_000,
+    });
+
+    window.localStorage.setItem('marginalia:provider-sync-preferences', JSON.stringify({
+      google: {
+        syncSettings: true,
+        syncFiles: true,
+        selectedTargets: [
+          { id: 'g-folder-1', kind: 'folder', name: 'Notes', path: 'Google Drive/Notes', tags: ['Teaching'] },
+          { id: 'g-folder-2', kind: 'folder', name: 'Papers', path: 'Google Drive/Papers', tags: ['Teaching'] },
+        ],
+      },
+      microsoft: {
+        syncSettings: false,
+        syncFiles: false,
+        selectedTargets: [],
+      },
+    }));
+
+    mockGetStoredSessions.mockReturnValue({ google: googleSession });
+    mockGetFreshSessions.mockResolvedValue({ google: googleSession });
+
+    await renderAccountControl();
+
+    await waitFor(() => {
+      expect(getFileSyncExclusionSnapshot().google.canEdit).toBe(true);
+    });
+
+    act(() => {
+      requestFileSyncExclusionToggle('google', 'g-file-notes');
+    });
+
+    await waitFor(() => {
+      const persisted = JSON.parse(window.localStorage.getItem('marginalia:provider-sync-preferences') || '{}');
+      expect(persisted.google.selectedTargets.map((target: { excludedItemIds?: string[] }) => target.excludedItemIds))
+        .toEqual([['g-file-notes'], ['g-file-notes']]);
+    });
+
+    act(() => {
+      requestFileSyncExclusionToggle('google', 'g-file-notes');
+    });
+
+    await waitFor(() => {
+      const persisted = JSON.parse(window.localStorage.getItem('marginalia:provider-sync-preferences') || '{}');
+      expect(persisted.google.selectedTargets.every((target: { excludedItemIds?: string[] }) => !target.excludedItemIds))
+        .toBe(true);
     });
   });
 

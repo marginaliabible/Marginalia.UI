@@ -19,7 +19,27 @@ import {
   writeCloudConfigForSession,
   type SyncedCloudConfig,
 } from '../services/cloudConfigProviderService';
+import {
+  SYNCED_CONFIG_FIELDS,
+  createFieldStamps,
+  fieldFingerprints,
+  folderSelectionChanged,
+  maxFieldStamp,
+  mergeSyncedCloudConfigs,
+  nextStamp,
+  normalizeFieldStamps,
+  removedFolderIds,
+  stableStringify,
+  syncedConfigsEqual,
+  type SyncedConfigField,
+  type SyncedFieldStamps,
+} from '../services/cloudConfigMerge';
 import { queueCloudFolderSelection, reportSyncActivity } from '../services/cloudControlService';
+import {
+  publishFileSyncExclusionSnapshot,
+  registerFileSyncExclusionToggleHandler,
+  toggleItemExclusion,
+} from '../services/fileSyncExclusionService';
 import {
   clearStorageSession,
   establishStorageSession,
@@ -34,7 +54,7 @@ const THIRTY_MINUTES_MS = 30 * 60 * 1000;
 const SYNC_ACTIVITY_THROTTLE_MS = 5 * 60 * 1000;
 const SYNC_ACTIVITY_FORCE_GAP_MS = 60 * 60 * 1000;
 const PROVIDERS: FederatedProvider[] = ['google', 'microsoft'];
-const DISCONNECT_FILE_SYNC_CONFIRMATION = 'Your synchronization data will be kept for 30 days. If you reconnect after 30 days than you may incur additional data usage to reprocess your files. Are you sure you wish to disconnect this service from file sync?';
+const DISCONNECT_FILE_SYNC_CONFIRMATION = 'Your synchronization data will be kept for 10 days. If you reconnect after 10 days then you may incur additional data usage to reprocess your files. Are you sure you wish to disconnect this service from file sync?';
 const UNSAVED_FILE_SYNC_CONFIRMATION = 'You have unapplied File Sync folder changes. Discard them?';
 const PROVIDER_SYNC_PREFERENCES_STORAGE_KEY = 'marginalia:provider-sync-preferences';
 
@@ -252,6 +272,59 @@ function toLinkedAccount(session: FederatedSession): LinkedCloudAccount {
   };
 }
 
+/**
+ * The config exactly as this device will hold it after applying `remote` (same defaults as
+ * restoreState). Comparing through this view keeps fields a cloud copy omits from looking changed
+ * on every sync.
+ */
+function toLocalConfigView(
+  remote: SyncedCloudConfig['config'],
+  currentFolders: Record<FederatedProvider, ProviderSyncTarget[]>
+): SyncedCloudConfig['config'] {
+  const lastTranslationId = remote.lastTranslationId || 'KJV';
+  const lastBook = remote.lastBook || undefined;
+  const folders = {} as Record<FederatedProvider, ProviderSyncTarget[]>;
+  for (const provider of PROVIDERS) {
+    const remoteTargets = remote.providerFolderSelections?.[provider];
+    folders[provider] = Array.isArray(remoteTargets)
+      ? remoteTargets.filter((entry): entry is ProviderSyncTarget => isProviderSyncTarget(entry))
+      : currentFolders[provider];
+  }
+
+  return {
+    lastTranslationId,
+    lastTranslationIds: remote.lastTranslationIds || [lastTranslationId],
+    translationRecords: remote.translationRecords || [{ id: lastTranslationId, starred: true }],
+    lastBook,
+    lastChapter: lastBook ? remote.lastChapter || 1 : undefined,
+    languages: Array.isArray(remote.languages) ? remote.languages : [],
+    sourceUrls: Array.isArray(remote.sourceUrls) ? remote.sourceUrls : [],
+    resourceHiddenTags: Array.isArray(remote.resourceHiddenTags) ? remote.resourceHiddenTags : [],
+    theme: remote.theme || 'light',
+    userId: remote.userId,
+    providerFolderSelections: folders,
+  };
+}
+
+function localConfigDiffers(local: SyncedCloudConfig['config'], next: SyncedCloudConfig['config']): boolean {
+  const localPrints = fieldFingerprints(local);
+  const nextPrints = fieldFingerprints(next);
+  // A user ID never changes once set locally, so only an empty local one can be filled in.
+  const userIdDiffers = !String(local.userId ?? '').trim() && Boolean(String(next.userId ?? '').trim());
+  return userIdDiffers
+    || SYNCED_CONFIG_FIELDS.some((field) => field !== 'userId' && localPrints[field] !== nextPrints[field])
+    || stableStringify(local.sourceUrls ?? []) !== stableStringify(next.sourceUrls ?? []);
+}
+
+interface ReconcileResult {
+  merged: SyncedCloudConfig;
+  localChanged: boolean;
+  readCount: number;
+  writeCount: number;
+  failures: string[];
+  libraryUrls: string[];
+}
+
 const AccountControl: React.FC = () => {
   const dispatch = useAppDispatch();
 
@@ -295,43 +368,17 @@ const AccountControl: React.FC = () => {
   const hasBootstrappedAuthRef = useRef(false);
   const hasInitializedCloudStateRef = useRef(false);
   const hasLoadedCloudSnapshotRef = useRef(false);
-  const suppressNextFingerprintCommitRef = useRef(false);
   const hasUserActivitySinceReadRef = useRef(false);
-  const cloudRefreshInFlightRef = useRef(false);
+  const syncInFlightRef = useRef(false);
+  const syncQueuedRef = useRef(false);
   const lastCloudReadAtRef = useRef(Date.now());
   const lastSyncActivityReportAtRef = useRef(0);
-  const reconnectPromptSeenRef = useRef<string>('');
-
-  const persistedConfigFingerprint = useMemo(() => {
-    return JSON.stringify({
-      selectedTranslationId,
-      selectedTranslationIds,
-      translationRecords,
-      selectedBook,
-      selectedChapter,
-      selectedLanguages,
-      sourceUrls,
-      resourceHiddenTags,
-      theme,
-      userId,
-      providerFolderSelections: {
-        google: providerSyncPreferences.google.selectedTargets,
-        microsoft: providerSyncPreferences.microsoft.selectedTargets,
-      },
-    });
-  }, [
-    selectedTranslationId,
-    selectedTranslationIds,
-    translationRecords,
-    selectedBook,
-    selectedChapter,
-    selectedLanguages,
-    sourceUrls,
-    resourceHiddenTags,
-    theme,
-    userId,
-    providerSyncPreferences,
-  ]);
+  const fieldStampsRef = useRef<SyncedFieldStamps>(createFieldStamps(0));
+  const lastFingerprintsRef = useRef<Record<SyncedConfigField, string> | null>(null);
+  const lastSourceUrlsFingerprintRef = useRef('');
+  // Fingerprints of the last config pulled from the cloud; state catching up to it is not a local edit.
+  const appliedFingerprintsRef = useRef<Record<SyncedConfigField, string> | null>(null);
+  const appliedSourceUrlsFingerprintRef = useRef<string | null>(null);
 
   const configSnapshot = useMemo<SyncedCloudConfig['config']>(() => {
     return {
@@ -363,6 +410,9 @@ const AccountControl: React.FC = () => {
     userId,
     providerSyncPreferences,
   ]);
+
+  const syncedFieldFingerprints = useMemo(() => fieldFingerprints(configSnapshot), [configSnapshot]);
+  const sourceUrlsFingerprint = useMemo(() => stableStringify(configSnapshot.sourceUrls ?? []), [configSnapshot]);
 
   const activeSession = useMemo(() => getMostRecentlyGrantedSession(sessions), [sessions]);
 
@@ -437,11 +487,9 @@ const AccountControl: React.FC = () => {
     writeStoredProviderSyncPreferences(providerSyncPreferences);
   }, [providerSyncPreferences]);
 
-  const applyRemoteConfig = useCallback(async (payload: SyncedCloudConfig) => {
-    const remote = payload.config;
-
-    // A cloud-originated restore should not be treated as a local edit.
-    suppressNextFingerprintCommitRef.current = true;
+  const applyRemoteConfig = useCallback(async (remote: SyncedCloudConfig['config']) => {
+    appliedFingerprintsRef.current = fieldFingerprints(remote);
+    appliedSourceUrlsFingerprintRef.current = stableStringify(remote.sourceUrls ?? []);
 
     dispatch(restoreState({
       selectedTranslationId: remote.lastTranslationId || 'KJV',
@@ -449,31 +497,23 @@ const AccountControl: React.FC = () => {
       translationRecords: remote.translationRecords || [{ id: remote.lastTranslationId || 'KJV', starred: true }],
       selectedBook: remote.lastBook || null,
       selectedChapter: remote.lastChapter || 1,
-      selectedLanguages: Array.isArray(remote.languages) ? remote.languages : [],
-      sourceUrls: Array.isArray(remote.sourceUrls) ? remote.sourceUrls : [],
-      resourceHiddenTags: Array.isArray(remote.resourceHiddenTags) ? remote.resourceHiddenTags : [],
+      selectedLanguages: remote.languages ?? [],
+      sourceUrls: remote.sourceUrls ?? [],
+      resourceHiddenTags: remote.resourceHiddenTags ?? [],
       theme: remote.theme || 'light',
     }));
 
-    const remoteFolderSelections = remote.providerFolderSelections;
-    if (remoteFolderSelections) {
-      setProviderSyncPreferences((current) => {
-        const next = { ...current };
-        for (const provider of PROVIDERS) {
-          const remoteTargets = remoteFolderSelections[provider];
-          if (!Array.isArray(remoteTargets)) {
-            continue;
-          }
+    setProviderSyncPreferences((current) => {
+      const next = { ...current };
+      for (const provider of PROVIDERS) {
+        next[provider] = {
+          ...next[provider],
+          selectedTargets: (remote.providerFolderSelections?.[provider] ?? []) as ProviderSyncTarget[],
+        };
+      }
 
-          next[provider] = {
-            ...next[provider],
-            selectedTargets: remoteTargets.filter((entry): entry is ProviderSyncTarget => isProviderSyncTarget(entry)),
-          };
-        }
-
-        return next;
-      });
-    }
+      return next;
+    });
 
     // setUserId is a no-op locally if a user ID was already established on this device.
     if (typeof remote.userId === 'string' && remote.userId.trim().length > 0) {
@@ -486,68 +526,195 @@ const AccountControl: React.FC = () => {
     }
   }, [dispatch]);
 
-  const refreshCloudSnapshot = useCallback(async (reason: 'startup' | 'activity') => {
-    if (!ready || !hasInitializedCloudStateRef.current || cloudRefreshInFlightRef.current) {
-      return;
-    }
+  /**
+   * Reads every signed-in provider's copy, merges it with `localDoc`, applies the result locally,
+   * and writes it back to each provider whose copy differs. Providers whose read failed are not
+   * written, so an unreadable copy is never clobbered.
+   */
+  const reconcileWithCloud = useCallback(async (
+    localDoc: SyncedCloudConfig,
+    currentSessions: Partial<Record<FederatedProvider, FederatedSession>>,
+    options: { queueFolderChanges: boolean }
+  ): Promise<ReconcileResult> => {
+    const failures: string[] = [];
+    const remotes = new Map<FederatedProvider, SyncedCloudConfig | null>();
 
-    cloudRefreshInFlightRef.current = true;
-
-    try {
-      if (linkedAccounts.length === 0) {
-        lastCloudReadAtRef.current = Date.now();
-        hasUserActivitySinceReadRef.current = false;
-        return;
+    for (const provider of PROVIDERS) {
+      const session = currentSessions[provider];
+      if (!session || !providerSyncPreferences[provider].syncSettings) {
+        continue;
       }
 
-      const currentSessions = await getFreshFederatedSessions();
-      setSessions(currentSessions);
-      const linkedProviders = Array.from(new Set(linkedAccounts.map((entry) => entry.provider)));
-      const settingsProviders = linkedProviders.filter((provider) => providerSyncPreferences[provider].syncSettings);
-      const missingOnThisDevice = linkedProviders.filter((provider) => !currentSessions[provider]);
-      setMissingProviderPrompts(missingOnThisDevice);
+      try {
+        remotes.set(provider, await readCloudConfigForSession(session));
+      } catch (readError) {
+        const message = readError instanceof Error ? readError.message : String(readError);
+        failures.push(`${PROVIDER_LABEL[provider]}: ${message}`);
+      }
+    }
 
-      let newestPayload: SyncedCloudConfig | null = null;
+    const remoteDocs = Array.from(remotes.values()).filter((doc): doc is SyncedCloudConfig => Boolean(doc));
+    const persistedState = bibleService.readState() as MarginaliaState;
+    const detachedProviders = persistedState.cloudDetachedProviders ?? [];
+    const rawMerged = mergeSyncedCloudConfigs([localDoc, ...remoteDocs]);
+    const localFolders = {
+      google: (localDoc.config.providerFolderSelections?.google ?? []) as ProviderSyncTarget[],
+      microsoft: (localDoc.config.providerFolderSelections?.microsoft ?? []) as ProviderSyncTarget[],
+    };
+    const merged: SyncedCloudConfig = {
+      ...rawMerged,
+      config: toLocalConfigView(rawMerged.config, localFolders),
+      linkedAccounts: rawMerged.linkedAccounts.filter((entry) => !detachedProviders.includes(entry.provider)),
+    };
 
-      for (const provider of settingsProviders) {
-        const session = currentSessions[provider];
-        if (!session) {
-          continue;
+    const localChanged = localConfigDiffers(localDoc.config, merged.config);
+    if (localChanged) {
+      await applyRemoteConfig(merged.config);
+    }
+
+    // Keep any stamp a local edit made while the reads were in flight.
+    const mergedStamps = normalizeFieldStamps(merged.fieldUpdatedAt, 0);
+    for (const field of SYNCED_CONFIG_FIELDS) {
+      mergedStamps[field] = Math.max(mergedStamps[field], fieldStampsRef.current[field]);
+    }
+    fieldStampsRef.current = mergedStamps;
+    setConfigUpdatedAt(merged.updatedAt);
+    if (stableStringify(merged.linkedAccounts) !== stableStringify(linkedAccountsRef.current)) {
+      setLinkedAccounts(merged.linkedAccounts);
+    }
+
+    const written: FederatedProvider[] = [];
+    for (const [provider, remote] of remotes) {
+      const session = currentSessions[provider];
+      if (!session || syncedConfigsEqual(remote, merged)) {
+        continue;
+      }
+
+      try {
+        await writeCloudConfigForSession(session, merged);
+        written.push(provider);
+      } catch (writeError) {
+        const message = writeError instanceof Error ? writeError.message : String(writeError);
+        failures.push(`${PROVIDER_LABEL[provider]}: ${message}`);
+      }
+    }
+
+    const syncedAt = Date.now();
+    if (remotes.size > 0) {
+      setLastSyncedAt(syncedAt);
+    }
+    persistCloudState({
+      cloudLinkedAccounts: merged.linkedAccounts,
+      cloudConfigUpdatedAt: merged.updatedAt,
+      cloudFieldUpdatedAt: fieldStampsRef.current,
+      ...(remotes.size > 0 ? { cloudConfigLastSyncedAt: syncedAt } : {}),
+    });
+
+    // CloudControlService reads each provider's folder selection from that provider's own copy.
+    const libraryUrls: string[] = [];
+    const ownerUserId = String(persistedState.userId ?? '').trim();
+    if (options.queueFolderChanges && ownerUserId) {
+      await Promise.all(written.map(async (provider) => {
+        if (!providerSyncPreferences[provider].syncFiles) {
+          return;
+        }
+
+        const before = remotes.get(provider)?.config.providerFolderSelections?.[provider];
+        const after = merged.config.providerFolderSelections?.[provider];
+        if (!folderSelectionChanged(before, after)) {
+          return;
         }
 
         try {
-          const payload = await readCloudConfigForSession(session);
-          if (!payload) {
-            continue;
+          const result = await queueCloudFolderSelection({
+            userId: ownerUserId,
+            provider,
+            removed: removedFolderIds(before, after),
+            accessToken: currentSessions[provider]?.accessToken,
+          });
+          const libraryUrl = String(result?.libraryUrl ?? '').trim();
+          if (libraryUrl) {
+            libraryUrls.push(libraryUrl);
           }
-
-          if (!newestPayload || payload.updatedAt > newestPayload.updatedAt) {
-            newestPayload = payload;
-          }
-        } catch {
-          // Best effort refresh; manual reconnect/sync remains available.
+        } catch (queueError) {
+          failures.push(queueError instanceof Error ? queueError.message : String(queueError));
         }
-      }
-
-      if (newestPayload && newestPayload.updatedAt > configUpdatedAt) {
-        await applyRemoteConfig(newestPayload);
-        setConfigUpdatedAt(newestPayload.updatedAt);
-        persistCloudState({
-          cloudConfigUpdatedAt: newestPayload.updatedAt,
-          cloudLinkedAccounts: mergeLinkedAccounts(linkedAccounts, newestPayload.linkedAccounts),
-        });
-
-        if (reason === 'activity') {
-          setStatusMessage('Pulled newer configuration from cloud.');
-        }
-      }
-
-      lastCloudReadAtRef.current = Date.now();
-      hasUserActivitySinceReadRef.current = false;
-    } finally {
-      cloudRefreshInFlightRef.current = false;
+      }));
     }
-  }, [applyRemoteConfig, configUpdatedAt, linkedAccounts, persistCloudState, providerSyncPreferences, ready]);
+
+    return {
+      merged,
+      localChanged,
+      readCount: remotes.size,
+      writeCount: written.length,
+      failures,
+      libraryUrls,
+    };
+  }, [applyRemoteConfig, persistCloudState, providerSyncPreferences]);
+
+  const buildLocalDoc = useCallback((): SyncedCloudConfig => ({
+    ...toSyncedCloudConfig(configSnapshot, linkedAccounts, configUpdatedAt),
+    fieldUpdatedAt: { ...fieldStampsRef.current },
+  }), [configSnapshot, configUpdatedAt, linkedAccounts]);
+
+  const runSync = useCallback(async (reason: 'publish' | 'startup' | 'activity') => {
+    if (!ready || linkedAccounts.length === 0) {
+      return;
+    }
+
+    if (syncInFlightRef.current) {
+      syncQueuedRef.current = true;
+      return;
+    }
+
+    syncInFlightRef.current = true;
+    // Cleared up front so an edit made mid-reconcile schedules another pass.
+    setHasPendingSync(false);
+    try {
+      const currentSessions = await getFreshFederatedSessions();
+      setSessions(currentSessions);
+      setMissingProviderPrompts(
+        Array.from(new Set(linkedAccounts.map((entry) => entry.provider)))
+          .filter((provider) => !currentSessions[provider])
+      );
+
+      setSyncState('syncing');
+      if (reason === 'publish') {
+        setStatusMessage(null);
+      }
+
+      const result = await reconcileWithCloud(buildLocalDoc(), currentSessions, { queueFolderChanges: true });
+
+      if (result.failures.length > 0) {
+        setSyncState('error');
+        setStatusMessage(`Sync issues: ${result.failures.join(' | ')}`);
+        return;
+      }
+
+      setSyncState('idle');
+      if (result.localChanged && reason !== 'startup') {
+        setStatusMessage('Pulled newer configuration from cloud.');
+      } else if (reason === 'publish') {
+        setStatusMessage(result.writeCount > 0 ? 'Configuration synced.' : null);
+      }
+    } finally {
+      syncInFlightRef.current = false;
+      if (syncQueuedRef.current) {
+        syncQueuedRef.current = false;
+        setHasPendingSync(true);
+      }
+    }
+  }, [buildLocalDoc, linkedAccounts, ready, reconcileWithCloud]);
+
+  const refreshCloudSnapshot = useCallback(async (reason: 'startup' | 'activity') => {
+    if (!ready || !hasInitializedCloudStateRef.current) {
+      return;
+    }
+
+    lastCloudReadAtRef.current = Date.now();
+    hasUserActivitySinceReadRef.current = false;
+    await runSync(reason);
+  }, [ready, runSync]);
 
   const handleSessionAfterSignIn = useCallback(async (session: FederatedSession) => {
     const localSessions = await getFreshFederatedSessions();
@@ -565,55 +732,20 @@ const AccountControl: React.FC = () => {
     const baseLinked = mergeLinkedAccounts(linkedAccountsRef.current, persistedLinked);
     const nextLinked = mergeLinkedAccounts(baseLinked, [toLinkedAccount(session)]);
     setLinkedAccounts(nextLinked);
+    setMissingProviderPrompts(
+      Array.from(new Set(nextLinked.map((entry) => entry.provider)))
+        .filter((provider) => !localSessions[provider])
+    );
 
-    let nextConfigUpdatedAt = configUpdatedAt;
-    const deriveMissingProviders = (accounts: LinkedCloudAccount[]): FederatedProvider[] => {
-      return Array.from(new Set(accounts.map((entry) => entry.provider)))
-        .filter((provider) => !localSessions[provider]);
-    };
-
-    const shouldReadCloudConfig = providerSyncPreferences[session.provider].syncSettings;
-
-    if (shouldReadCloudConfig) {
-      try {
-        const remotePayload = await readCloudConfigForSession(session);
-        if (remotePayload) {
-          const mergedLinked = mergeLinkedAccounts(nextLinked, remotePayload.linkedAccounts);
-          setLinkedAccounts(mergedLinked);
-
-          if (remotePayload.updatedAt > configUpdatedAt) {
-            await applyRemoteConfig(remotePayload);
-            nextConfigUpdatedAt = remotePayload.updatedAt;
-            setConfigUpdatedAt(nextConfigUpdatedAt);
-            setStatusMessage(`Pulled newer configuration from ${PROVIDER_LABEL[session.provider]}.`);
-          }
-
-          setMissingProviderPrompts(deriveMissingProviders(mergedLinked));
-
-          persistCloudState({
-            cloudLinkedAccounts: mergedLinked,
-            cloudConfigUpdatedAt: nextConfigUpdatedAt,
-          });
-
-          // Always publish merged linkage to all signed-in providers after auth.
-          setHasPendingSync(true);
-          return;
-        }
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        setStatusMessage(`Signed in, but cloud read failed: ${message}`);
-      }
-    }
-
-    setMissingProviderPrompts(deriveMissingProviders(nextLinked));
     persistCloudState({
       cloudLinkedAccounts: nextLinked,
-      cloudConfigUpdatedAt: nextConfigUpdatedAt,
+      cloudDetachedProviders: (persistedState.cloudDetachedProviders ?? []).filter((provider) => provider !== session.provider),
     });
 
-    // New linkage should always publish to currently signed-in providers.
+    // Reconcile (read every copy, merge, write back) through the normal sync path, which runs
+    // with current state rather than this first-render closure.
     setHasPendingSync(true);
-  }, [applyRemoteConfig, configUpdatedAt, dispatch, persistCloudState, providerSyncPreferences]);
+  }, [dispatch, persistCloudState]);
 
   useEffect(() => {
     if (hasBootstrappedAuthRef.current) {
@@ -629,6 +761,12 @@ const AccountControl: React.FC = () => {
     lastCloudReadAtRef.current = typeof saved.cloudConfigLastSyncedAt === 'number'
       ? saved.cloudConfigLastSyncedAt
       : Date.now();
+    // Before per-field stamps existed, the whole config carried one timestamp; a device that has never
+    // synced (fresh or wiped) starts at 0 so the cloud copy wins every field.
+    const legacyStamp = typeof saved.cloudConfigLastSyncedAt === 'number' && typeof saved.cloudConfigUpdatedAt === 'number'
+      ? saved.cloudConfigUpdatedAt
+      : 0;
+    fieldStampsRef.current = normalizeFieldStamps(saved.cloudFieldUpdatedAt, legacyStamp);
     const currentSessions = getStoredFederatedSessions();
     setSessions(currentSessions);
     const missingOnThisDevice = Array.from(new Set(initialLinked.map((entry) => entry.provider)))
@@ -722,65 +860,56 @@ const AccountControl: React.FC = () => {
   }, [isModalOpen, hasUnsavedFileSyncChanges]);
 
   useEffect(() => {
-    if (missingProviderPrompts.length === 0) {
-      reconnectPromptSeenRef.current = '';
+    if (!ready || !hasInitializedCloudStateRef.current) {
       return;
     }
 
-    const reconnectKey = missingProviderPrompts.slice().sort().join('|');
-    if (reconnectPromptSeenRef.current === reconnectKey) {
-      return;
-    }
-
-    reconnectPromptSeenRef.current = reconnectKey;
-    setIsModalOpen(true);
-    // Only one accordion can be open, so surface the first provider needing reconnect.
-    setExpandedProvider(missingProviderPrompts[0]);
-    setStatusMessage('Reconnect required on this device to resume cloud synchronization.');
-  }, [missingProviderPrompts]);
-
-  const lastFingerprintRef = useRef<string>('');
-  useEffect(() => {
-    if (!ready) {
-      return;
-    }
-
-    if (!hasInitializedCloudStateRef.current) {
-      return;
-    }
+    const previous = lastFingerprintsRef.current;
+    const previousSourceUrls = lastSourceUrlsFingerprintRef.current;
+    lastFingerprintsRef.current = syncedFieldFingerprints;
+    lastSourceUrlsFingerprintRef.current = sourceUrlsFingerprint;
 
     // Baseline capture: this is not a modification.
-    if (lastFingerprintRef.current.length === 0) {
-      lastFingerprintRef.current = persistedConfigFingerprint;
+    if (!previous) {
       return;
     }
 
-    // Cloud hydrate should update baseline only, not schedule upload.
-    if (suppressNextFingerprintCommitRef.current) {
-      lastFingerprintRef.current = persistedConfigFingerprint;
-      suppressNextFingerprintCommitRef.current = false;
+    const applied = appliedFingerprintsRef.current;
+    const changedFields = SYNCED_CONFIG_FIELDS.filter((field) => (
+      previous[field] !== syncedFieldFingerprints[field]
+      && applied?.[field] !== syncedFieldFingerprints[field]
+    ));
+    const sourceUrlsChanged = previousSourceUrls !== sourceUrlsFingerprint
+      && appliedSourceUrlsFingerprintRef.current !== sourceUrlsFingerprint;
+    if (changedFields.length === 0 && !sourceUrlsChanged) {
       return;
     }
 
-    if (lastFingerprintRef.current === persistedConfigFingerprint) {
+    // Edits made while no account is linked are defaults, so a fresh device adopts the cloud copy.
+    if (linkedAccountsRef.current.length === 0) {
       return;
     }
 
-    lastFingerprintRef.current = persistedConfigFingerprint;
-    const nextUpdated = Date.now();
-    setConfigUpdatedAt(nextUpdated);
-    persistCloudState({ cloudConfigUpdatedAt: nextUpdated });
+    const stamp = nextStamp(maxFieldStamp(fieldStampsRef.current));
+    const nextStamps = { ...fieldStampsRef.current };
+    for (const field of changedFields) {
+      nextStamps[field] = stamp;
+    }
+    fieldStampsRef.current = nextStamps;
+    setConfigUpdatedAt(stamp);
+    persistCloudState({ cloudConfigUpdatedAt: stamp, cloudFieldUpdatedAt: nextStamps });
     setHasPendingSync(true);
-  }, [ready, persistedConfigFingerprint, persistCloudState]);
+  }, [ready, syncedFieldFingerprints, sourceUrlsFingerprint, persistCloudState]);
 
   useEffect(() => {
-    if (!ready || !hasInitializedCloudStateRef.current || hasLoadedCloudSnapshotRef.current) {
+    // Wait for linked accounts to load; the first render's closure still has none.
+    if (!ready || !hasInitializedCloudStateRef.current || hasLoadedCloudSnapshotRef.current || linkedAccounts.length === 0) {
       return;
     }
 
     hasLoadedCloudSnapshotRef.current = true;
     void refreshCloudSnapshot('startup');
-  }, [ready, refreshCloudSnapshot]);
+  }, [linkedAccounts.length, ready, refreshCloudSnapshot]);
 
   useEffect(() => {
     if (!ready || !hasInitializedCloudStateRef.current) {
@@ -873,61 +1002,7 @@ const AccountControl: React.FC = () => {
     };
   }, [ready, refreshCloudSnapshot, userId, providerSyncPreferences, providerSessionByType]);
 
-  const syncNow = useCallback(async () => {
-    if (!ready || linkedAccounts.length === 0) {
-      return;
-    }
-
-    const currentSessions = await getFreshFederatedSessions();
-    setSessions(currentSessions);
-
-    const linkedProviders = Array.from(new Set(linkedAccounts.map((entry) => entry.provider)));
-    const settingsProviders = linkedProviders.filter((provider) => providerSyncPreferences[provider].syncSettings);
-    const payload = toSyncedCloudConfig(configSnapshot, linkedAccounts, configUpdatedAt);
-
-    setSyncState('syncing');
-    setStatusMessage(null);
-
-    const failures: string[] = [];
-    let successfulWrites = 0;
-
-    for (const provider of settingsProviders) {
-      const session = currentSessions[provider];
-      if (!session) {
-        failures.push(`${PROVIDER_LABEL[provider]} not signed in on this device`);
-        continue;
-      }
-
-      try {
-        await writeCloudConfigForSession(session, payload);
-        successfulWrites += 1;
-      } catch (writeError) {
-        const message = writeError instanceof Error ? writeError.message : String(writeError);
-        failures.push(`${PROVIDER_LABEL[provider]}: ${message}`);
-      }
-    }
-
-    if (successfulWrites > 0) {
-      const syncedAt = Date.now();
-      setLastSyncedAt(syncedAt);
-      persistCloudState({
-        cloudLinkedAccounts: linkedAccounts,
-        cloudConfigUpdatedAt: configUpdatedAt,
-        cloudConfigLastSyncedAt: syncedAt,
-      });
-    }
-
-    if (failures.length > 0) {
-      setSyncState('error');
-      setStatusMessage(`Sync issues: ${failures.join(' | ')}`);
-      setHasPendingSync(false);
-      return;
-    }
-
-    setSyncState('idle');
-    setStatusMessage(successfulWrites > 0 ? 'Configuration synced.' : null);
-    setHasPendingSync(false);
-  }, [configSnapshot, configUpdatedAt, linkedAccounts, persistCloudState, providerSyncPreferences, ready]);
+  const syncNow = useCallback(() => runSync('publish'), [runSync]);
 
   useEffect(() => {
     if (!ready || linkedAccounts.length === 0 || !hasPendingSync) {
@@ -1002,10 +1077,12 @@ const AccountControl: React.FC = () => {
       }
     })();
 
+    const detachedProviders = (bibleService.readState() as MarginaliaState).cloudDetachedProviders ?? [];
     persistCloudState({
       cloudLinkedAccounts: nextLinked,
       cloudConfigUpdatedAt: configUpdatedAt,
       cloudConfigLastSyncedAt: lastSyncedAt ?? undefined,
+      cloudDetachedProviders: Array.from(new Set([...detachedProviders, provider])),
     });
 
     if (nextLinked.length > 0) {
@@ -1101,139 +1178,94 @@ const AccountControl: React.FC = () => {
       },
     }));
 
-    const syncedAt = Date.now();
-    setConfigUpdatedAt(syncedAt);
+    const nextFolders: Record<FederatedProvider, ProviderSyncTarget[]> = {
+      google: nextGoogleTargets,
+      microsoft: nextMicrosoftTargets,
+    };
+
+    // Stamp here rather than in the fingerprint effect: the reconcile below runs before the next render.
+    const stamp = nextStamp(maxFieldStamp(fieldStampsRef.current));
+    const nextStamps = { ...fieldStampsRef.current };
+    for (const provider of PROVIDERS) {
+      const field: SyncedConfigField = provider === 'google' ? 'folders.google' : 'folders.microsoft';
+      const nextFingerprint = stableStringify(nextFolders[provider]);
+      if (nextFingerprint !== stableStringify(previousSelections[provider].selectedTargets)) {
+        nextStamps[field] = stamp;
+      }
+      if (lastFingerprintsRef.current) {
+        lastFingerprintsRef.current = { ...lastFingerprintsRef.current, [field]: nextFingerprint };
+      }
+    }
+    fieldStampsRef.current = nextStamps;
+    setConfigUpdatedAt(stamp);
+    persistCloudState({ cloudConfigUpdatedAt: stamp, cloudFieldUpdatedAt: nextStamps });
 
     const userId = String((bibleService.readState() as MarginaliaState).userId ?? '').trim();
     if (!userId) {
+      setHasPendingSync(true);
       return;
     }
 
-    // Write marginalia-config.json first (selection SoT), then notify CCS to enumerate from that config.
-    // After CCS returns libraryUrl, register it in sourceUrls and re-write config so Settings Sync keeps it.
+    // Reconcile writes marginalia-config.json (selection SoT) and then notifies CCS for each provider
+    // whose own selection changed. A returned libraryUrl is registered in sourceUrls and synced again.
     void (async () => {
       const currentSessions = await getFreshFederatedSessions();
       setSessions(currentSessions);
 
-      const nextPreferences: ProviderSyncPreferenceMap = {
-        google: { ...previousSelections.google, selectedTargets: nextGoogleTargets },
-        microsoft: { ...previousSelections.microsoft, selectedTargets: nextMicrosoftTargets },
+      const localDoc: SyncedCloudConfig = {
+        ...toSyncedCloudConfig({ ...configSnapshot, providerFolderSelections: nextFolders }, linkedAccounts, stamp),
+        fieldUpdatedAt: { ...nextStamps },
       };
-      const payload = toSyncedCloudConfig({
-        ...configSnapshot,
-        providerFolderSelections: {
-          google: nextGoogleTargets,
-          microsoft: nextMicrosoftTargets,
-        },
-      }, linkedAccounts, syncedAt);
-
-      for (const provider of PROVIDERS) {
-        if (!nextPreferences[provider].syncSettings) {
-          continue;
-        }
-        const session = currentSessions[provider];
-        if (!session) {
-          continue;
-        }
-        try {
-          await writeCloudConfigForSession(session, payload);
-        } catch (writeError) {
-          setStatusMessage(writeError instanceof Error ? writeError.message : String(writeError));
-          return;
-        }
-      }
-
-      setLastSyncedAt(syncedAt);
-      persistCloudState({
-        cloudLinkedAccounts: linkedAccounts,
-        cloudConfigUpdatedAt: syncedAt,
-        cloudConfigLastSyncedAt: syncedAt,
-      });
-      setHasPendingSync(false);
-
-      const registeredLibraryUrls = new Set<string>();
-      await Promise.all(PROVIDERS.map(async (provider) => {
-        const next = nextSelections[provider];
-        const previous = previousSelections[provider];
-        if (!previous.syncFiles) {
-          return;
-        }
-
-        const previousIds = new Set(previous.selectedTargets.map((target) => target.id));
-        const nextIds = new Set(next.map((target) => target.id));
-
-        const selectionChanged = previous.selectedTargets.length !== next.length
-          || [...previousIds].some((id) => !nextIds.has(id))
-          || [...nextIds].some((id) => !previousIds.has(id))
-          || JSON.stringify(previous.selectedTargets.map((target) => ({
-            id: target.id,
-            excludedItemIds: [...(target.excludedItemIds || [])].sort(),
-            tags: [...(target.tags || [])].sort(),
-            itemTags: target.itemTags || {},
-          }))) !== JSON.stringify(next.map((target) => ({
-            id: target.id,
-            excludedItemIds: [...(target.excludedItemIds || [])].sort(),
-            tags: [...(target.tags || [])].sort(),
-            itemTags: target.itemTags || {},
-          })));
-
-        if (!selectionChanged) {
-          return;
-        }
-
-        const result = await queueCloudFolderSelection({
-          userId,
-          provider,
-          removed: [...previousIds].filter((id) => !nextIds.has(id)),
-          accessToken: providerSessionByType[provider]?.accessToken,
-        });
-        const libraryUrl = String(result?.libraryUrl ?? '').trim();
-        if (libraryUrl) {
-          registeredLibraryUrls.add(libraryUrl);
-        }
-      }));
-
-      if (registeredLibraryUrls.size === 0) {
+      const result = await reconcileWithCloud(localDoc, currentSessions, { queueFolderChanges: true });
+      if (result.failures.length > 0) {
+        setStatusMessage(result.failures.join(' | '));
         return;
       }
 
-      for (const libraryUrl of registeredLibraryUrls) {
+      if (result.libraryUrls.length === 0) {
+        return;
+      }
+
+      for (const libraryUrl of result.libraryUrls) {
         dispatch(addSourceUrl(libraryUrl));
       }
 
-      const nextSourceUrls = Array.from(new Set([
-        ...sourceUrls,
-        ...registeredLibraryUrls,
-      ].map((entry) => entry.trim()).filter((entry) => entry.length > 0)));
-
-      const payloadWithLibrary = toSyncedCloudConfig({
-        ...configSnapshot,
-        sourceUrls: nextSourceUrls,
-        providerFolderSelections: {
-          google: nextGoogleTargets,
-          microsoft: nextMicrosoftTargets,
+      const withLibrary: SyncedCloudConfig = {
+        ...result.merged,
+        config: {
+          ...result.merged.config,
+          sourceUrls: [...(result.merged.config.sourceUrls ?? []), ...result.libraryUrls],
         },
-      }, linkedAccounts, syncedAt);
-
-      for (const provider of PROVIDERS) {
-        if (!nextPreferences[provider].syncSettings) {
-          continue;
-        }
-        const session = currentSessions[provider];
-        if (!session) {
-          continue;
-        }
-        try {
-          await writeCloudConfigForSession(session, payloadWithLibrary);
-        } catch (writeError) {
-          setStatusMessage(writeError instanceof Error ? writeError.message : String(writeError));
-          return;
-        }
+      };
+      const followUp = await reconcileWithCloud(withLibrary, currentSessions, { queueFolderChanges: false });
+      if (followUp.failures.length > 0) {
+        setStatusMessage(followUp.failures.join(' | '));
       }
     })().catch((error: unknown) => {
       setStatusMessage(error instanceof Error ? error.message : String(error));
     });
-  }, [configSnapshot, dispatch, linkedAccounts, persistCloudState, providerSessionByType, providerSyncPreferences, sourceUrls]);
+  }, [configSnapshot, dispatch, linkedAccounts, persistCloudState, providerSyncPreferences, reconcileWithCloud]);
+
+  useEffect(() => {
+    publishFileSyncExclusionSnapshot({
+      google: {
+        canEdit: providerSyncPreferences.google.syncFiles && Boolean(providerSessionByType.google),
+        targets: providerSyncPreferences.google.selectedTargets,
+      },
+      microsoft: {
+        canEdit: providerSyncPreferences.microsoft.syncFiles && Boolean(providerSessionByType.microsoft),
+        targets: providerSyncPreferences.microsoft.selectedTargets,
+      },
+    });
+  }, [providerSessionByType, providerSyncPreferences]);
+
+  useEffect(() => registerFileSyncExclusionToggleHandler((provider, itemId) => {
+    handleApplyFolderSelections({
+      google: providerSyncPreferences.google.selectedTargets,
+      microsoft: providerSyncPreferences.microsoft.selectedTargets,
+      [provider]: toggleItemExclusion(providerSyncPreferences[provider].selectedTargets, itemId),
+    });
+  }), [handleApplyFolderSelections, providerSyncPreferences]);
 
   const handleProviderAction = useCallback((provider: FederatedProvider) => {
     const connected = isProviderConnected(provider);

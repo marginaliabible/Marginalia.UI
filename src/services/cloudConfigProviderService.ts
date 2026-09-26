@@ -1,5 +1,6 @@
 import type { FederatedProvider, LinkedCloudAccount, MarginaliaState } from '../models/bible';
 import type { FederatedSession } from './federatedAuthService';
+import type { SyncedConfigField } from './cloudConfigMerge';
 import { isSupportedMarkupFileName } from '../utils/supportedMarkupFileTypes';
 
 const GOOGLE_APPDATA_FILENAME = 'marginalia-config.json';
@@ -128,6 +129,8 @@ export interface SyncedCloudConfig {
   > & {
     providerFolderSelections?: Partial<Record<FederatedProvider, SyncedCloudFolderSelection[]>>;
   };
+  // Absent on files written by clients that predate per-field stamps.
+  fieldUpdatedAt?: Partial<Record<SyncedConfigField, number>>;
 }
 
 function isLinkedCloudAccount(value: unknown): value is LinkedCloudAccount {

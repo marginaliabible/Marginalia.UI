@@ -90,6 +90,10 @@ export interface MarginaliaState {
   cloudLinkedAccounts?: LinkedCloudAccount[];
   cloudConfigUpdatedAt?: number;
   cloudConfigLastSyncedAt?: number;
+  // Per-field edit times for synced settings (keys are SyncedConfigField).
+  cloudFieldUpdatedAt?: Partial<Record<string, number>>;
+  // Providers disconnected on this device; kept out of merged linkedAccounts until signed in again.
+  cloudDetachedProviders?: FederatedProvider[];
   // Email of the first cloud account ever connected; internal reference only, synced across devices.
   userId?: string;
 }
