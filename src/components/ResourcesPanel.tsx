@@ -1,12 +1,20 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import type { PanelTab, VerseContext } from '../models/tab';
 import { useAppDispatch, useAppSelector } from '../store/hooks';
-import { openDocumentViewer, setResourceHiddenTags, type DocumentSyncItem } from '../store/slices/uiSlice';
+import {
+  openDocumentViewer,
+  setResourceHiddenTags,
+  setResourceVerseMatchMode,
+  type DocumentSyncItem,
+} from '../store/slices/uiSlice';
 import type { DocumentViewerKind } from '../utils/resourceLibraryConfig';
 import { buildMarkupDocumentShellUrl } from '../utils/resourceLibraryConfig';
 import { bibleService, type VerseResourcesPayload } from '../services/bibleService';
 import { buildPdfProxyUrl } from '../utils/pdfProxy';
 import { getOrAssignResourceTagColors, TAG_COLOR_PALETTE } from '../utils/resourceTagColors';
+import { versesFromContext } from '../utils/selectedVerseContext';
+import { mergeVerseResourcePayloads, type ResourceVerseMatchMode } from '../utils/verseResources';
+import { VerseReferenceLabel, VerseTextList } from './VersePreview';
 
 interface ResourcesPanelProps {
   tab: PanelTab;
@@ -15,13 +23,17 @@ interface ResourcesPanelProps {
 
 const ResourcesPanel: React.FC<ResourcesPanelProps> = ({ tab, isActive }) => {
   const verseContext = tab.verseContext as VerseContext | undefined;
+  const selectedVerseNumbers = useMemo(
+    () => (verseContext ? versesFromContext(verseContext) : []),
+    [verseContext]
+  );
   const dispatch = useAppDispatch();
-  const { sourceUrls, resourceHiddenTags, pdfViewer } = useAppSelector((state) => state.ui);
+  const { sourceUrls, resourceHiddenTags, resourceVerseMatchMode, pdfViewer } = useAppSelector((state) => state.ui);
   const { currentBible, isPanelDetached } = useAppSelector((state) => state.bible);
 
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [payload, setPayload] = useState<VerseResourcesPayload | null>(null);
+  const [versePayloads, setVersePayloads] = useState<VerseResourcesPayload[]>([]);
   const [tagColors, setTagColors] = useState<Map<string, string>>(new Map());
 
   useEffect(() => {
@@ -40,7 +52,7 @@ const ResourcesPanel: React.FC<ResourcesPanelProps> = ({ tab, isActive }) => {
     const run = async () => {
       if (!verseContext) {
         if (!cancelled) {
-          setPayload(null);
+          setVersePayloads([]);
           setError(null);
         }
         return;
@@ -50,27 +62,28 @@ const ResourcesPanel: React.FC<ResourcesPanelProps> = ({ tab, isActive }) => {
       setError(null);
 
       try {
-        const nextPayload = await bibleService.getResourcesForVerse(
-          verseContext.book,
-          verseContext.chapter,
-          verseContext.verse,
-          sourceUrls
+        const nextPayloads = await Promise.all(
+          versesFromContext(verseContext).map((verse) => (
+            bibleService.getResourcesForVerse(
+              verseContext.book,
+              verseContext.chapter,
+              verse,
+              sourceUrls
+            )
+          ))
         );
 
         if (cancelled) {
           return;
         }
 
-        setPayload(nextPayload);
-
-        const colors = getOrAssignResourceTagColors(nextPayload.tags);
-        setTagColors(colors);
+        setVersePayloads(nextPayloads);
       } catch (loadError) {
         if (cancelled) {
           return;
         }
 
-        setPayload(null);
+        setVersePayloads([]);
         setError(loadError instanceof Error ? loadError.message : 'Failed to load resources');
       } finally {
         if (!cancelled) {
@@ -87,17 +100,35 @@ const ResourcesPanel: React.FC<ResourcesPanelProps> = ({ tab, isActive }) => {
   }, [isActive, verseContext, sourceUrls]);
 
   const hiddenTags = useMemo(() => new Set(resourceHiddenTags), [resourceHiddenTags]);
+  const matchMode: ResourceVerseMatchMode = selectedVerseNumbers.length > 1
+    ? resourceVerseMatchMode
+    : 'any';
 
-  const verseText = useMemo(() => {
+  const payload = useMemo(
+    () => mergeVerseResourcePayloads(versePayloads, matchMode),
+    [versePayloads, matchMode]
+  );
+
+  useEffect(() => {
+    if (!payload) {
+      return;
+    }
+
+    setTagColors(getOrAssignResourceTagColors(payload.tags));
+  }, [payload]);
+
+  const verseTexts = useMemo(() => {
     if (!verseContext || !currentBible) {
-      return '';
+      return [];
     }
 
     const book = currentBible.books.find((entry) => entry.name === verseContext.book);
     const chapter = book?.chapters.find((entry) => entry.chapter === verseContext.chapter);
-    const verse = chapter?.verses.find((entry) => entry.verse === verseContext.verse);
-    return verse?.text ?? '';
-  }, [verseContext, currentBible]);
+    return selectedVerseNumbers.map((verseNumber) => ({
+      verse: verseNumber,
+      text: chapter?.verses.find((entry) => entry.verse === verseNumber)?.text ?? '',
+    }));
+  }, [verseContext, currentBible, selectedVerseNumbers]);
 
   const visibleDocuments = useMemo(() => {
     if (!payload) {
@@ -195,10 +226,40 @@ const ResourcesPanel: React.FC<ResourcesPanelProps> = ({ tab, isActive }) => {
     <div className="card border-0 shadow-sm h-100 d-flex flex-column">
       <div className="card-body d-flex flex-column gap-3 flex-grow-1 resources-panel-body">
         <div className="position-sticky top-0 z-3 bg-body border-bottom pb-3 resources-panel-sticky">
-          <div className="small fw-semibold text-body-secondary mb-1">
-            {verseContext.book} {verseContext.chapter}:{verseContext.verse}
+          <div className="d-flex align-items-start justify-content-between gap-2">
+            <VerseReferenceLabel
+              verseContext={verseContext}
+              className="small fw-semibold text-body-secondary mb-1"
+            />
+            {selectedVerseNumbers.length > 1 && (
+              <div
+                className="btn-group btn-group-sm resources-verse-match-toggle"
+                role="group"
+                aria-label="Show resources containing ALL these verses or ANY of these verses."
+                title="Show resources containing ALL these verses or ANY of these verses."
+              >
+                <button
+                  type="button"
+                  className={`btn ${resourceVerseMatchMode === 'all' ? 'btn-primary' : 'btn-outline-primary'}`}
+                  aria-pressed={resourceVerseMatchMode === 'all'}
+                  onClick={() => dispatch(setResourceVerseMatchMode('all'))}
+                >
+                  ALL
+                </button>
+                <button
+                  type="button"
+                  className={`btn ${resourceVerseMatchMode === 'any' ? 'btn-primary' : 'btn-outline-primary'}`}
+                  aria-pressed={resourceVerseMatchMode === 'any'}
+                  onClick={() => dispatch(setResourceVerseMatchMode('any'))}
+                >
+                  ANY
+                </button>
+              </div>
+            )}
           </div>
-          <div className="small">{verseText || 'Verse text unavailable in current translation.'}</div>
+          <div className="small">
+            <VerseTextList verses={verseTexts} />
+          </div>
         </div>
 
         <div className="d-flex flex-column gap-3 resources-panel-scroll">
@@ -237,7 +298,11 @@ const ResourcesPanel: React.FC<ResourcesPanelProps> = ({ tab, isActive }) => {
               )}
 
               {groupedDocuments.length === 0 ? (
-                <p className="text-body-secondary small mb-0">No resources matched this verse.</p>
+                <p className="text-body-secondary small mb-0">
+                  {selectedVerseNumbers.length > 1
+                    ? 'No resources matched these verses.'
+                    : 'No resources matched this verse.'}
+                </p>
               ) : (
                 <div className="d-flex flex-column gap-2">
                   {groupedDocuments.map((document) => {

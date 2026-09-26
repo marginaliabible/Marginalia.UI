@@ -3,6 +3,7 @@ import type { PanelTab, VerseContext } from '../models/tab';
 import type { ResolvedHyperlink } from '../models/hyperlink';
 import { useAppSelector } from '../store/hooks';
 import { hyperlinkService } from '../services/hyperlinkService';
+import { firstVerseContext, formatVerseReference } from '../utils/selectedVerseContext';
 
 interface LinksPanelProps {
   tab: PanelTab;
@@ -38,7 +39,10 @@ const LinksPanel: React.FC<LinksPanelProps> = ({ tab, isActive }) => {
       setError(null);
 
       try {
-        const resolved = await hyperlinkService.getHyperlinksForVerse(verseContext, sourceUrls);
+        const resolved = await hyperlinkService.getHyperlinksForVerse(
+          firstVerseContext(verseContext),
+          sourceUrls
+        );
         if (cancelled) {
           return;
         }
@@ -69,11 +73,9 @@ const LinksPanel: React.FC<LinksPanelProps> = ({ tab, isActive }) => {
     return <div className="links-panel-empty">Select a verse to see external links.</div>;
   }
 
-  const reference = `${verseContext.book} ${verseContext.chapter}:${verseContext.verse}`;
-
   return (
     <div className="links-panel">
-      <div className="links-panel-reference">{reference}</div>
+      <div className="links-panel-reference">{formatVerseReference(verseContext)}</div>
 
       {isLoading && <div className="links-panel-status">Loading links&hellip;</div>}
       {error && <div className="links-panel-status links-panel-error">{error}</div>}

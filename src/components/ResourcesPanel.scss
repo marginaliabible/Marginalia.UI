@@ -2,6 +2,19 @@
   min-height: 0;
 }
 
+.resources-verse-match-toggle {
+  flex: 0 0 auto;
+}
+
+.resources-verse-match-toggle > .btn[aria-pressed='false'],
+.resources-verse-match-toggle > .btn[aria-pressed='false']:hover,
+.resources-verse-match-toggle > .btn[aria-pressed='false']:focus,
+.resources-verse-match-toggle > .btn[aria-pressed='false']:active {
+  color: var(--bs-primary);
+  background-color: transparent;
+  border-color: var(--bs-primary);
+}
+
 .resources-panel-sticky {
   flex: 0 0 auto;
 }

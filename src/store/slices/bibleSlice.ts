@@ -1,6 +1,7 @@
 import { createSlice, createAsyncThunk, type PayloadAction } from '@reduxjs/toolkit';
 import type { BibleData, BibleTranslationMeta, ExtraLanguageMeta, SearchResultSet } from '../../models/bible';
-import type { PanelTab } from '../../models/tab';
+import type { PanelTab, VerseContext } from '../../models/tab';
+import { sameVerseContext } from '../../utils/selectedVerseContext';
 import { bibleService } from '../../services/bibleService';
 import { searchIndexService } from '../../services/searchIndexService';
 import { compareBibleReferences } from '../../utils/book-aliases';
@@ -160,17 +161,11 @@ const isVersePanelTab = (tab: PanelTab): boolean => (
 
 const applyVerseContextToTab = (
   tab: PanelTab,
-  verseContext: { book: string; chapter: number; verse: number } | null,
+  verseContext: VerseContext | null,
   now: number
 ): void => {
   if (verseContext) {
-    const current = tab.verseContext;
-    if (
-      current
-      && current.book === verseContext.book
-      && current.chapter === verseContext.chapter
-      && current.verse === verseContext.verse
-    ) {
+    if (sameVerseContext(tab.verseContext, verseContext)) {
       return;
     }
     tab.verseContext = verseContext;
@@ -185,7 +180,7 @@ const applyVerseContextToTab = (
 
 const applyVerseContextToVerseTabs = (
   state: BibleState,
-  verseContext: { book: string; chapter: number; verse: number } | null
+  verseContext: VerseContext | null
 ): void => {
   const now = Date.now();
   for (const tab of state.tabs) {
@@ -199,7 +194,7 @@ const applyVerseContextToVerseTabs = (
 
 const applyVerseContextToActiveVerseTab = (
   state: BibleState,
-  verseContext: { book: string; chapter: number; verse: number } | null
+  verseContext: VerseContext | null
 ): void => {
   const activeTab = state.tabs.find((tab) => tab.id === state.activeTabId);
   if (!activeTab || !isVersePanelTab(activeTab)) {
@@ -212,7 +207,7 @@ const applyVerseContextToActiveVerseTab = (
 const upsertVerseTab = (
   state: BibleState,
   type: 'translations' | 'resources' | 'links',
-  verseContext: { book: string; chapter: number; verse: number } | null,
+  verseContext: VerseContext | null,
   now: number
 ): PanelTab => {
   const existing = state.tabs.find((tab) => tab.type === type);
@@ -409,7 +404,7 @@ const bibleSlice = createSlice({
     },
     setActiveTab: (state, action: PayloadAction<string | {
       tabId: string;
-      verseContext?: { book: string; chapter: number; verse: number } | null;
+      verseContext?: VerseContext | null;
     }>) => {
       const tabId = typeof action.payload === 'string' ? action.payload : action.payload.tabId;
       const verseContext = typeof action.payload === 'string' ? undefined : action.payload.verseContext;
@@ -431,7 +426,7 @@ const bibleSlice = createSlice({
     },
     closeTab: (state, action: PayloadAction<string | {
       tabId: string;
-      verseContext?: { book: string; chapter: number; verse: number } | null;
+      verseContext?: VerseContext | null;
     }>) => {
       const tabId = typeof action.payload === 'string' ? action.payload : action.payload.tabId;
       const verseContext = typeof action.payload === 'string' ? undefined : action.payload.verseContext;
@@ -471,7 +466,7 @@ const bibleSlice = createSlice({
       state.tabs = [];
       state.activeTabId = null;
     },
-    updateActiveVerseTabContext: (state, action: PayloadAction<{ book: string; chapter: number; verse: number }>) => {
+    updateActiveVerseTabContext: (state, action: PayloadAction<VerseContext>) => {
       // Only the visible verse tab should react; inactive tabs keep their last rendered context
       // until they are selected (see setActiveTab verseContext sync).
       applyVerseContextToActiveVerseTab(state, action.payload);

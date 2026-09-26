@@ -121,4 +121,39 @@ describe('TranslationsPanel visibility gating', () => {
       expect(bibleService.loadVerseText).toHaveBeenCalledWith('KJV', 'Romans', 10, 9);
     });
   });
+
+  it('loads every selected verse for each translation', async () => {
+    (bibleService.loadVerseText as jest.Mock).mockImplementation(async (
+      _id: string,
+      _book: string,
+      _chapter: number,
+      verse: number
+    ) => `text ${verse}`);
+
+    const { findByText } = render(
+      <TranslationsPanel
+        tab={{
+          ...translationsTab,
+          verseContext: { book: 'Genesis', chapter: 1, verse: 1, verses: [1, 2] },
+        }}
+        isActive={true}
+        translationRecords={translationRecords}
+        translationMetadataById={new Map()}
+        addableTranslations={[]}
+        onAddTranslation={noop}
+        onRemoveTranslation={noop}
+        onToggleStar={noop}
+        onReorder={noop}
+      />
+    );
+
+    await waitFor(() => {
+      expect(bibleService.loadVerseText).toHaveBeenCalledWith('KJV', 'Genesis', 1, 1);
+      expect(bibleService.loadVerseText).toHaveBeenCalledWith('KJV', 'Genesis', 1, 2);
+    });
+
+    expect(await findByText('Genesis 1:1-2')).toBeTruthy();
+    expect(await findByText('text 1')).toBeTruthy();
+    expect(await findByText('text 2')).toBeTruthy();
+  });
 });
