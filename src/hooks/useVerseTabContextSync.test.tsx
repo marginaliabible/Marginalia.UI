@@ -91,7 +91,7 @@ describe('useVerseTabContextSync', () => {
     ));
 
     expect(activeTab?.type).toBe('resources');
-    expect(activeTab?.verseContext).toEqual({ book: 'Genesis', chapter: 2, verse: 3 });
+    expect(activeTab?.verseContext).toEqual({ book: 'Genesis', chapter: 2, verse: 3, verses: [3] });
     expect(inactiveTabs.every((tab) => tab.verseContext === undefined)).toBe(true);
   });
 
@@ -190,6 +190,7 @@ describe('useVerseTabContextSync', () => {
       book: 'Genesis',
       chapter: 2,
       verse: 9,
+      verses: [9],
     });
     expect(tabs.find((tab) => tab.type === 'translations')?.verseContext).toEqual({
       book: 'Genesis',

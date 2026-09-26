@@ -56,15 +56,15 @@ export const mergeVerseResourcePayloads = (
     return null;
   }
 
-  const reference = {
-    book: payloads[0].reference.book,
-    chapter: payloads[0].reference.chapter,
-    verse: payloads[0].reference.verse,
-  };
-
   if (payloads.length === 1) {
     return payloads[0];
   }
+
+  const reference = payloads[0].reference ?? {
+    book: '',
+    chapter: 0,
+    verse: 0,
+  };
 
   const maps = payloads.map((payload) => {
     const map = new Map<string, VerseResourceDocument>();
