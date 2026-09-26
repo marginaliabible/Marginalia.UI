@@ -91,7 +91,7 @@ describe('useVerseTabContextSync', () => {
     ));
 
     expect(activeTab?.type).toBe('resources');
-    expect(activeTab?.verseContext).toEqual({ book: 'Genesis', chapter: 2, verse: 3 });
+    expect(activeTab?.verseContext).toEqual({ book: 'Genesis', chapter: 2, verse: 3, verses: [3] });
     expect(inactiveTabs.every((tab) => tab.verseContext === undefined)).toBe(true);
   });
 
@@ -110,6 +110,28 @@ describe('useVerseTabContextSync', () => {
       tab.id === store.getState().bible.activeTabId
     ));
     expect(activeTab?.verseContext?.verse).toBe(4);
+  });
+
+  it('updates the active verse panel when the selection expands to multiple verses', () => {
+    const store = mountAtGenesis1();
+
+    act(() => {
+      store.dispatch(setVerseSelection({
+        translationId: 'KJV',
+        verses: [1, 2, 3],
+        anchorVerse: 1,
+      }));
+    });
+
+    const activeTab = store.getState().bible.tabs.find((tab) => (
+      tab.id === store.getState().bible.activeTabId
+    ));
+    expect(activeTab?.verseContext).toEqual({
+      book: 'Genesis',
+      chapter: 1,
+      verse: 1,
+      verses: [1, 2, 3],
+    });
   });
 
   it('does not clear verse context when selection is cleared in the same chapter', () => {
@@ -168,6 +190,7 @@ describe('useVerseTabContextSync', () => {
       book: 'Genesis',
       chapter: 2,
       verse: 9,
+      verses: [9],
     });
     expect(tabs.find((tab) => tab.type === 'translations')?.verseContext).toEqual({
       book: 'Genesis',

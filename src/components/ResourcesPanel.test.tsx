@@ -1,8 +1,9 @@
-import { render, waitFor } from '@testing-library/react';
+import { fireEvent, render, waitFor } from '@testing-library/react';
 import ResourcesPanel from './ResourcesPanel';
 import { useAppDispatch, useAppSelector } from '../store/hooks';
 import { bibleService } from '../services/bibleService';
 import type { PanelTab } from '../models/tab';
+import type { VerseResourcesPayload } from '../services/bibleService';
 
 jest.mock('../store/hooks', () => ({
   useAppDispatch: jest.fn(),
@@ -39,7 +40,7 @@ describe('ResourcesPanel visibility gating', () => {
     (useAppDispatch as unknown as jest.Mock).mockReturnValue(jest.fn());
     (useAppSelector as unknown as jest.Mock).mockImplementation((selector: (state: unknown) => unknown) => (
       selector({
-        ui: { sourceUrls: [], resourceHiddenTags: [], pdfViewer: { isOpen: false, kind: 'pdf', sourceUrl: null, title: null, page: 1, matchRaw: null, focusNonce: 0 } },
+        ui: { sourceUrls: [], resourceHiddenTags: [], resourceVerseMatchMode: 'all', pdfViewer: { isOpen: false, kind: 'pdf', sourceUrl: null, title: null, page: 1, matchRaw: null, focusNonce: 0 } },
         bible: { currentBible: null, isPanelDetached: false },
       })
     ));
@@ -85,6 +86,118 @@ describe('ResourcesPanel visibility gating', () => {
 
     await waitFor(() => {
       expect(bibleService.getResourcesForVerse).toHaveBeenCalledWith('Romans', 10, 9, []);
+    });
+  });
+});
+
+const documentPayload = (
+  verse: number,
+  documents: VerseResourcesPayload['documents']
+): VerseResourcesPayload => ({
+  reference: { book: 'Genesis', chapter: 1, verse },
+  tags: Array.from(new Set(documents.flatMap((document) => document.tags))),
+  documents,
+});
+
+describe('ResourcesPanel multi-verse selection', () => {
+  const dispatch = jest.fn();
+  const multiVerseTab: PanelTab = {
+    ...resourcesTab,
+    verseContext: { book: 'Genesis', chapter: 1, verse: 1, verses: [1, 2] },
+  };
+
+  beforeEach(() => {
+    dispatch.mockReset();
+    (useAppDispatch as unknown as jest.Mock).mockReturnValue(dispatch);
+    (useAppSelector as unknown as jest.Mock).mockImplementation((selector: (state: unknown) => unknown) => (
+      selector({
+        ui: { sourceUrls: [], resourceHiddenTags: [], resourceVerseMatchMode: 'all', pdfViewer: { isOpen: false, kind: 'pdf', sourceUrl: null, title: null, page: 1, matchRaw: null, focusNonce: 0 } },
+        bible: {
+          isPanelDetached: false,
+          currentBible: {
+            books: [{
+              name: 'Genesis',
+              chapters: [{
+                chapter: 1,
+                verses: [
+                  { verse: 1, text: 'In the beginning God created the heaven and the earth.' },
+                  { verse: 2, text: 'And the earth was without form, and void.' },
+                ],
+              }],
+            }],
+          },
+        },
+      })
+    ));
+    (bibleService.getResourcesForVerse as jest.Mock).mockReset();
+    (bibleService.getResourcesForVerse as jest.Mock).mockImplementation(async (
+      _book: string,
+      _chapter: number,
+      verse: number
+    ) => {
+      if (verse === 1) {
+        return documentPayload(1, [{
+          libraryId: 'lib',
+          libraryLabel: 'Library',
+          documentId: 'shared',
+          title: 'Shared Commentary',
+          tags: ['commentary'],
+          pages: [3],
+          pageLinks: [{ page: 3, url: 'https://example.com/shared#3' }],
+        }, {
+          libraryId: 'lib',
+          libraryLabel: 'Library',
+          documentId: 'first-only',
+          title: 'First Only',
+          tags: ['map'],
+          pages: [8],
+          pageLinks: [{ page: 8, url: 'https://example.com/first#8' }],
+        }]);
+      }
+
+      return documentPayload(2, [{
+        libraryId: 'lib',
+        libraryLabel: 'Library',
+        documentId: 'shared',
+        title: 'Shared Commentary',
+        tags: ['commentary'],
+        pages: [4],
+        pageLinks: [{ page: 4, url: 'https://example.com/shared#4' }],
+      }]);
+    });
+  });
+
+  it('previews every selected verse and fetches resources for each', async () => {
+    const { findByText } = render(<ResourcesPanel tab={multiVerseTab} isActive={true} />);
+
+    await waitFor(() => {
+      expect(bibleService.getResourcesForVerse).toHaveBeenCalledWith('Genesis', 1, 1, []);
+      expect(bibleService.getResourcesForVerse).toHaveBeenCalledWith('Genesis', 1, 2, []);
+    });
+
+    expect(await findByText('Genesis 1:1-2')).toBeTruthy();
+    expect(await findByText('In the beginning God created the heaven and the earth.')).toBeTruthy();
+    expect(await findByText('And the earth was without form, and void.')).toBeTruthy();
+    expect(await findByText('Shared Commentary')).toBeTruthy();
+    expect(await findByText('ALL')).toBeTruthy();
+    expect(await findByText('ANY')).toBeTruthy();
+  });
+
+  it('keeps only resources present in every selected verse when ALL is selected', async () => {
+    const { findByText, queryByText } = render(<ResourcesPanel tab={multiVerseTab} isActive={true} />);
+
+    expect(await findByText('Shared Commentary')).toBeTruthy();
+    expect(queryByText('First Only')).toBeNull();
+  });
+
+  it('dispatches ANY when the match toggle is changed', async () => {
+    const { findByText } = render(<ResourcesPanel tab={multiVerseTab} isActive={true} />);
+    const anyButton = await findByText('ANY');
+
+    fireEvent.click(anyButton);
+    expect(dispatch).toHaveBeenCalledWith({
+      type: 'ui/setResourceVerseMatchMode',
+      payload: 'any',
     });
   });
 });

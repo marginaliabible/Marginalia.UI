@@ -2,6 +2,8 @@ import React, { useState, useMemo, useEffect } from 'react';
 import type { PanelTab, VerseContext } from '../models/tab';
 import type { BibleTranslationMeta, TranslationRecord } from '../models/bible';
 import { bibleService } from '../services/bibleService';
+import { versesFromContext } from '../utils/selectedVerseContext';
+import { VerseReferenceLabel, VerseTextList } from './VersePreview';
 
 interface TranslationsPanelProps {
   tab: PanelTab;
@@ -28,8 +30,9 @@ const TranslationsPanel: React.FC<TranslationsPanelProps> = ({
 }) => {
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
   const [translationFilter, setTranslationFilter] = useState('');
-  const [verseTextByTranslation, setVerseTextByTranslation] = useState<Map<string, string>>(new Map());
+  const [verseTextByTranslation, setVerseTextByTranslation] = useState<Map<string, Array<{ verse: number; text: string }>>>(new Map());
   const verseContext = tab.verseContext as VerseContext | undefined;
+  const selectedVerseNumbers = verseContext ? versesFromContext(verseContext) : [];
 
   const filteredAddableTranslations = useMemo(() => {
     const query = translationFilter.trim().toLowerCase();
@@ -58,11 +61,17 @@ const TranslationsPanel: React.FC<TranslationsPanelProps> = ({
         return;
       }
 
-      const { book, chapter, verse } = verseContext;
+      const { book, chapter } = verseContext;
+      const verseNumbers = versesFromContext(verseContext);
       const entries = await Promise.all(
         translationRecords.map(async (record) => {
-          const text = await bibleService.loadVerseText(record.id, book, chapter, verse);
-          return [record.id, text] as const;
+          const verseTexts = await Promise.all(
+            verseNumbers.map(async (verse) => ({
+              verse,
+              text: await bibleService.loadVerseText(record.id, book, chapter, verse),
+            }))
+          );
+          return [record.id, verseTexts] as const;
         })
       );
 
@@ -116,9 +125,10 @@ const TranslationsPanel: React.FC<TranslationsPanelProps> = ({
       <div className="card-body d-flex flex-column gap-3 flex-grow-1 translations-panel-shell translations-panel-body">
         {/* Verse reference header */}
         <div className="d-flex align-items-center justify-content-between">
-          <span className="text-body-secondary small fw-semibold">
-            {verseContext.book} {verseContext.chapter}:{verseContext.verse}
-          </span>
+          <VerseReferenceLabel
+            verseContext={verseContext}
+            className="text-body-secondary small fw-semibold"
+          />
         </div>
 
         <div className="translations-panel-layout">
@@ -136,7 +146,8 @@ const TranslationsPanel: React.FC<TranslationsPanelProps> = ({
                   const meta = translationMetadataById.get(record.id);
                   const label = meta?.label ?? record.id;
                   const chipText = `${record.id}: ${label}`;
-                  const verseText = verseTextByTranslation.get(record.id) ?? '';
+                  const verseTexts = verseTextByTranslation.get(record.id) ?? [];
+                  const hasAnyVerseText = verseTexts.some((entry) => entry.text.length > 0);
                   const isLastStarred = record.starred && starredCount === 1;
 
                   return (
@@ -204,10 +215,16 @@ const TranslationsPanel: React.FC<TranslationsPanelProps> = ({
                         </div>
 
                         <div className="text-body text-small lh-base">
-                          {verseText || (
+                          {hasAnyVerseText ? (
+                            <VerseTextList verses={verseTexts} />
+                          ) : (
                             <span
                               className="text-muted"
-                              title="This verse is not available in this translation"
+                              title={
+                                selectedVerseNumbers.length > 1
+                                  ? 'These verses are not available in this translation'
+                                  : 'This verse is not available in this translation'
+                              }
                             >
                               Not available in this translation
                             </span>
