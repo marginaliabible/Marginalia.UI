@@ -124,8 +124,12 @@ export async function searchResourceDocumentTitles(
     };
   }
 
-  const total = results.length;
-  const matches = results.slice(0, SEARCH_LIMIT).map((result) => {
+  // Cloud-synced documents are listed before processing assigns a hash; hash-addressed stores can't open them yet.
+  const openableResults = results.filter((result) =>
+    typeof result['hash'] === 'string' || !/\{\{?hash\b/.test(result['documentStoreAddress'] as string)
+  );
+  const total = openableResults.length;
+  const matches = openableResults.slice(0, SEARCH_LIMIT).map((result): ResourceDocumentTitleSearchMatch => {
     const title = result['title'] as string;
     const documentId = result['documentId'] as string;
     const libraryId = result['libraryId'] as string;
@@ -218,32 +222,39 @@ async function extractResourceLibraryCandidates(payload: unknown, sourceUrl: str
   }
 
   const library = validateLibraryFile(payload, sourceUrl);
-  const modifiedOn = readString(library.modifiedOn);
+  const explicitSources = readLibrarySourceAddresses(library);
+  const sourceAddresses = explicitSources.length > 0 ? explicitSources : ['resources.json', 'translations.json'];
+
+  const children = await Promise.all(sourceAddresses.map(async (address) => {
+    const childUrl = resolveAddress(address, sourceUrl);
+    const childPayload = await fetchJsonPayload(childUrl).catch(() => null);
+    if (childPayload === null) {
+      return null;
+    }
+
+    const childKind = inferSourceFileKindFromUrl(childUrl) ?? inferSourceFileKindFromPayload(childPayload);
+    if (childKind !== 'resources') {
+      return null;
+    }
+
+    const resources = validateResourcesFile(childPayload, childUrl);
+    return { candidate: buildCandidate(childUrl, resources, library), modifiedOn: readString(resources.modifiedOn) ?? '' };
+  }));
+  const resolvedChildren = children.filter((child): child is NonNullable<typeof child> => child !== null);
+  const candidates = resolvedChildren.map((child) => child.candidate);
+
+  // Cloud sync rewrites documents.json and resources.json (e.g. filling in hashes) without touching
+  // library.json, so the snapshot must also track each child resources.json modifiedOn.
+  const libraryModifiedOn = readString(library.modifiedOn);
+  const modifiedOn = libraryModifiedOn
+    ? [libraryModifiedOn, ...resolvedChildren.map((child) => `${child.candidate.resourcesUrl}@${child.modifiedOn}`)].join('|')
+    : undefined;
   const cached = modifiedOn
     ? librarySearchSnapshots.get(sourceUrl) ?? readLibrarySearchSnapshot(sourceUrl)
     : undefined;
   if (cached && cached.modifiedOn === modifiedOn) {
     librarySearchSnapshots.set(sourceUrl, cached);
     return cached.candidates;
-  }
-
-  const explicitSources = readLibrarySourceAddresses(library);
-  const sourceAddresses = explicitSources.length > 0 ? explicitSources : ['resources.json', 'translations.json'];
-
-  const candidates: ResourceLibraryCandidate[] = [];
-  for (const address of sourceAddresses) {
-    const childUrl = resolveAddress(address, sourceUrl);
-    const childPayload = await fetchJsonPayload(childUrl).catch(() => null);
-    if (childPayload === null) {
-      continue;
-    }
-
-    const childKind = inferSourceFileKindFromUrl(childUrl) ?? inferSourceFileKindFromPayload(childPayload);
-    if (childKind !== 'resources') {
-      continue;
-    }
-
-    candidates.push(buildCandidate(childUrl, validateResourcesFile(childPayload, childUrl), library));
   }
 
   const candidatesWithDocuments = await Promise.all(candidates.map(async (candidate) => ({
