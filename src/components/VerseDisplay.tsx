@@ -3,12 +3,21 @@ import type { BibleBook, BibleChapter } from '../models/bible';
 import MiniSearchBar, { type MiniSearchBarHandle } from './MiniSearchBar';
 import type { QuickJumpTarget } from '../models/bible';
 import { getOrAssignResourceTagColors } from '../utils/resourceTagColors';
+import {
+  markupFlagsFromBible,
+  renderVerseMarkers,
+  stripVerseMarkers,
+  type VerseMarkupFlags,
+  type VerseMarkupSettings,
+} from '../utils/verseMarkup';
 import { verseElementId } from '../App';
 
 type VerseSelectionMode = 'single' | 'toggle' | 'range' | 'mobile-range' | 'mobile-anchor';
 
 interface VerseDisplayProps {
   chaptersByTranslation: Record<string, BibleChapter | null>;
+  markupFlagsByTranslation: Record<string, VerseMarkupFlags>;
+  verseMarkupSettings: VerseMarkupSettings;
   translationOrder: string[];
   translationLabels: Record<string, string>;
   selectedTranslationId: string;
@@ -47,6 +56,8 @@ const MAX_INNER_TAGS = 5;
 
 const VerseDisplay: React.FC<VerseDisplayProps> = ({
   chaptersByTranslation,
+  markupFlagsByTranslation,
+  verseMarkupSettings,
   translationOrder,
   translationLabels,
   selectedTranslationId,
@@ -621,6 +632,8 @@ const VerseDisplay: React.FC<VerseDisplayProps> = ({
             {visibleTranslationIds.map((translationId) => {
               const verseText =
                 chaptersByTranslation[translationId]?.verses.find((verse) => verse.verse === verseNumber)?.text ?? '';
+              const markupFlags = markupFlagsByTranslation[translationId] ?? markupFlagsFromBible(null);
+              const plainVerseText = verseText ? stripVerseMarkers(verseText, markupFlags) : '';
               const isMobileAnchor =
                 mobileMultiSelectMode?.translationId === translationId
                 && mobileMultiSelectMode.anchorVerse === verseNumber;
@@ -645,7 +658,7 @@ const VerseDisplay: React.FC<VerseDisplayProps> = ({
                   ].filter(Boolean).join(' ')}
                   data-translation-id={translationId}
                   data-verse={verseNumber}
-                  title={verseText ? undefined : 'This verse is not available in this translation'}
+                  title={plainVerseText ? undefined : 'This verse is not available in this translation'}
                   onMouseDown={(event) => {
                     if (event.shiftKey) {
                       event.preventDefault();
@@ -669,7 +682,9 @@ const VerseDisplay: React.FC<VerseDisplayProps> = ({
                   onTouchMove={handleVerseTouchMove}
                   onTouchEnd={(event) => handleVerseTouchEnd(event, translationId, verseNumber)}
                 >
-                  {verseText || '-'}
+                  {verseText
+                    ? renderVerseMarkers(verseText, markupFlags, verseMarkupSettings)
+                    : '-'}
                 </span>
               );
             })}

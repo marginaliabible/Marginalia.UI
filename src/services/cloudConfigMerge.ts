@@ -16,6 +16,8 @@ export const SYNCED_CONFIG_FIELDS = [
   'languages',
   'resourceHiddenTags',
   'theme',
+  'translatorItalics',
+  'translatorParagraphMarks',
   'userId',
   'folders.google',
   'folders.microsoft',

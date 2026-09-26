@@ -1,6 +1,7 @@
 import MiniSearch, { type SearchOptions } from 'minisearch';
 import type { BibleData } from '../models/bible';
 import { SearchMatch } from '../models/bible';
+import { markupFlagsFromBible, stripVerseMarkers } from '../utils/verseMarkup';
 import { normalizeTerm } from './searchNormalizer';
 
 interface VerseDocument {
@@ -48,6 +49,7 @@ class SearchIndexService {
       processTerm: (term) => normalizeTerm(term, lang),
     });
 
+    const markupFlags = markupFlagsFromBible(bible);
     const docs: VerseDocument[] = [];
     for (const book of bible.books) {
       for (const chapter of book.chapters) {
@@ -58,7 +60,7 @@ class SearchIndexService {
               book: book.name,
               chapter: chapter.chapter,
               verse: verse.verse,
-              text: verse.text,
+              text: stripVerseMarkers(verse.text, markupFlags),
             });
           }
         }

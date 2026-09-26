@@ -100,6 +100,8 @@ const baseUiState = {
   sourceUrls: [],
   resourceHiddenTags: [],
   theme: 'light',
+  translatorItalics: true,
+  translatorParagraphMarks: true,
   ready: true,
 };
 

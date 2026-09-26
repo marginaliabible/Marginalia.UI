@@ -301,6 +301,10 @@ function toLocalConfigView(
     sourceUrls: Array.isArray(remote.sourceUrls) ? remote.sourceUrls : [],
     resourceHiddenTags: Array.isArray(remote.resourceHiddenTags) ? remote.resourceHiddenTags : [],
     theme: remote.theme || 'light',
+    translatorItalics: typeof remote.translatorItalics === 'boolean' ? remote.translatorItalics : true,
+    translatorParagraphMarks: typeof remote.translatorParagraphMarks === 'boolean'
+      ? remote.translatorParagraphMarks
+      : true,
     userId: remote.userId,
     providerFolderSelections: folders,
   };
@@ -338,6 +342,8 @@ const AccountControl: React.FC = () => {
     sourceUrls,
     resourceHiddenTags,
     theme,
+    translatorItalics,
+    translatorParagraphMarks,
     ready,
     userId,
   } = useAppSelector((state) => state.ui);
@@ -391,6 +397,8 @@ const AccountControl: React.FC = () => {
       sourceUrls,
       resourceHiddenTags,
       theme,
+      translatorItalics,
+      translatorParagraphMarks,
       userId: userId ?? undefined,
       providerFolderSelections: {
         google: providerSyncPreferences.google.selectedTargets,
@@ -407,6 +415,8 @@ const AccountControl: React.FC = () => {
     sourceUrls,
     resourceHiddenTags,
     theme,
+    translatorItalics,
+    translatorParagraphMarks,
     userId,
     providerSyncPreferences,
   ]);
@@ -501,6 +511,10 @@ const AccountControl: React.FC = () => {
       sourceUrls: remote.sourceUrls ?? [],
       resourceHiddenTags: remote.resourceHiddenTags ?? [],
       theme: remote.theme || 'light',
+      translatorItalics: typeof remote.translatorItalics === 'boolean' ? remote.translatorItalics : true,
+      translatorParagraphMarks: typeof remote.translatorParagraphMarks === 'boolean'
+        ? remote.translatorParagraphMarks
+        : true,
     }));
 
     setProviderSyncPreferences((current) => {

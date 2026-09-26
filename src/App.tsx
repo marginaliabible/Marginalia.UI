@@ -20,6 +20,7 @@ import {
   removeLoadedTranslations,
 } from './store/slices/bibleSlice';
 import { resolveSelectedVerseContext } from './utils/selectedVerseContext';
+import { markupFlagsFromBible, stripVerseMarkers } from './utils/verseMarkup';
 import {
   setSelectedTranslationId,
   setSelectedTranslationIds,
@@ -32,6 +33,8 @@ import {
   removeSourceUrl,
   removeTranslationsByIds,
   setTheme,
+  setTranslatorItalics,
+  setTranslatorParagraphMarks,
   setReady,
   restoreState,
   addTranslationRecord,
@@ -152,6 +155,8 @@ function App() {
     resourceHiddenTags,
     pdfViewer,
     theme,
+    translatorItalics,
+    translatorParagraphMarks,
     ready,
     userId,
   } = useAppSelector((state) => state.ui);
@@ -218,12 +223,16 @@ function App() {
       return;
     }
 
+    const markupFlags = markupFlagsFromBible(sourceBible);
     const normalizedVerses = Array.from(new Set(chosenVerses)).sort((left, right) => left - right);
     const verseTexts = normalizedVerses
-      .map((verseNumber) => ({
-        verseNumber,
-        text: chapter.verses.find((verse) => verse.verse === verseNumber)?.text ?? '',
-      }))
+      .map((verseNumber) => {
+        const raw = chapter.verses.find((verse) => verse.verse === verseNumber)?.text ?? '';
+        return {
+          verseNumber,
+          text: stripVerseMarkers(raw, markupFlags),
+        };
+      })
       .filter((entry) => entry.text.length > 0);
 
     if (verseTexts.length === 0) {
@@ -432,6 +441,10 @@ function App() {
         selectedBook: initialBook,
         selectedChapter: initialChapter,
         theme: savedState?.theme ?? detectPreferredTheme(),
+        translatorItalics: typeof savedState?.translatorItalics === 'boolean' ? savedState.translatorItalics : true,
+        translatorParagraphMarks: typeof savedState?.translatorParagraphMarks === 'boolean'
+          ? savedState.translatorParagraphMarks
+          : true,
         selectedLanguages: finalLanguages,
         sourceUrls: Array.isArray(savedState?.sourceUrls) ? savedState.sourceUrls : [],
         resourceHiddenTags: Array.isArray(savedState?.resourceHiddenTags) ? savedState.resourceHiddenTags : [],
@@ -469,6 +482,8 @@ function App() {
       lastVerse: undefined,
       lastSearch: undefined,
       theme,
+      translatorItalics,
+      translatorParagraphMarks,
       languages: safeSelectedLanguages,
       sourceUrls,
       resourceHiddenTags,
@@ -481,6 +496,8 @@ function App() {
     selectedBook,
     selectedChapter,
     theme,
+    translatorItalics,
+    translatorParagraphMarks,
     safeSelectedLanguages,
     sourceUrls,
     resourceHiddenTags,
@@ -652,6 +669,14 @@ function App() {
 
   const handleThemeToggle = (e: ChangeEvent<HTMLInputElement>) => {
     dispatch(setTheme(e.target.checked ? 'dark' : 'light'));
+  };
+
+  const handleTranslatorItalicsToggle = (e: ChangeEvent<HTMLInputElement>) => {
+    dispatch(setTranslatorItalics(e.target.checked));
+  };
+
+  const handleTranslatorParagraphMarksToggle = (e: ChangeEvent<HTMLInputElement>) => {
+    dispatch(setTranslatorParagraphMarks(e.target.checked));
   };
 
   const handleLanguagesChange = (selected: string[]) => {
@@ -971,6 +996,10 @@ function App() {
         <SettingsModal
           theme={theme}
           handleThemeToggle={handleThemeToggle}
+          translatorItalics={translatorItalics}
+          handleTranslatorItalicsToggle={handleTranslatorItalicsToggle}
+          translatorParagraphMarks={translatorParagraphMarks}
+          handleTranslatorParagraphMarksToggle={handleTranslatorParagraphMarksToggle}
           selectedLanguages={safeSelectedLanguages}
           handleLanguagesChange={handleLanguagesChange}
           languageOptions={languageOptions}

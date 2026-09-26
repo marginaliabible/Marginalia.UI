@@ -16,6 +16,7 @@ import { bibleService } from '../services/bibleService';
 import { searchIndexService } from '../services/searchIndexService';
 import { scrollToVerse } from '../App';
 import type { BibleChapter, BibleTranslationMeta, QuickJumpTarget } from '../models/bible';
+import { markupFlagsFromBible } from '../utils/verseMarkup';
 import type { WorkspacePanelKey } from '../App';
 
 interface WorkspaceMainPaneProps {
@@ -77,12 +78,15 @@ const WorkspaceMainPane: React.FC<WorkspaceMainPaneProps> = ({
     selectionAnchorVerse,
     sourceUrls,
     pdfViewer,
+    translatorItalics,
+    translatorParagraphMarks,
   } = useAppSelector((state) => state.ui);
 
   const [loadedChapterView, setLoadedChapterView] = useState<{
     book: string;
     chapter: number;
     byTranslation: Record<string, BibleChapter | null>;
+    markupFlagsByTranslation: Record<string, ReturnType<typeof markupFlagsFromBible>>;
   } | null>(null);
   const [resourceVerseTagsByVerse, setResourceVerseTagsByVerse] = useState<Map<number, string[]>>(new Map());
   const keyboardCursorRef = useRef<{
@@ -98,6 +102,7 @@ const WorkspaceMainPane: React.FC<WorkspaceMainPaneProps> = ({
   }, [translationRecords]);
 
   const chaptersByTranslation = loadedChapterView?.byTranslation ?? {};
+  const markupFlagsByTranslation = loadedChapterView?.markupFlagsByTranslation ?? {};
 
   const selectedBookEntry = useMemo(() => {
     if (!currentBible || !selectedBook) return null;
@@ -112,6 +117,11 @@ const WorkspaceMainPane: React.FC<WorkspaceMainPaneProps> = ({
     }
     return labels;
   }, [starredTranslationIds, translationMetadataById]);
+
+  const verseMarkupSettings = useMemo(() => ({
+    italics: translatorItalics,
+    paragraphMarks: translatorParagraphMarks,
+  }), [translatorItalics, translatorParagraphMarks]);
 
   // Sync cache sizes
   useEffect(() => {
@@ -140,8 +150,11 @@ const WorkspaceMainPane: React.FC<WorkspaceMainPaneProps> = ({
 
       const entries = await Promise.all(
         starredTranslationIds.map(async (translationId) => {
-          const chapter = await bibleService.loadChapter(translationId, requestedBook, requestedChapter);
-          return [translationId, chapter] as const;
+          const [chapter, bible] = await Promise.all([
+            bibleService.loadChapter(translationId, requestedBook, requestedChapter),
+            bibleService.loadTranslation(translationId),
+          ]);
+          return [translationId, chapter, markupFlagsFromBible(bible)] as const;
         })
       );
 
@@ -149,7 +162,8 @@ const WorkspaceMainPane: React.FC<WorkspaceMainPaneProps> = ({
         setLoadedChapterView({
           book: requestedBook,
           chapter: requestedChapter,
-          byTranslation: Object.fromEntries(entries),
+          byTranslation: Object.fromEntries(entries.map(([id, chapter]) => [id, chapter])),
+          markupFlagsByTranslation: Object.fromEntries(entries.map(([id, , flags]) => [id, flags])),
         });
       }
     };
@@ -471,6 +485,8 @@ const WorkspaceMainPane: React.FC<WorkspaceMainPaneProps> = ({
           ) : selectedBook ? (
             <VerseDisplay
               chaptersByTranslation={chaptersByTranslation}
+              markupFlagsByTranslation={markupFlagsByTranslation}
+              verseMarkupSettings={verseMarkupSettings}
               translationOrder={starredTranslationIds}
               translationLabels={translationLabels}
               selectedTranslationId={selectedTranslationId}

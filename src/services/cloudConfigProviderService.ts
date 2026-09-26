@@ -125,6 +125,8 @@ export interface SyncedCloudConfig {
     | 'sourceUrls'
     | 'resourceHiddenTags'
     | 'theme'
+    | 'translatorItalics'
+    | 'translatorParagraphMarks'
     | 'userId'
   > & {
     providerFolderSelections?: Partial<Record<FederatedProvider, SyncedCloudFolderSelection[]>>;

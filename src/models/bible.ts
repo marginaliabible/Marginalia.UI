@@ -1,5 +1,9 @@
 export interface BibleData {
   translation: string;
+  /** When true, `[words]` in verse text are translator-supplied italics markers. */
+  italiciseBrackets?: boolean;
+  /** When true, a leading `#` in verse text is a translator paragraph mark. */
+  paragraphMarks?: boolean;
   books: BibleBook[];
 }
 
@@ -87,6 +91,10 @@ export interface MarginaliaState {
   sourceUrls?: string[];
   resourceHiddenTags?: string[];
   theme?: ThemePreference;
+  /** Italicize translator-added words in opted-in translations (default true). */
+  translatorItalics?: boolean;
+  /** Show translator paragraph marks in opted-in translations (default true). */
+  translatorParagraphMarks?: boolean;
   cloudLinkedAccounts?: LinkedCloudAccount[];
   cloudConfigUpdatedAt?: number;
   cloudConfigLastSyncedAt?: number;
