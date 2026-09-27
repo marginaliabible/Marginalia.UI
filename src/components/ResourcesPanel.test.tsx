@@ -5,6 +5,10 @@ import { bibleService } from '../services/bibleService';
 import type { PanelTab } from '../models/tab';
 import type { VerseResourcesPayload } from '../services/bibleService';
 
+jest.mock('../hooks/useDocumentScriptureNavigation', () => ({
+  useRevealVerseSelectionInBible: () => jest.fn(),
+}));
+
 jest.mock('../store/hooks', () => ({
   useAppDispatch: jest.fn(),
   useAppSelector: jest.fn(),
@@ -40,7 +44,14 @@ describe('ResourcesPanel visibility gating', () => {
     (useAppDispatch as unknown as jest.Mock).mockReturnValue(jest.fn());
     (useAppSelector as unknown as jest.Mock).mockImplementation((selector: (state: unknown) => unknown) => (
       selector({
-        ui: { sourceUrls: [], resourceHiddenTags: [], resourceVerseMatchMode: 'all', pdfViewer: { isOpen: false, kind: 'pdf', sourceUrl: null, title: null, page: 1, matchRaw: null, focusNonce: 0 } },
+        ui: {
+          sourceUrls: [],
+          resourceHiddenTags: [],
+          resourceVerseMatchMode: 'all',
+          translatorItalics: true,
+          translatorParagraphMarks: true,
+          pdfViewer: { isOpen: false, kind: 'pdf', sourceUrl: null, title: null, page: 1, matchRaw: null, focusNonce: 0 },
+        },
         bible: { currentBible: null, isPanelDetached: false },
       })
     ));
@@ -111,7 +122,14 @@ describe('ResourcesPanel multi-verse selection', () => {
     (useAppDispatch as unknown as jest.Mock).mockReturnValue(dispatch);
     (useAppSelector as unknown as jest.Mock).mockImplementation((selector: (state: unknown) => unknown) => (
       selector({
-        ui: { sourceUrls: [], resourceHiddenTags: [], resourceVerseMatchMode: 'all', pdfViewer: { isOpen: false, kind: 'pdf', sourceUrl: null, title: null, page: 1, matchRaw: null, focusNonce: 0 } },
+        ui: {
+          sourceUrls: [],
+          resourceHiddenTags: [],
+          resourceVerseMatchMode: 'all',
+          translatorItalics: true,
+          translatorParagraphMarks: true,
+          pdfViewer: { isOpen: false, kind: 'pdf', sourceUrl: null, title: null, page: 1, matchRaw: null, focusNonce: 0 },
+        },
         bible: {
           isPanelDetached: false,
           currentBible: {
@@ -199,5 +217,56 @@ describe('ResourcesPanel multi-verse selection', () => {
       type: 'ui/setResourceVerseMatchMode',
       payload: 'any',
     });
+  });
+
+  it('limits the sticky verse preview to five verses and shows overflow', async () => {
+    (useAppSelector as unknown as jest.Mock).mockImplementation((selector: (state: unknown) => unknown) => (
+      selector({
+        ui: {
+          sourceUrls: [],
+          resourceHiddenTags: [],
+          resourceVerseMatchMode: 'all',
+          translatorItalics: true,
+          translatorParagraphMarks: true,
+          pdfViewer: { isOpen: false, kind: 'pdf', sourceUrl: null, title: null, page: 1, matchRaw: null, focusNonce: 0 },
+        },
+        bible: {
+          isPanelDetached: false,
+          currentBible: {
+            books: [{
+              name: 'Genesis',
+              chapters: [{
+                chapter: 1,
+                verses: [1, 2, 3, 4, 5, 6, 7].map((verse) => ({
+                  verse,
+                  text: `Verse ${verse}`,
+                })),
+              }],
+            }],
+          },
+        },
+      })
+    ));
+    (bibleService.getResourcesForVerse as jest.Mock).mockResolvedValue(documentPayload(1, []));
+
+    const { findByText, queryByText } = render(
+      <ResourcesPanel
+        tab={{
+          ...resourcesTab,
+          verseContext: {
+            book: 'Genesis',
+            chapter: 1,
+            verse: 1,
+            verses: [1, 2, 3, 4, 5, 6, 7],
+          },
+        }}
+        isActive={true}
+      />
+    );
+
+    expect(await findByText('Genesis 1:1-7')).toBeTruthy();
+    expect(await findByText('Verse 5')).toBeTruthy();
+    expect(queryByText('Verse 6')).toBeNull();
+    expect(await findByText('...')).toBeTruthy();
   });
 });

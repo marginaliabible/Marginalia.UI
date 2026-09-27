@@ -474,16 +474,33 @@ const bibleSlice = createSlice({
     clearVerseTabContexts: (state) => {
       applyVerseContextToVerseTabs(state, null);
     },
-    openVerseTabs: (state, action: PayloadAction<{ book: string; chapter: number; verse: number; hasResources: boolean }>) => {
-      const { book, chapter, verse, hasResources } = action.payload;
+    openVerseTabs: (state, action: PayloadAction<{
+      book: string;
+      chapter: number;
+      verse: number;
+      verses?: number[];
+      hasResources: boolean;
+      preferPanel?: 'translations' | 'resources' | 'links';
+    }>) => {
+      const { book, chapter, verse, hasResources, preferPanel } = action.payload;
       const now = Date.now();
-      const verseContext = { book, chapter, verse };
+      const explicitVerses = Array.isArray(action.payload.verses)
+        ? Array.from(new Set(action.payload.verses.filter((entry) => Number.isInteger(entry) && entry > 0))).sort((a, b) => a - b)
+        : null;
+      const verseContext = explicitVerses && explicitVerses.length > 0
+        ? { book, chapter, verse: explicitVerses[0] ?? verse, verses: explicitVerses }
+        : { book, chapter, verse };
 
-      const preferredType = hasResources
-        ? state.lastVersePanelType
-        : state.lastVersePanelType === 'resources'
-          ? 'translations'
-          : state.lastVersePanelType;
+      const preferredType = preferPanel
+        ?? (hasResources
+          ? state.lastVersePanelType
+          : state.lastVersePanelType === 'resources'
+            ? 'translations'
+            : state.lastVersePanelType);
+
+      if (preferPanel) {
+        state.lastVersePanelType = preferPanel;
+      }
 
       // Ensure tabs exist, but only bind verseContext on the tab that will be shown.
       const translationsTab = upsertVerseTab(

@@ -3,6 +3,15 @@ import { useAppDispatch, useAppSelector } from '../store/hooks';
 import { closeDocumentViewer, setPdfViewerPage } from '../store/slices/uiSlice';
 import { buildMarkupDocumentShellUrl } from '../utils/resourceLibraryConfig';
 import { fetchStorageAware } from '../services/storageAuthenticatedFetch';
+import { useOpenDocumentScriptureReference } from '../hooks/useDocumentScriptureNavigation';
+import { findScriptureReferences } from '../utils/findScriptureReferences';
+import {
+  buildPageVersesJsonUrl,
+  groupPageVerseEntries,
+  parsePageVerseEntries,
+  type DocumentScriptureReference,
+} from '../utils/pageVerseReferences';
+import { applyScriptureLinkOverlays } from '../utils/scriptureLinkOverlays';
 import FileSyncExclusionButton from './FileSyncExclusionButton';
 
 const MIN_SCALE = 0.6;
@@ -355,6 +364,22 @@ function buildViewerSrcDoc(options: {
     background: color-mix(in srgb, #ff9a3b 62%, transparent);
     z-index: 5;
   }
+  .document-scripture-link {
+    position: absolute;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    border-bottom: 1.5px dashed #0d6efd;
+    background: transparent;
+    cursor: pointer;
+    z-index: 6;
+    appearance: none;
+  }
+  .document-scripture-link:hover,
+  .document-scripture-link:focus-visible {
+    background: color-mix(in srgb, #0d6efd 14%, transparent);
+    outline: none;
+  }
   #sidebar { display: none !important; }
 </style>
 </head>
@@ -685,12 +710,15 @@ function pageHasHighlightableText(pageElement: HTMLElement): boolean {
 const MarkupDocumentViewer: React.FC = () => {
   const dispatch = useAppDispatch();
   const { pdfViewer } = useAppSelector((state) => state.ui);
+  const currentBible = useAppSelector((state) => state.bible.currentBible);
+  const openScriptureReference = useOpenDocumentScriptureReference();
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const pageBlobUrlsRef = useRef<string[]>([]);
   const pageUrlsRef = useRef<string[]>([]);
   const pageBlobsRef = useRef<Map<string, string>>(new Map());
   const assetBlobsRef = useRef<Map<string, string>>(new Map());
   const storageOriginRef = useRef('');
+  const pagesBaseUrlRef = useRef('');
   const materializingPagesRef = useRef<Set<string>>(new Set());
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -789,6 +817,7 @@ const MarkupDocumentViewer: React.FC = () => {
     let cancelled = false;
     const shellUrl = buildMarkupDocumentShellUrl(activeSourceUrl);
     const pagesBaseUrl = resolvePagesBaseUrl(shellUrl);
+    pagesBaseUrlRef.current = pagesBaseUrl;
     const initialPageIndex = Math.max(0, activePage - 1);
 
     setIsLoading(true);
@@ -1003,6 +1032,76 @@ const MarkupDocumentViewer: React.FC = () => {
       cancelled = true;
     };
   }, [matchRaw, activePage, focusNonce, highlightEpoch, isLoading, srcDoc]);
+
+  useEffect(() => {
+    if (isLoading || !srcDoc || !currentBible?.books?.length) {
+      return;
+    }
+
+    const doc = iframeRef.current?.contentDocument;
+    if (!doc) {
+      return;
+    }
+
+    let cancelled = false;
+    let attempts = 0;
+
+    const applyLinks = async () => {
+      if (cancelled) {
+        return;
+      }
+      attempts += 1;
+      const pageElement = doc.querySelector<HTMLElement>(`#pf${activePage}, [data-page-no="${activePage.toString(16)}"], [data-page-no="${activePage}"]`);
+      if (!pageElement || !pageHasHighlightableText(pageElement)) {
+        if (attempts < 50) {
+          window.setTimeout(() => {
+            void applyLinks();
+          }, 120);
+        }
+        return;
+      }
+
+      const books = currentBible.books;
+      let references: DocumentScriptureReference[] = [];
+      const pagesBaseUrl = pagesBaseUrlRef.current;
+      if (pagesBaseUrl) {
+        try {
+          const versesUrl = buildPageVersesJsonUrl(pagesBaseUrl, activePage);
+          const response = await fetchStorageAware(versesUrl);
+          if (response.ok) {
+            const payload = await response.json();
+            references = groupPageVerseEntries(parsePageVerseEntries(payload), books);
+          }
+        } catch {
+          // Fall back to client-side detection from visible page text.
+        }
+      }
+
+      if (cancelled) {
+        return;
+      }
+
+      if (references.length === 0) {
+        const textNodes = Array.from(pageElement.querySelectorAll<HTMLElement>('.t'));
+        const pageText = textNodes.map((node) => node.textContent ?? '').join(' ');
+        references = findScriptureReferences(pageText, books);
+      }
+
+      if (cancelled || references.length === 0) {
+        return;
+      }
+
+      const textNodes = Array.from(pageElement.querySelectorAll<HTMLElement>('.t'));
+      applyScriptureLinkOverlays(pageElement, textNodes, references, (reference) => {
+        void openScriptureReference(reference);
+      });
+    };
+
+    void applyLinks();
+    return () => {
+      cancelled = true;
+    };
+  }, [activePage, focusNonce, highlightEpoch, isLoading, srcDoc, currentBible, openScriptureReference, scale]);
 
   if (!pdfViewer.isOpen || pdfViewer.kind !== 'markup') {
     return null;

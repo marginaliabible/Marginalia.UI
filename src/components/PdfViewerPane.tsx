@@ -11,6 +11,16 @@ import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import 'pdfjs-dist/web/pdf_viewer.css';
 import { useAppDispatch, useAppSelector } from '../store/hooks';
 import { closePdfViewer, setPdfViewerPage } from '../store/slices/uiSlice';
+import { useOpenDocumentScriptureReference } from '../hooks/useDocumentScriptureNavigation';
+import { findScriptureReferences } from '../utils/findScriptureReferences';
+import {
+  buildPageVersesJsonUrl,
+  groupPageVerseEntries,
+  parsePageVerseEntries,
+  type DocumentScriptureReference,
+} from '../utils/pageVerseReferences';
+import { fetchStorageAware } from '../services/storageAuthenticatedFetch';
+import { applyScriptureLinkOverlays } from '../utils/scriptureLinkOverlays';
 import FileSyncExclusionButton from './FileSyncExclusionButton';
 
 GlobalWorkerOptions.workerSrc = workerUrl;
@@ -45,6 +55,29 @@ const sanitizeFileName = (value: string): string => {
 
 function clearRawHighlights(root: ParentNode | null | undefined): void {
   root?.querySelectorAll('.pdf-raw-highlight').forEach((node) => node.remove());
+}
+
+function resolvePagesBaseUrlForPdf(sourceUrl: string | null | undefined): string | null {
+  if (!sourceUrl) {
+    return null;
+  }
+  try {
+    const url = new URL(sourceUrl, window.location.href);
+    if (/\/pages(?:\/|$)/i.test(url.pathname)) {
+      if (/\/index\.html$/i.test(url.pathname)) {
+        url.pathname = url.pathname.replace(/\/index\.html$/i, '/');
+      } else if (!url.pathname.endsWith('/')) {
+        const pagesIndex = url.pathname.toLowerCase().lastIndexOf('/pages');
+        url.pathname = `${url.pathname.slice(0, pagesIndex + '/pages'.length)}/`;
+      }
+      url.search = '';
+      url.hash = '';
+      return url.toString();
+    }
+  } catch {
+    return null;
+  }
+  return null;
 }
 
 function highlightMatchOnPageView(pageViewRoot: HTMLElement, rawMatchText: string): HTMLElement | null {
@@ -110,6 +143,8 @@ function highlightMatchOnPageView(pageViewRoot: HTMLElement, rawMatchText: strin
 const PdfViewerPane: React.FC = () => {
   const dispatch = useAppDispatch();
   const { pdfViewer } = useAppSelector((state) => state.ui);
+  const currentBible = useAppSelector((state) => state.bible.currentBible);
+  const openScriptureReference = useOpenDocumentScriptureReference();
   const containerRef = useRef<HTMLDivElement | null>(null);
   const viewerRef = useRef<PDFViewer | null>(null);
   const eventBusRef = useRef<EventBus | null>(null);
@@ -333,6 +368,87 @@ const PdfViewerPane: React.FC = () => {
       cancelled = true;
     };
   }, [matchRaw, activePage, isLoading, viewerReady, activeSourceUrl]);
+
+  useEffect(() => {
+    if (isLoading || !viewerReady || !currentBible?.books?.length) {
+      return;
+    }
+
+    const viewer = viewerRef.current;
+    if (!viewer) {
+      return;
+    }
+
+    let cancelled = false;
+    let attempts = 0;
+
+    const applyLinks = async () => {
+      if (cancelled) {
+        return;
+      }
+      attempts += 1;
+      const pageView = viewer.getPageView(activePage - 1) as { div?: HTMLElement } | undefined;
+      const pageRoot = pageView?.div;
+      const spans = pageRoot
+        ? Array.from(pageRoot.querySelectorAll<HTMLElement>('.textLayer span'))
+        : [];
+      if (!pageRoot || spans.length === 0) {
+        if (attempts < 40) {
+          window.setTimeout(() => {
+            void applyLinks();
+          }, 150);
+        }
+        return;
+      }
+
+      const books = currentBible.books;
+      let references: DocumentScriptureReference[] = [];
+      const pagesBaseUrl = resolvePagesBaseUrlForPdf(activeSourceUrl);
+      if (pagesBaseUrl) {
+        try {
+          const versesUrl = buildPageVersesJsonUrl(pagesBaseUrl, activePage);
+          const response = await fetchStorageAware(versesUrl);
+          if (response.ok) {
+            const payload = await response.json();
+            references = groupPageVerseEntries(parsePageVerseEntries(payload), books);
+          }
+        } catch {
+          // Fall back to text-layer detection.
+        }
+      }
+
+      if (cancelled) {
+        return;
+      }
+
+      if (references.length === 0) {
+        const pageText = spans.map((span) => span.textContent ?? '').join(' ');
+        references = findScriptureReferences(pageText, books);
+      }
+
+      if (cancelled || references.length === 0) {
+        return;
+      }
+
+      applyScriptureLinkOverlays(pageRoot, spans, references, (reference) => {
+        void openScriptureReference(reference);
+      });
+    };
+
+    void applyLinks();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    activePage,
+    activeSourceUrl,
+    currentBible,
+    focusNonce,
+    isLoading,
+    openScriptureReference,
+    scale,
+    viewerReady,
+  ]);
 
   useEffect(() => {
     if (!pdfViewer.isOpen || pdfViewer.kind === 'markup') {

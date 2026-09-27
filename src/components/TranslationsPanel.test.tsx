@@ -1,13 +1,24 @@
 import { render, waitFor } from '@testing-library/react';
 import TranslationsPanel from './TranslationsPanel';
 import { bibleService } from '../services/bibleService';
+import { useAppDispatch, useAppSelector } from '../store/hooks';
 import type { PanelTab } from '../models/tab';
 import type { TranslationRecord } from '../models/bible';
 
 jest.mock('../services/bibleService', () => ({
   bibleService: {
     loadVerseText: jest.fn(),
+    loadTranslation: jest.fn(),
   },
+}));
+
+jest.mock('../store/hooks', () => ({
+  useAppDispatch: jest.fn(),
+  useAppSelector: jest.fn(),
+}));
+
+jest.mock('../hooks/useDocumentScriptureNavigation', () => ({
+  useRevealVerseSelectionInBible: () => jest.fn(),
 }));
 
 const translationsTab: PanelTab = {
@@ -28,8 +39,18 @@ const noop = () => {};
 
 describe('TranslationsPanel visibility gating', () => {
   beforeEach(() => {
+    (useAppDispatch as unknown as jest.Mock).mockReturnValue(jest.fn());
+    (useAppSelector as unknown as jest.Mock).mockImplementation((selector: (state: unknown) => unknown) => (
+      selector({
+        ui: { translatorItalics: true, translatorParagraphMarks: true },
+      })
+    ));
     (bibleService.loadVerseText as jest.Mock).mockReset();
     (bibleService.loadVerseText as jest.Mock).mockResolvedValue('In the beginning');
+    (bibleService.loadTranslation as jest.Mock).mockResolvedValue({
+      translation: 'KJV',
+      books: [],
+    });
   });
 
   it('does not load verse texts while the tab is inactive', () => {
@@ -155,5 +176,42 @@ describe('TranslationsPanel visibility gating', () => {
     expect(await findByText('Genesis 1:1-2')).toBeTruthy();
     expect(await findByText('text 1')).toBeTruthy();
     expect(await findByText('text 2')).toBeTruthy();
+  });
+
+  it('loads at most five verse texts when more are selected', async () => {
+    (bibleService.loadVerseText as jest.Mock).mockImplementation(async (
+      _id: string,
+      _book: string,
+      _chapter: number,
+      verse: number
+    ) => `text ${verse}`);
+
+    const verses = [1, 2, 3, 4, 5, 6, 7];
+    const { findByText, queryByText } = render(
+      <TranslationsPanel
+        tab={{
+          ...translationsTab,
+          verseContext: { book: 'Genesis', chapter: 1, verse: 1, verses },
+        }}
+        isActive={true}
+        translationRecords={translationRecords}
+        translationMetadataById={new Map()}
+        addableTranslations={[]}
+        onAddTranslation={noop}
+        onRemoveTranslation={noop}
+        onToggleStar={noop}
+        onReorder={noop}
+      />
+    );
+
+    await waitFor(() => {
+      expect(bibleService.loadVerseText).toHaveBeenCalledWith('KJV', 'Genesis', 1, 5);
+    });
+    expect(bibleService.loadVerseText).not.toHaveBeenCalledWith('KJV', 'Genesis', 1, 6);
+
+    expect(await findByText('Genesis 1:1-7')).toBeTruthy();
+    expect(await findByText('text 5')).toBeTruthy();
+    expect(queryByText('text 6')).toBeNull();
+    expect(await findByText('...')).toBeTruthy();
   });
 });

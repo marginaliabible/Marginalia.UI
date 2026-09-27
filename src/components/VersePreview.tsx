@@ -1,6 +1,7 @@
 import React from 'react';
 import type { VerseContext } from '../models/tab';
 import { formatVerseReference } from '../utils/selectedVerseContext';
+import { MAX_PANEL_VISIBLE_VERSES } from '../utils/documentTextMatch';
 import {
   renderVerseMarkers,
   type VerseMarkupFlags,
@@ -24,6 +25,10 @@ interface VerseTextListProps {
   emptyText?: string;
   markupFlags?: VerseMarkupFlags;
   verseMarkupSettings?: VerseMarkupSettings;
+  /** Total verses in the selection (may exceed `verses.length` when truncated for display). */
+  totalVerseCount?: number;
+  maxVisibleVerses?: number;
+  onOverflowClick?: () => void;
 }
 
 const DEFAULT_MARKUP_SETTINGS: VerseMarkupSettings = {
@@ -36,9 +41,12 @@ export const VerseTextList: React.FC<VerseTextListProps> = ({
   emptyText,
   markupFlags = {},
   verseMarkupSettings = DEFAULT_MARKUP_SETTINGS,
+  totalVerseCount,
+  maxVisibleVerses = MAX_PANEL_VISIBLE_VERSES,
+  onOverflowClick,
 }) => {
   const available = verses.filter((entry) => entry.text.length > 0);
-  if (available.length === 0) {
+  if (available.length === 0 && verses.length === 0) {
     return (
       <span className="text-muted">
         {emptyText ?? 'Verse text unavailable in current translation.'}
@@ -46,13 +54,17 @@ export const VerseTextList: React.FC<VerseTextListProps> = ({
     );
   }
 
-  if (verses.length === 1) {
-    return <>{renderVerseMarkers(verses[0].text, markupFlags, verseMarkupSettings)}</>;
+  const totalCount = totalVerseCount ?? verses.length;
+  const showOverflow = totalCount > maxVisibleVerses;
+  const visibleVerses = showOverflow ? verses.slice(0, maxVisibleVerses) : verses;
+
+  if (visibleVerses.length === 1 && !showOverflow) {
+    return <>{renderVerseMarkers(visibleVerses[0].text, markupFlags, verseMarkupSettings)}</>;
   }
 
   return (
     <div className="verse-text-list">
-      {verses.map((entry) => (
+      {visibleVerses.map((entry) => (
         <div key={entry.verse} className="verse-text-list-item">
           <span className="verse-text-list-number">{entry.verse}</span>
           {' '}
@@ -63,6 +75,22 @@ export const VerseTextList: React.FC<VerseTextListProps> = ({
             )}
         </div>
       ))}
+      {showOverflow && (
+        <div className="verse-text-list-overflow">
+          {onOverflowClick ? (
+            <button
+              type="button"
+              className="btn btn-link btn-sm p-0 verse-text-list-overflow-button"
+              onClick={onOverflowClick}
+              title="Open the first verse in the Bible panel"
+            >
+              ...
+            </button>
+          ) : (
+            <span className="verse-text-list-overflow-static">...</span>
+          )}
+        </div>
+      )}
     </div>
   );
 };

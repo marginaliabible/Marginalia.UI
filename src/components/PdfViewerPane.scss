@@ -56,6 +56,24 @@
   z-index: 4;
 }
 
+.document-scripture-link {
+  position: absolute;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-bottom: 1.5px dashed #0d6efd;
+  background: transparent;
+  cursor: pointer;
+  z-index: 5;
+  appearance: none;
+}
+
+.document-scripture-link:hover,
+.document-scripture-link:focus-visible {
+  background: color-mix(in srgb, #0d6efd 14%, transparent);
+  outline: none;
+}
+
 .pdf-loading-overlay {
   position: absolute;
   inset: 0;
