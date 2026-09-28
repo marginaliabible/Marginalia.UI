@@ -159,4 +159,25 @@ describe('bibleSlice verse tab context', () => {
       verses: [1, 2, 3],
     });
   });
+
+  it('openVerseTabs can prefer Translations and bind a multi-verse context', () => {
+    const state = reducer(undefined, openVerseTabs({
+      book: 'Romans',
+      chapter: 12,
+      verse: 1,
+      verses: [1, 2, 3],
+      hasResources: true,
+      preferPanel: 'translations',
+    }));
+
+    const activeTab = state.tabs.find((tab) => tab.id === state.activeTabId);
+    expect(activeTab?.type).toBe('translations');
+    expect(activeTab?.verseContext).toEqual({
+      book: 'Romans',
+      chapter: 12,
+      verse: 1,
+      verses: [1, 2, 3],
+    });
+    expect(state.lastVersePanelType).toBe('translations');
+  });
 });

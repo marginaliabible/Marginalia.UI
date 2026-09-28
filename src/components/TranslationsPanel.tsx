@@ -3,6 +3,8 @@ import type { PanelTab, VerseContext } from '../models/tab';
 import type { BibleTranslationMeta, TranslationRecord } from '../models/bible';
 import { bibleService } from '../services/bibleService';
 import { useAppSelector } from '../store/hooks';
+import { useRevealVerseSelectionInBible } from '../hooks/useDocumentScriptureNavigation';
+import { MAX_PANEL_VISIBLE_VERSES } from '../utils/documentTextMatch';
 import { versesFromContext } from '../utils/selectedVerseContext';
 import { markupFlagsFromBible } from '../utils/verseMarkup';
 import { VerseReferenceLabel, VerseTextList } from './VersePreview';
@@ -41,6 +43,7 @@ const TranslationsPanel: React.FC<TranslationsPanelProps> = ({
   }), [translatorItalics, translatorParagraphMarks]);
   const verseContext = tab.verseContext as VerseContext | undefined;
   const selectedVerseNumbers = verseContext ? versesFromContext(verseContext) : [];
+  const revealInBible = useRevealVerseSelectionInBible();
 
   const filteredAddableTranslations = useMemo(() => {
     const query = translationFilter.trim().toLowerCase();
@@ -72,11 +75,13 @@ const TranslationsPanel: React.FC<TranslationsPanelProps> = ({
 
       const { book, chapter } = verseContext;
       const verseNumbers = versesFromContext(verseContext);
+      // Load only what the panel will show; ANY|ALL / full selection still use all verses.
+      const visibleVerseNumbers = verseNumbers.slice(0, MAX_PANEL_VISIBLE_VERSES);
       const entries = await Promise.all(
         translationRecords.map(async (record) => {
           const [verseTexts, bible] = await Promise.all([
             Promise.all(
-              verseNumbers.map(async (verse) => ({
+              visibleVerseNumbers.map(async (verse) => ({
                 verse,
                 text: await bibleService.loadVerseText(record.id, book, chapter, verse),
               }))
@@ -231,8 +236,12 @@ const TranslationsPanel: React.FC<TranslationsPanelProps> = ({
                           {hasAnyVerseText ? (
                             <VerseTextList
                               verses={verseTexts}
+                              totalVerseCount={selectedVerseNumbers.length}
                               markupFlags={markupFlagsByTranslation.get(record.id) ?? {}}
                               verseMarkupSettings={verseMarkupSettings}
+                              onOverflowClick={verseContext
+                                ? () => revealInBible(verseContext)
+                                : undefined}
                             />
                           ) : (
                             <span

@@ -15,6 +15,7 @@ import { getOrAssignResourceTagColors, TAG_COLOR_PALETTE } from '../utils/resour
 import { versesFromContext } from '../utils/selectedVerseContext';
 import { mergeVerseResourcePayloads, type ResourceVerseMatchMode } from '../utils/verseResources';
 import { markupFlagsFromBible } from '../utils/verseMarkup';
+import { useRevealVerseSelectionInBible } from '../hooks/useDocumentScriptureNavigation';
 import { VerseReferenceLabel, VerseTextList } from './VersePreview';
 
 interface ResourcesPanelProps {
@@ -38,6 +39,7 @@ const ResourcesPanel: React.FC<ResourcesPanelProps> = ({ tab, isActive }) => {
     translatorParagraphMarks,
   } = useAppSelector((state) => state.ui);
   const { currentBible, isPanelDetached } = useAppSelector((state) => state.bible);
+  const revealInBible = useRevealVerseSelectionInBible();
   const verseMarkupSettings = useMemo(() => ({
     italics: translatorItalics,
     paragraphMarks: translatorParagraphMarks,
@@ -272,8 +274,12 @@ const ResourcesPanel: React.FC<ResourcesPanelProps> = ({ tab, isActive }) => {
           <div className="small">
             <VerseTextList
               verses={verseTexts}
+              totalVerseCount={selectedVerseNumbers.length}
               markupFlags={markupFlagsFromBible(currentBible)}
               verseMarkupSettings={verseMarkupSettings}
+              onOverflowClick={verseContext
+                ? () => revealInBible(verseContext)
+                : undefined}
             />
           </div>
         </div>

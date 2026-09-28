@@ -21,3 +21,20 @@
   color: var(--bs-secondary-color);
   font-variant-numeric: tabular-nums;
 }
+
+.verse-text-list-overflow {
+  line-height: 1;
+}
+
+.verse-text-list-overflow-button,
+.verse-text-list-overflow-static {
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-decoration: none;
+  color: var(--bs-primary);
+}
+
+.verse-text-list-overflow-button:hover,
+.verse-text-list-overflow-button:focus-visible {
+  text-decoration: underline;
+}

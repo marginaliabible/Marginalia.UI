@@ -3,6 +3,9 @@ import { useAppDispatch, useAppSelector } from '../store/hooks';
 import { closeDocumentViewer, setPdfViewerPage } from '../store/slices/uiSlice';
 import { buildMarkupDocumentShellUrl } from '../utils/resourceLibraryConfig';
 import { fetchStorageAware } from '../services/storageAuthenticatedFetch';
+import { useOpenDocumentScriptureReference } from '../hooks/useDocumentScriptureNavigation';
+import { loadPageScriptureReferences } from '../utils/loadPageScriptureReferences';
+import { applyScriptureLinkOverlays, clearScriptureLinks } from '../utils/scriptureLinkOverlays';
 import FileSyncExclusionButton from './FileSyncExclusionButton';
 
 const MIN_SCALE = 0.6;
@@ -355,6 +358,22 @@ function buildViewerSrcDoc(options: {
     background: color-mix(in srgb, #ff9a3b 62%, transparent);
     z-index: 5;
   }
+  .document-scripture-link {
+    position: absolute;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    border-bottom: 1.5px dashed #0d6efd;
+    background: transparent;
+    cursor: pointer;
+    z-index: 6;
+    appearance: none;
+  }
+  .document-scripture-link:hover,
+  .document-scripture-link:focus-visible {
+    background: color-mix(in srgb, #0d6efd 14%, transparent);
+    outline: none;
+  }
   #sidebar { display: none !important; }
 </style>
 </head>
@@ -488,9 +507,18 @@ ${options.bodyHtml}
         if (viewer && typeof viewer.load_page === 'function') {
           var origLoadPage = viewer.load_page.bind(viewer);
           viewer.load_page = function (pageIndex, preload, callback) {
+            var wrappedCallback = function (loadedPage) {
+              window.parent.postMessage({
+                type: 'markup-page-settled',
+                pageIndex: pageIndex
+              }, '*');
+              if (typeof callback === 'function') {
+                try { callback(loadedPage); } catch (cbError) { /* ignore */ }
+              }
+            };
             var page = viewer.pages && viewer.pages[pageIndex];
             if (!page || page.loaded || viewer.pages_loading[pageIndex]) {
-              return origLoadPage(pageIndex, preload, callback);
+              return origLoadPage(pageIndex, preload, wrappedCallback);
             }
             var el = page.page;
             var blobUrl = el && el.getAttribute('data-page-url');
@@ -516,7 +544,7 @@ ${options.bodyHtml}
               }
               return;
             }
-            return origLoadPage(pageIndex, preload, callback);
+            return origLoadPage(pageIndex, preload, wrappedCallback);
           };
 
           window.addEventListener('message', function (event) {
@@ -542,6 +570,10 @@ ${options.bodyHtml}
               for (var i = 0; i < callbacks.length; i += 1) {
                 try { callbacks[i](loadedPage); } catch (cbError) { /* ignore */ }
               }
+              window.parent.postMessage({
+                type: 'markup-page-settled',
+                pageIndex: idx
+              }, '*');
               // Loading a page at/before the target can change cumulative offsets.
               if (
                 typeof pendingScrollPageIndex === 'number'
@@ -553,6 +585,43 @@ ${options.bodyHtml}
               }
             });
           });
+        }
+
+        // Free-scrolling shows pages without going through toolbar prev/next. Notify the
+        // parent when the viewport moves or pdf2htmlEX marks a page .opened so scripture
+        // links can attach to newly visible pages.
+        var viewportNotifyTimer = null;
+        function notifyViewportChanged() {
+          if (viewportNotifyTimer) {
+            clearTimeout(viewportNotifyTimer);
+          }
+          viewportNotifyTimer = setTimeout(function () {
+            window.parent.postMessage({ type: 'markup-viewport-changed' }, '*');
+          }, 100);
+        }
+        var pageContainer = document.getElementById('page-container');
+        if (pageContainer) {
+          pageContainer.addEventListener('scroll', notifyViewportChanged, { passive: true });
+          try {
+            var openedObserver = new MutationObserver(function (mutations) {
+              for (var m = 0; m < mutations.length; m += 1) {
+                var target = mutations[m].target;
+                if (
+                  target
+                  && target.classList
+                  && (target.classList.contains('pc') || target.classList.contains('opened'))
+                ) {
+                  notifyViewportChanged();
+                  return;
+                }
+              }
+            });
+            openedObserver.observe(pageContainer, {
+              subtree: true,
+              attributes: true,
+              attributeFilter: ['class']
+            });
+          } catch (observerError) { /* ignore */ }
         }
 
         // Rescale before scroll so page offset geometry matches the active zoom.
@@ -682,15 +751,50 @@ function pageHasHighlightableText(pageElement: HTMLElement): boolean {
   return false;
 }
 
+function resolveMarkupPageNumber(pageElement: HTMLElement, fallbackIndex: number): number {
+  const idMatch = pageElement.id.match(/^pf(\d+)$/i);
+  if (idMatch) {
+    const fromId = Number.parseInt(idMatch[1] ?? '', 10);
+    if (Number.isInteger(fromId) && fromId > 0) {
+      return fromId;
+    }
+  }
+
+  const dataPageNo = pageElement.getAttribute('data-page-no');
+  if (dataPageNo) {
+    const asDecimal = Number.parseInt(dataPageNo, 10);
+    if (Number.isInteger(asDecimal) && asDecimal > 0 && String(asDecimal) === dataPageNo) {
+      return asDecimal;
+    }
+    const asHex = Number.parseInt(dataPageNo, 16);
+    if (Number.isInteger(asHex) && asHex > 0) {
+      return asHex;
+    }
+  }
+
+  return fallbackIndex + 1;
+}
+
+function listMarkupPageElements(doc: Document): Array<{ pageNumber: number; element: HTMLElement }> {
+  const frames = Array.from(doc.querySelectorAll<HTMLElement>('#page-container .pf'));
+  return frames.map((element, index) => ({
+    pageNumber: resolveMarkupPageNumber(element, index),
+    element,
+  }));
+}
+
 const MarkupDocumentViewer: React.FC = () => {
   const dispatch = useAppDispatch();
   const { pdfViewer } = useAppSelector((state) => state.ui);
+  const currentBible = useAppSelector((state) => state.bible.currentBible);
+  const openScriptureReference = useOpenDocumentScriptureReference();
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const pageBlobUrlsRef = useRef<string[]>([]);
   const pageUrlsRef = useRef<string[]>([]);
   const pageBlobsRef = useRef<Map<string, string>>(new Map());
   const assetBlobsRef = useRef<Map<string, string>>(new Map());
   const storageOriginRef = useRef('');
+  const pagesBaseUrlRef = useRef('');
   const materializingPagesRef = useRef<Set<string>>(new Set());
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -698,7 +802,11 @@ const MarkupDocumentViewer: React.FC = () => {
   const [scale, setScale] = useState(1);
   const [srcDoc, setSrcDoc] = useState<string | null>(null);
   const [highlightEpoch, setHighlightEpoch] = useState(0);
+  const [scriptureLinkEpoch, setScriptureLinkEpoch] = useState(0);
   const highlightAttemptedRef = useRef(false);
+  const scriptureLinkedPagesRef = useRef<Set<number>>(new Set());
+  const openScriptureReferenceRef = useRef(openScriptureReference);
+  openScriptureReferenceRef.current = openScriptureReference;
 
   const activeSourceUrl = pdfViewer.sourceUrl;
   const activePage = Math.max(1, pdfViewer.page);
@@ -789,6 +897,7 @@ const MarkupDocumentViewer: React.FC = () => {
     let cancelled = false;
     const shellUrl = buildMarkupDocumentShellUrl(activeSourceUrl);
     const pagesBaseUrl = resolvePagesBaseUrl(shellUrl);
+    pagesBaseUrlRef.current = pagesBaseUrl;
     const initialPageIndex = Math.max(0, activePage - 1);
 
     setIsLoading(true);
@@ -893,10 +1002,18 @@ const MarkupDocumentViewer: React.FC = () => {
         return;
       }
       if (data.type === 'markup-page-settled' && typeof data.pageIndex === 'number') {
+        // Page DOM may have been freshly materialized; allow re-linking.
+        scriptureLinkedPagesRef.current.delete(data.pageIndex + 1);
+        setScriptureLinkEpoch((value) => value + 1);
         if (data.pageIndex === Math.max(0, activePage - 1)) {
           highlightAttemptedRef.current = false;
           setHighlightEpoch((value) => value + 1);
         }
+        return;
+      }
+      if (data.type === 'markup-viewport-changed') {
+        // Free-scroll showed additional .opened pages; scan without clearing linked ones.
+        setScriptureLinkEpoch((value) => value + 1);
         return;
       }
       if (data.type === 'markup-need-page' && typeof data.pageIndex === 'number') {
@@ -1003,6 +1120,80 @@ const MarkupDocumentViewer: React.FC = () => {
       cancelled = true;
     };
   }, [matchRaw, activePage, focusNonce, highlightEpoch, isLoading, srcDoc]);
+
+  useEffect(() => {
+    // Scale/document changes invalidate absolute overlay positions.
+    scriptureLinkedPagesRef.current.clear();
+    setScriptureLinkEpoch((value) => value + 1);
+  }, [scale, srcDoc, activeSourceUrl]);
+
+  useEffect(() => {
+    if (isLoading || !srcDoc || !currentBible?.books?.length) {
+      return;
+    }
+
+    const doc = iframeRef.current?.contentDocument;
+    if (!doc) {
+      return;
+    }
+
+    let cancelled = false;
+    const books = currentBible.books;
+    const pagesBaseUrl = pagesBaseUrlRef.current || null;
+
+    const applyLinksToReadyPages = async () => {
+      if (cancelled) {
+        return;
+      }
+
+      const pages = listMarkupPageElements(doc);
+      for (const { pageNumber, element } of pages) {
+        if (cancelled) {
+          return;
+        }
+        if (scriptureLinkedPagesRef.current.has(pageNumber)) {
+          continue;
+        }
+        if (!pageHasHighlightableText(element)) {
+          continue;
+        }
+
+        const textNodes = Array.from(element.querySelectorAll<HTMLElement>('.t'));
+        const pageText = textNodes.map((node) => node.textContent ?? '').join(' ');
+        const references = await loadPageScriptureReferences({
+          pageNumber,
+          books,
+          pagesBaseUrl,
+          pageText,
+        });
+
+        if (cancelled) {
+          return;
+        }
+
+        // Mark linked even when empty so we don't keep refetching empty pages.
+        scriptureLinkedPagesRef.current.add(pageNumber);
+        if (references.length === 0) {
+          clearScriptureLinks(element);
+          continue;
+        }
+
+        applyScriptureLinkOverlays(element, textNodes, references, (reference) => {
+          void openScriptureReferenceRef.current(reference);
+        });
+      }
+    };
+
+    void applyLinksToReadyPages();
+    const retryTimer = window.setTimeout(() => {
+      void applyLinksToReadyPages();
+    }, 250);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(retryTimer);
+    };
+  }, [isLoading, srcDoc, currentBible, scriptureLinkEpoch]);
 
   if (!pdfViewer.isOpen || pdfViewer.kind !== 'markup') {
     return null;
