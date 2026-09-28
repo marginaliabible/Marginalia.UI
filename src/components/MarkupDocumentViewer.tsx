@@ -507,9 +507,18 @@ ${options.bodyHtml}
         if (viewer && typeof viewer.load_page === 'function') {
           var origLoadPage = viewer.load_page.bind(viewer);
           viewer.load_page = function (pageIndex, preload, callback) {
+            var wrappedCallback = function (loadedPage) {
+              window.parent.postMessage({
+                type: 'markup-page-settled',
+                pageIndex: pageIndex
+              }, '*');
+              if (typeof callback === 'function') {
+                try { callback(loadedPage); } catch (cbError) { /* ignore */ }
+              }
+            };
             var page = viewer.pages && viewer.pages[pageIndex];
             if (!page || page.loaded || viewer.pages_loading[pageIndex]) {
-              return origLoadPage(pageIndex, preload, callback);
+              return origLoadPage(pageIndex, preload, wrappedCallback);
             }
             var el = page.page;
             var blobUrl = el && el.getAttribute('data-page-url');
@@ -535,7 +544,7 @@ ${options.bodyHtml}
               }
               return;
             }
-            return origLoadPage(pageIndex, preload, callback);
+            return origLoadPage(pageIndex, preload, wrappedCallback);
           };
 
           window.addEventListener('message', function (event) {
@@ -561,6 +570,10 @@ ${options.bodyHtml}
               for (var i = 0; i < callbacks.length; i += 1) {
                 try { callbacks[i](loadedPage); } catch (cbError) { /* ignore */ }
               }
+              window.parent.postMessage({
+                type: 'markup-page-settled',
+                pageIndex: idx
+              }, '*');
               // Loading a page at/before the target can change cumulative offsets.
               if (
                 typeof pendingScrollPageIndex === 'number'
@@ -572,6 +585,43 @@ ${options.bodyHtml}
               }
             });
           });
+        }
+
+        // Free-scrolling shows pages without going through toolbar prev/next. Notify the
+        // parent when the viewport moves or pdf2htmlEX marks a page .opened so scripture
+        // links can attach to newly visible pages.
+        var viewportNotifyTimer = null;
+        function notifyViewportChanged() {
+          if (viewportNotifyTimer) {
+            clearTimeout(viewportNotifyTimer);
+          }
+          viewportNotifyTimer = setTimeout(function () {
+            window.parent.postMessage({ type: 'markup-viewport-changed' }, '*');
+          }, 100);
+        }
+        var pageContainer = document.getElementById('page-container');
+        if (pageContainer) {
+          pageContainer.addEventListener('scroll', notifyViewportChanged, { passive: true });
+          try {
+            var openedObserver = new MutationObserver(function (mutations) {
+              for (var m = 0; m < mutations.length; m += 1) {
+                var target = mutations[m].target;
+                if (
+                  target
+                  && target.classList
+                  && (target.classList.contains('pc') || target.classList.contains('opened'))
+                ) {
+                  notifyViewportChanged();
+                  return;
+                }
+              }
+            });
+            openedObserver.observe(pageContainer, {
+              subtree: true,
+              attributes: true,
+              attributeFilter: ['class']
+            });
+          } catch (observerError) { /* ignore */ }
         }
 
         // Rescale before scroll so page offset geometry matches the active zoom.
@@ -959,6 +1009,11 @@ const MarkupDocumentViewer: React.FC = () => {
           highlightAttemptedRef.current = false;
           setHighlightEpoch((value) => value + 1);
         }
+        return;
+      }
+      if (data.type === 'markup-viewport-changed') {
+        // Free-scroll showed additional .opened pages; scan without clearing linked ones.
+        setScriptureLinkEpoch((value) => value + 1);
         return;
       }
       if (data.type === 'markup-need-page' && typeof data.pageIndex === 'number') {

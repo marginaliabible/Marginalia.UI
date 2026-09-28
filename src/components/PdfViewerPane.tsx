@@ -221,6 +221,8 @@ const PdfViewerPane: React.FC = () => {
       queueMicrotask(() => {
         syncingPageFromViewerRef.current = false;
       });
+      // Scroll may bring already-cached pages into view without a fresh textlayerrendered.
+      void scanRenderedPagesForLinks();
     };
     eventBus.on('pagechanging', onPageChanging);
 
@@ -266,6 +268,16 @@ const PdfViewerPane: React.FC = () => {
       });
     };
 
+    const scanRenderedPagesForLinks = async () => {
+      const total = pdfViewerInstance.pagesCount || 0;
+      for (let pageNumber = 1; pageNumber <= total; pageNumber += 1) {
+        if (scriptureLinkedPagesRef.current.has(pageNumber)) {
+          continue;
+        }
+        await applyLinksForPage(pageNumber);
+      }
+    };
+
     const onTextLayerRendered = (evt: { pageNumber?: number }) => {
       if (typeof evt.pageNumber !== 'number' || evt.pageNumber < 1) {
         return;
@@ -276,9 +288,18 @@ const PdfViewerPane: React.FC = () => {
     };
     eventBus.on('textlayerrendered', onTextLayerRendered);
 
+    const onPageRendered = (evt: { pageNumber?: number }) => {
+      if (typeof evt.pageNumber !== 'number' || evt.pageNumber < 1) {
+        return;
+      }
+      void applyLinksForPage(evt.pageNumber);
+    };
+    eventBus.on('pagerendered', onPageRendered);
+
     return () => {
       eventBus.off('pagechanging', onPageChanging);
       eventBus.off('textlayerrendered', onTextLayerRendered);
+      eventBus.off('pagerendered', onPageRendered);
       try {
         // pdf.js cleanup path accepts null at runtime.
         (pdfViewerInstance as { setDocument: (doc: PDFDocumentProxy | null) => void }).setDocument(null);
