@@ -12,15 +12,8 @@ import 'pdfjs-dist/web/pdf_viewer.css';
 import { useAppDispatch, useAppSelector } from '../store/hooks';
 import { closePdfViewer, setPdfViewerPage } from '../store/slices/uiSlice';
 import { useOpenDocumentScriptureReference } from '../hooks/useDocumentScriptureNavigation';
-import { findScriptureReferences } from '../utils/findScriptureReferences';
-import {
-  buildPageVersesJsonUrl,
-  groupPageVerseEntries,
-  parsePageVerseEntries,
-  type DocumentScriptureReference,
-} from '../utils/pageVerseReferences';
-import { fetchStorageAware } from '../services/storageAuthenticatedFetch';
-import { applyScriptureLinkOverlays } from '../utils/scriptureLinkOverlays';
+import { loadPageScriptureReferences } from '../utils/loadPageScriptureReferences';
+import { applyScriptureLinkOverlays, clearScriptureLinks } from '../utils/scriptureLinkOverlays';
 import FileSyncExclusionButton from './FileSyncExclusionButton';
 
 GlobalWorkerOptions.workerSrc = workerUrl;
@@ -155,6 +148,13 @@ const PdfViewerPane: React.FC = () => {
   const pinchStartScaleRef = useRef(1);
   const highlightAttemptedRef = useRef(false);
   const syncingPageFromViewerRef = useRef(false);
+  const scriptureLinkedPagesRef = useRef<Set<number>>(new Set());
+  const openScriptureReferenceRef = useRef(openScriptureReference);
+  openScriptureReferenceRef.current = openScriptureReference;
+  const currentBibleRef = useRef(currentBible);
+  currentBibleRef.current = currentBible;
+  const activeSourceUrlRef = useRef(pdfViewer.sourceUrl);
+  activeSourceUrlRef.current = pdfViewer.sourceUrl;
 
   const [pageCount, setPageCount] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
@@ -224,8 +224,61 @@ const PdfViewerPane: React.FC = () => {
     };
     eventBus.on('pagechanging', onPageChanging);
 
+    const applyLinksForPage = async (pageNumber: number) => {
+      const books = currentBibleRef.current?.books;
+      if (!books?.length) {
+        return;
+      }
+      if (scriptureLinkedPagesRef.current.has(pageNumber)) {
+        return;
+      }
+
+      const pageView = pdfViewerInstance.getPageView(pageNumber - 1) as { div?: HTMLElement } | undefined;
+      const pageRoot = pageView?.div;
+      const spans = pageRoot
+        ? Array.from(pageRoot.querySelectorAll<HTMLElement>('.textLayer span'))
+        : [];
+      if (!pageRoot || spans.length === 0) {
+        return;
+      }
+
+      const pageText = spans.map((span) => span.textContent ?? '').join(' ');
+      const references = await loadPageScriptureReferences({
+        pageNumber,
+        books,
+        pagesBaseUrl: resolvePagesBaseUrlForPdf(activeSourceUrlRef.current),
+        pageText,
+      });
+
+      // Page may have been torn down or re-rendered while we fetched.
+      if (!pageRoot.isConnected || scriptureLinkedPagesRef.current.has(pageNumber)) {
+        return;
+      }
+
+      scriptureLinkedPagesRef.current.add(pageNumber);
+      if (references.length === 0) {
+        clearScriptureLinks(pageRoot);
+        return;
+      }
+
+      applyScriptureLinkOverlays(pageRoot, spans, references, (reference) => {
+        void openScriptureReferenceRef.current(reference);
+      });
+    };
+
+    const onTextLayerRendered = (evt: { pageNumber?: number }) => {
+      if (typeof evt.pageNumber !== 'number' || evt.pageNumber < 1) {
+        return;
+      }
+      // Text layers re-render on zoom / virtualization; allow a fresh link pass.
+      scriptureLinkedPagesRef.current.delete(evt.pageNumber);
+      void applyLinksForPage(evt.pageNumber);
+    };
+    eventBus.on('textlayerrendered', onTextLayerRendered);
+
     return () => {
       eventBus.off('pagechanging', onPageChanging);
+      eventBus.off('textlayerrendered', onTextLayerRendered);
       try {
         // pdf.js cleanup path accepts null at runtime.
         (pdfViewerInstance as { setDocument: (doc: PDFDocumentProxy | null) => void }).setDocument(null);
@@ -257,6 +310,7 @@ const PdfViewerPane: React.FC = () => {
     setError(null);
     setPageCount(0);
     highlightAttemptedRef.current = false;
+    scriptureLinkedPagesRef.current.clear();
 
     const previousTask = loadingTaskRef.current;
     loadingTaskRef.current = null;
@@ -370,82 +424,81 @@ const PdfViewerPane: React.FC = () => {
   }, [matchRaw, activePage, isLoading, viewerReady, activeSourceUrl]);
 
   useEffect(() => {
+    // Zoom / document changes invalidate absolute overlay positions.
+    scriptureLinkedPagesRef.current.clear();
+  }, [scale, activeSourceUrl]);
+
+  useEffect(() => {
     if (isLoading || !viewerReady || !currentBible?.books?.length) {
       return;
     }
 
     const viewer = viewerRef.current;
-    if (!viewer) {
+    if (!viewer || !viewer.pdfDocument) {
       return;
     }
 
     let cancelled = false;
-    let attempts = 0;
+    const books = currentBible.books;
+    const pagesBaseUrl = resolvePagesBaseUrlForPdf(activeSourceUrl);
 
-    const applyLinks = async () => {
-      if (cancelled) {
-        return;
-      }
-      attempts += 1;
-      const pageView = viewer.getPageView(activePage - 1) as { div?: HTMLElement } | undefined;
-      const pageRoot = pageView?.div;
-      const spans = pageRoot
-        ? Array.from(pageRoot.querySelectorAll<HTMLElement>('.textLayer span'))
-        : [];
-      if (!pageRoot || spans.length === 0) {
-        if (attempts < 40) {
-          window.setTimeout(() => {
-            void applyLinks();
-          }, 150);
-        }
-        return;
-      }
-
-      const books = currentBible.books;
-      let references: DocumentScriptureReference[] = [];
-      const pagesBaseUrl = resolvePagesBaseUrlForPdf(activeSourceUrl);
-      if (pagesBaseUrl) {
-        try {
-          const versesUrl = buildPageVersesJsonUrl(pagesBaseUrl, activePage);
-          const response = await fetchStorageAware(versesUrl);
-          if (response.ok) {
-            const payload = await response.json();
-            references = groupPageVerseEntries(parsePageVerseEntries(payload), books);
-          }
-        } catch {
-          // Fall back to text-layer detection.
-        }
-      }
-
+    const applyLinksToRenderedPages = async () => {
       if (cancelled) {
         return;
       }
 
-      if (references.length === 0) {
+      const total = viewer.pagesCount || pageCount || 0;
+      for (let pageNumber = 1; pageNumber <= total; pageNumber += 1) {
+        if (cancelled) {
+          return;
+        }
+        if (scriptureLinkedPagesRef.current.has(pageNumber)) {
+          continue;
+        }
+
+        const pageView = viewer.getPageView(pageNumber - 1) as { div?: HTMLElement } | undefined;
+        const pageRoot = pageView?.div;
+        const spans = pageRoot
+          ? Array.from(pageRoot.querySelectorAll<HTMLElement>('.textLayer span'))
+          : [];
+        if (!pageRoot || spans.length === 0) {
+          continue;
+        }
+
         const pageText = spans.map((span) => span.textContent ?? '').join(' ');
-        references = findScriptureReferences(pageText, books);
-      }
+        const references = await loadPageScriptureReferences({
+          pageNumber,
+          books,
+          pagesBaseUrl,
+          pageText,
+        });
 
-      if (cancelled || references.length === 0) {
-        return;
-      }
+        if (cancelled || !pageRoot.isConnected) {
+          return;
+        }
 
-      applyScriptureLinkOverlays(pageRoot, spans, references, (reference) => {
-        void openScriptureReference(reference);
-      });
+        scriptureLinkedPagesRef.current.add(pageNumber);
+        if (references.length === 0) {
+          clearScriptureLinks(pageRoot);
+          continue;
+        }
+
+        applyScriptureLinkOverlays(pageRoot, spans, references, (reference) => {
+          void openScriptureReferenceRef.current(reference);
+        });
+      }
     };
 
-    void applyLinks();
+    void applyLinksToRenderedPages();
     return () => {
       cancelled = true;
     };
   }, [
-    activePage,
     activeSourceUrl,
     currentBible,
     focusNonce,
     isLoading,
-    openScriptureReference,
+    pageCount,
     scale,
     viewerReady,
   ]);

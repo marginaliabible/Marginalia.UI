@@ -4,14 +4,8 @@ import { closeDocumentViewer, setPdfViewerPage } from '../store/slices/uiSlice';
 import { buildMarkupDocumentShellUrl } from '../utils/resourceLibraryConfig';
 import { fetchStorageAware } from '../services/storageAuthenticatedFetch';
 import { useOpenDocumentScriptureReference } from '../hooks/useDocumentScriptureNavigation';
-import { findScriptureReferences } from '../utils/findScriptureReferences';
-import {
-  buildPageVersesJsonUrl,
-  groupPageVerseEntries,
-  parsePageVerseEntries,
-  type DocumentScriptureReference,
-} from '../utils/pageVerseReferences';
-import { applyScriptureLinkOverlays } from '../utils/scriptureLinkOverlays';
+import { loadPageScriptureReferences } from '../utils/loadPageScriptureReferences';
+import { applyScriptureLinkOverlays, clearScriptureLinks } from '../utils/scriptureLinkOverlays';
 import FileSyncExclusionButton from './FileSyncExclusionButton';
 
 const MIN_SCALE = 0.6;
@@ -707,6 +701,38 @@ function pageHasHighlightableText(pageElement: HTMLElement): boolean {
   return false;
 }
 
+function resolveMarkupPageNumber(pageElement: HTMLElement, fallbackIndex: number): number {
+  const idMatch = pageElement.id.match(/^pf(\d+)$/i);
+  if (idMatch) {
+    const fromId = Number.parseInt(idMatch[1] ?? '', 10);
+    if (Number.isInteger(fromId) && fromId > 0) {
+      return fromId;
+    }
+  }
+
+  const dataPageNo = pageElement.getAttribute('data-page-no');
+  if (dataPageNo) {
+    const asDecimal = Number.parseInt(dataPageNo, 10);
+    if (Number.isInteger(asDecimal) && asDecimal > 0 && String(asDecimal) === dataPageNo) {
+      return asDecimal;
+    }
+    const asHex = Number.parseInt(dataPageNo, 16);
+    if (Number.isInteger(asHex) && asHex > 0) {
+      return asHex;
+    }
+  }
+
+  return fallbackIndex + 1;
+}
+
+function listMarkupPageElements(doc: Document): Array<{ pageNumber: number; element: HTMLElement }> {
+  const frames = Array.from(doc.querySelectorAll<HTMLElement>('#page-container .pf'));
+  return frames.map((element, index) => ({
+    pageNumber: resolveMarkupPageNumber(element, index),
+    element,
+  }));
+}
+
 const MarkupDocumentViewer: React.FC = () => {
   const dispatch = useAppDispatch();
   const { pdfViewer } = useAppSelector((state) => state.ui);
@@ -726,7 +752,11 @@ const MarkupDocumentViewer: React.FC = () => {
   const [scale, setScale] = useState(1);
   const [srcDoc, setSrcDoc] = useState<string | null>(null);
   const [highlightEpoch, setHighlightEpoch] = useState(0);
+  const [scriptureLinkEpoch, setScriptureLinkEpoch] = useState(0);
   const highlightAttemptedRef = useRef(false);
+  const scriptureLinkedPagesRef = useRef<Set<number>>(new Set());
+  const openScriptureReferenceRef = useRef(openScriptureReference);
+  openScriptureReferenceRef.current = openScriptureReference;
 
   const activeSourceUrl = pdfViewer.sourceUrl;
   const activePage = Math.max(1, pdfViewer.page);
@@ -922,6 +952,9 @@ const MarkupDocumentViewer: React.FC = () => {
         return;
       }
       if (data.type === 'markup-page-settled' && typeof data.pageIndex === 'number') {
+        // Page DOM may have been freshly materialized; allow re-linking.
+        scriptureLinkedPagesRef.current.delete(data.pageIndex + 1);
+        setScriptureLinkEpoch((value) => value + 1);
         if (data.pageIndex === Math.max(0, activePage - 1)) {
           highlightAttemptedRef.current = false;
           setHighlightEpoch((value) => value + 1);
@@ -1034,6 +1067,12 @@ const MarkupDocumentViewer: React.FC = () => {
   }, [matchRaw, activePage, focusNonce, highlightEpoch, isLoading, srcDoc]);
 
   useEffect(() => {
+    // Scale/document changes invalidate absolute overlay positions.
+    scriptureLinkedPagesRef.current.clear();
+    setScriptureLinkEpoch((value) => value + 1);
+  }, [scale, srcDoc, activeSourceUrl]);
+
+  useEffect(() => {
     if (isLoading || !srcDoc || !currentBible?.books?.length) {
       return;
     }
@@ -1044,64 +1083,62 @@ const MarkupDocumentViewer: React.FC = () => {
     }
 
     let cancelled = false;
-    let attempts = 0;
+    const books = currentBible.books;
+    const pagesBaseUrl = pagesBaseUrlRef.current || null;
 
-    const applyLinks = async () => {
-      if (cancelled) {
-        return;
-      }
-      attempts += 1;
-      const pageElement = doc.querySelector<HTMLElement>(`#pf${activePage}, [data-page-no="${activePage.toString(16)}"], [data-page-no="${activePage}"]`);
-      if (!pageElement || !pageHasHighlightableText(pageElement)) {
-        if (attempts < 50) {
-          window.setTimeout(() => {
-            void applyLinks();
-          }, 120);
-        }
-        return;
-      }
-
-      const books = currentBible.books;
-      let references: DocumentScriptureReference[] = [];
-      const pagesBaseUrl = pagesBaseUrlRef.current;
-      if (pagesBaseUrl) {
-        try {
-          const versesUrl = buildPageVersesJsonUrl(pagesBaseUrl, activePage);
-          const response = await fetchStorageAware(versesUrl);
-          if (response.ok) {
-            const payload = await response.json();
-            references = groupPageVerseEntries(parsePageVerseEntries(payload), books);
-          }
-        } catch {
-          // Fall back to client-side detection from visible page text.
-        }
-      }
-
+    const applyLinksToReadyPages = async () => {
       if (cancelled) {
         return;
       }
 
-      if (references.length === 0) {
-        const textNodes = Array.from(pageElement.querySelectorAll<HTMLElement>('.t'));
+      const pages = listMarkupPageElements(doc);
+      for (const { pageNumber, element } of pages) {
+        if (cancelled) {
+          return;
+        }
+        if (scriptureLinkedPagesRef.current.has(pageNumber)) {
+          continue;
+        }
+        if (!pageHasHighlightableText(element)) {
+          continue;
+        }
+
+        const textNodes = Array.from(element.querySelectorAll<HTMLElement>('.t'));
         const pageText = textNodes.map((node) => node.textContent ?? '').join(' ');
-        references = findScriptureReferences(pageText, books);
-      }
+        const references = await loadPageScriptureReferences({
+          pageNumber,
+          books,
+          pagesBaseUrl,
+          pageText,
+        });
 
-      if (cancelled || references.length === 0) {
-        return;
-      }
+        if (cancelled) {
+          return;
+        }
 
-      const textNodes = Array.from(pageElement.querySelectorAll<HTMLElement>('.t'));
-      applyScriptureLinkOverlays(pageElement, textNodes, references, (reference) => {
-        void openScriptureReference(reference);
-      });
+        // Mark linked even when empty so we don't keep refetching empty pages.
+        scriptureLinkedPagesRef.current.add(pageNumber);
+        if (references.length === 0) {
+          clearScriptureLinks(element);
+          continue;
+        }
+
+        applyScriptureLinkOverlays(element, textNodes, references, (reference) => {
+          void openScriptureReferenceRef.current(reference);
+        });
+      }
     };
 
-    void applyLinks();
+    void applyLinksToReadyPages();
+    const retryTimer = window.setTimeout(() => {
+      void applyLinksToReadyPages();
+    }, 250);
+
     return () => {
       cancelled = true;
+      window.clearTimeout(retryTimer);
     };
-  }, [activePage, focusNonce, highlightEpoch, isLoading, srcDoc, currentBible, openScriptureReference, scale]);
+  }, [isLoading, srcDoc, currentBible, scriptureLinkEpoch]);
 
   if (!pdfViewer.isOpen || pdfViewer.kind !== 'markup') {
     return null;
