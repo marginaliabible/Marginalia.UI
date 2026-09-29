@@ -1,16 +1,17 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useAppDispatch, useAppSelector } from '../store/hooks';
-import { closeDocumentViewer, setPdfViewerPage } from '../store/slices/uiSlice';
+import { closeDocumentViewer } from '../store/slices/uiSlice';
 import { buildMarkupDocumentShellUrl } from '../utils/resourceLibraryConfig';
 import { fetchStorageAware } from '../services/storageAuthenticatedFetch';
 import { useOpenDocumentScriptureReference } from '../hooks/useDocumentScriptureNavigation';
+import { useViewerZoomInputs } from '../hooks/useViewerZoomInputs';
 import { loadPageScriptureReferences } from '../utils/loadPageScriptureReferences';
 import { applyScriptureLinkOverlays, clearScriptureLinks } from '../utils/scriptureLinkOverlays';
+import { buildTextLayerHaystack, getMatchClientRects, placeOverlayOnPage } from '../utils/documentTextMatch';
+import { clampScale, FIT_WIDTH_GUTTER_PX, stepScale } from '../utils/viewerZoom';
 import FileSyncExclusionButton from './FileSyncExclusionButton';
+import ViewerZoomControls from './ViewerZoomControls';
 
-const MIN_SCALE = 0.6;
-const MAX_SCALE = 2.4;
-const SCALE_STEP = 0.2;
 /** Pages to keep materialized around the active page (matches pdf2htmlEX preload_pages ≈ 3). */
 const PAGE_WINDOW_RADIUS = 2;
 
@@ -36,11 +37,29 @@ interface Pdf2HtmlExViewer {
   scroll_to: (pageIndex: number, position?: [number | null, number | null] | null) => void;
   navigate_to_dest?: (detail: string) => void;
   rescale?: (scale: number) => void;
+  scale?: number;
+  cur_page_idx?: number;
   pages?: Array<{ loaded?: boolean; page?: HTMLElement | null }>;
 }
 
-function clampScale(value: number): number {
-  return Math.min(MAX_SCALE, Math.max(MIN_SCALE, Number(value.toFixed(2))));
+/** Scale at which the current page fills the iframe's page container width, or null if not measurable yet. */
+function computeMarkupFitWidthScale(frame: HTMLIFrameElement | null): number | null {
+  const viewer = frame?.contentWindow?.pdf2htmlEX?.defaultViewer;
+  const container = frame?.contentDocument?.getElementById('page-container');
+  if (!viewer || !container) {
+    return null;
+  }
+  const pages = viewer.pages ?? [];
+  const page = pages[viewer.cur_page_idx ?? 0]?.page ?? pages[0]?.page;
+  const currentScale = viewer.scale || 1;
+  if (!page || page.offsetWidth === 0) {
+    return null;
+  }
+  const available = container.clientWidth - FIT_WIDTH_GUTTER_PX;
+  if (available <= 0) {
+    return null;
+  }
+  return available / (page.offsetWidth / currentScale);
 }
 
 function normalizeMatchText(value: string | null | undefined): string {
@@ -355,7 +374,7 @@ function buildViewerSrcDoc(options: {
     position: absolute;
     pointer-events: none;
     border-radius: 0.15rem;
-    background: color-mix(in srgb, #ff9a3b 62%, transparent);
+    background: color-mix(in srgb, #ff9a3b 45%, transparent);
     z-index: 5;
   }
   .document-scripture-link {
@@ -675,17 +694,7 @@ function attemptHighlightMatchInPage(pageElement: HTMLElement, rawMatchText: str
     return { status: 'not-ready' };
   }
 
-  let haystack = '';
-  const ranges: Array<{ node: HTMLElement; start: number; end: number }> = [];
-  for (const node of textNodes) {
-    const text = normalizeMatchText(node.textContent ?? '');
-    if (!text) {
-      continue;
-    }
-    const start = haystack.length;
-    haystack += `${text} `;
-    ranges.push({ node, start, end: haystack.length });
-  }
+  const { haystack, ranges } = buildTextLayerHaystack(textNodes, normalizeMatchText);
 
   if (!haystack) {
     return { status: 'not-ready' };
@@ -707,23 +716,16 @@ function attemptHighlightMatchInPage(pageElement: HTMLElement, rawMatchText: str
       continue;
     }
 
-    const rect = range.node.getBoundingClientRect();
-    const pageRect = pageElement.getBoundingClientRect();
-    if (rect.width < 0.5 || rect.height < 0.5 || pageRect.width < 0.5 || pageRect.height < 0.5) {
-      pageElement.querySelectorAll('.markup-raw-highlight').forEach((node) => node.remove());
-      return { status: 'not-ready' };
-    }
-
-    const highlight = pageElement.ownerDocument.createElement('div');
-    highlight.className = 'markup-raw-highlight';
-    highlight.style.left = `${rect.left - pageRect.left}px`;
-    highlight.style.top = `${rect.top - pageRect.top}px`;
-    highlight.style.width = `${Math.max(rect.width, 2)}px`;
-    highlight.style.height = `${Math.max(rect.height, 2)}px`;
-    pageElement.style.position = pageElement.style.position || 'relative';
-    pageElement.appendChild(highlight);
-    if (!firstHighlight) {
-      firstHighlight = highlight;
+    for (const rect of getMatchClientRects(range, matchStart, matchEnd)) {
+      const highlight = pageElement.ownerDocument.createElement('div');
+      highlight.className = 'markup-raw-highlight';
+      if (rect.width < 0.5 || rect.height < 0.5 || !placeOverlayOnPage(highlight, pageElement, rect)) {
+        pageElement.querySelectorAll('.markup-raw-highlight').forEach((node) => node.remove());
+        return { status: 'not-ready' };
+      }
+      if (!firstHighlight) {
+        firstHighlight = highlight;
+      }
     }
   }
 
@@ -789,6 +791,7 @@ const MarkupDocumentViewer: React.FC = () => {
   const currentBible = useAppSelector((state) => state.bible.currentBible);
   const openScriptureReference = useOpenDocumentScriptureReference();
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
+  const stageRef = useRef<HTMLDivElement | null>(null);
   const pageBlobUrlsRef = useRef<string[]>([]);
   const pageUrlsRef = useRef<string[]>([]);
   const pageBlobsRef = useRef<Map<string, string>>(new Map());
@@ -800,6 +803,7 @@ const MarkupDocumentViewer: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [pageCount, setPageCount] = useState(0);
   const [scale, setScale] = useState(1);
+  const [fitWidth, setFitWidth] = useState(true);
   const [srcDoc, setSrcDoc] = useState<string | null>(null);
   const [highlightEpoch, setHighlightEpoch] = useState(0);
   const [scriptureLinkEpoch, setScriptureLinkEpoch] = useState(0);
@@ -820,13 +824,14 @@ const MarkupDocumentViewer: React.FC = () => {
     return 'Document Viewer';
   }, [pdfViewer.title]);
 
-  const goToPage = (pageNumber: number) => {
-    const next = Math.max(1, pageCount > 0 ? Math.min(pageCount, pageNumber) : pageNumber);
-    dispatch(setPdfViewerPage(next));
+  const adjustScale = (direction: -1 | 1) => {
+    setFitWidth(false);
+    setScale((current) => stepScale(current, direction));
   };
 
-  const adjustScale = (direction: -1 | 1) => {
-    setScale((current) => clampScale(current + direction * SCALE_STEP));
+  const zoomTo = (next: number) => {
+    setFitWidth(false);
+    setScale(clampScale(next));
   };
 
   const applyPageBlobsToIframe = (pageBlobs: Map<string, string>) => {
@@ -1076,6 +1081,34 @@ const MarkupDocumentViewer: React.FC = () => {
   }, [scale, srcDoc, isLoading]);
 
   useEffect(() => {
+    if (!fitWidth || isLoading || !srcDoc) {
+      return;
+    }
+
+    let retryTimer: number | undefined;
+    let attempts = 0;
+    const applyFit = () => {
+      window.clearTimeout(retryTimer);
+      const next = computeMarkupFitWidthScale(iframeRef.current);
+      if (next !== null) {
+        setScale(next);
+      } else if (attempts < 20) {
+        attempts += 1;
+        retryTimer = window.setTimeout(applyFit, 100);
+      }
+    };
+
+    applyFit();
+    const stage = stageRef.current;
+    const observer = stage && typeof ResizeObserver !== 'undefined' ? new ResizeObserver(applyFit) : null;
+    observer?.observe(stage!);
+    return () => {
+      window.clearTimeout(retryTimer);
+      observer?.disconnect();
+    };
+  }, [fitWidth, isLoading, srcDoc]);
+
+  useEffect(() => {
     if (!matchRaw || isLoading || highlightAttemptedRef.current) {
       return;
     }
@@ -1122,10 +1155,10 @@ const MarkupDocumentViewer: React.FC = () => {
   }, [matchRaw, activePage, focusNonce, highlightEpoch, isLoading, srcDoc]);
 
   useEffect(() => {
-    // Scale/document changes invalidate absolute overlay positions.
+    // Overlays are page-relative, so only a document change invalidates them.
     scriptureLinkedPagesRef.current.clear();
     setScriptureLinkEpoch((value) => value + 1);
-  }, [scale, srcDoc, activeSourceUrl]);
+  }, [srcDoc, activeSourceUrl]);
 
   useEffect(() => {
     if (isLoading || !srcDoc || !currentBible?.books?.length) {
@@ -1195,12 +1228,20 @@ const MarkupDocumentViewer: React.FC = () => {
     };
   }, [isLoading, srcDoc, currentBible, scriptureLinkEpoch]);
 
+  useViewerZoomInputs({
+    enabled: pdfViewer.isOpen && pdfViewer.kind === 'markup',
+    stageRef,
+    frameRef: iframeRef,
+    frameKey: srcDoc && !error ? srcDoc : null,
+    scale,
+    onZoomStep: adjustScale,
+    onZoomReset: () => setFitWidth(true),
+    onZoomTo: zoomTo,
+  });
+
   if (!pdfViewer.isOpen || pdfViewer.kind !== 'markup') {
     return null;
   }
-
-  const canGoBack = activePage > 1;
-  const canGoForward = pageCount > 0 && activePage < pageCount;
 
   return (
     <div className="pdf-viewer-shell markup-viewer-shell d-flex flex-column h-100">
@@ -1219,63 +1260,20 @@ const MarkupDocumentViewer: React.FC = () => {
         <div className="ms-auto d-flex align-items-center gap-2">
           <FileSyncExclusionButton syncItem={pdfViewer.syncItem} documentLabel={title} />
 
-          <button
-            type="button"
-            className="btn btn-sm btn-outline-primary"
-            disabled={!canGoBack}
-            onClick={() => goToPage(activePage - 1)}
-          >
-            Prev
-          </button>
-
           <span className="small text-body-secondary">
             Page {pageCount > 0 ? activePage : '-'}{pageCount > 0 ? ` / ${pageCount}` : ''}
           </span>
 
-          <button
-            type="button"
-            className="btn btn-sm btn-outline-primary"
-            disabled={!canGoForward}
-            onClick={() => goToPage(activePage + 1)}
-          >
-            Next
-          </button>
-
-          <div className="btn-group btn-group-sm" role="group" aria-label="Zoom controls">
-            <button
-              type="button"
-              className="btn btn-outline-secondary"
-              onClick={() => adjustScale(-1)}
-              title="zoom out"
-              aria-label="zoom out"
-              disabled={scale <= MIN_SCALE}
-            >
-              <i className="fa-solid fa-magnifying-glass-minus" aria-hidden="true"></i>
-            </button>
-            <button
-              type="button"
-              className="btn btn-outline-secondary"
-              onClick={() => setScale(1)}
-              title="reset zoom"
-              aria-label="reset zoom"
-            >
-              {Math.round(scale * 100)}%
-            </button>
-            <button
-              type="button"
-              className="btn btn-outline-secondary"
-              onClick={() => adjustScale(1)}
-              title="zoom in"
-              aria-label="zoom in"
-              disabled={scale >= MAX_SCALE}
-            >
-              <i className="fa-solid fa-magnifying-glass-plus" aria-hidden="true"></i>
-            </button>
-          </div>
+          <ViewerZoomControls
+            scale={scale}
+            fitWidth={fitWidth}
+            onZoomStep={adjustScale}
+            onFitWidth={() => setFitWidth(true)}
+          />
         </div>
       </div>
 
-      <div className="pdf-viewer-stage markup-viewer-stage flex-grow-1 position-relative">
+      <div ref={stageRef} className="pdf-viewer-stage markup-viewer-stage flex-grow-1 position-relative">
         {error && (
           <div className="alert alert-danger m-3" role="alert">{error}</div>
         )}

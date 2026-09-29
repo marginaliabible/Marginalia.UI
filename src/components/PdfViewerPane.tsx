@@ -12,33 +12,35 @@ import 'pdfjs-dist/web/pdf_viewer.css';
 import { useAppDispatch, useAppSelector } from '../store/hooks';
 import { closePdfViewer, setPdfViewerPage } from '../store/slices/uiSlice';
 import { useOpenDocumentScriptureReference } from '../hooks/useDocumentScriptureNavigation';
+import { useViewerZoomInputs } from '../hooks/useViewerZoomInputs';
 import { loadPageScriptureReferences } from '../utils/loadPageScriptureReferences';
 import { applyScriptureLinkOverlays, clearScriptureLinks } from '../utils/scriptureLinkOverlays';
+import {
+  buildTextLayerHaystack,
+  getMatchClientRects,
+  placeOverlayOnPage,
+  type MatchTextFolding,
+} from '../utils/documentTextMatch';
+import { clampScale, stepScale } from '../utils/viewerZoom';
 import FileSyncExclusionButton from './FileSyncExclusionButton';
+import ViewerZoomControls from './ViewerZoomControls';
 
 GlobalWorkerOptions.workerSrc = workerUrl;
 
-const MIN_SCALE = 0.6;
-const MAX_SCALE = 2.4;
-const SCALE_STEP = 0.2;
 const RANGE_CHUNK_SIZE = 1024 * 1024;
 const OCR_SPACE_PATTERN = /[\s\u00A0\u1680\u180E\u2000-\u200D\u2028\u2029\u202F\u205F\u2060\u3000\uFEFF\u0000-\u001F]+/g;
 
-const clampScale = (value: number): number => Math.min(MAX_SCALE, Math.max(MIN_SCALE, Number(value.toFixed(2))));
+const OCR_SPACE_CHAR = new RegExp(`^${OCR_SPACE_PATTERN.source}$`);
+const OCR_MATCH_FOLDING: MatchTextFolding = {
+  foldChar: (ch) => ch.toLowerCase(),
+  isSpace: (ch) => OCR_SPACE_CHAR.test(ch),
+};
 
 const normalizeMatchText = (value: string | null | undefined): string => {
   if (!value) {
     return '';
   }
   return value.replace(OCR_SPACE_PATTERN, ' ').trim();
-};
-
-const getTouchDistance = (event: React.TouchEvent<HTMLElement>): number => {
-  if (event.touches.length < 2) {
-    return 0;
-  }
-  const [a, b] = [event.touches[0], event.touches[1]];
-  return Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
 };
 
 const sanitizeFileName = (value: string): string => {
@@ -91,17 +93,7 @@ function highlightMatchOnPageView(pageViewRoot: HTMLElement, rawMatchText: strin
     return null;
   }
 
-  let haystack = '';
-  const ranges: Array<{ node: HTMLElement; start: number; end: number }> = [];
-  for (const span of spans) {
-    const text = normalizeMatchText(span.textContent ?? '').toLowerCase();
-    if (!text) {
-      continue;
-    }
-    const start = haystack.length;
-    haystack += `${text} `;
-    ranges.push({ node: span, start, end: haystack.length });
-  }
+  const { haystack, ranges } = buildTextLayerHaystack(spans, (value) => normalizeMatchText(value).toLowerCase());
 
   const matchStart = haystack.indexOf(normalizedNeedle);
   if (matchStart < 0) {
@@ -110,23 +102,21 @@ function highlightMatchOnPageView(pageViewRoot: HTMLElement, rawMatchText: strin
   const matchEnd = matchStart + normalizedNeedle.length;
 
   let firstHighlight: HTMLElement | null = null;
-  const pageRect = pageViewRoot.getBoundingClientRect();
 
   for (const range of ranges) {
     if (range.end <= matchStart || range.start >= matchEnd) {
       continue;
     }
 
-    const rect = range.node.getBoundingClientRect();
-    const highlight = pageViewRoot.ownerDocument.createElement('div');
-    highlight.className = 'pdf-raw-highlight';
-    highlight.style.left = `${rect.left - pageRect.left}px`;
-    highlight.style.top = `${rect.top - pageRect.top}px`;
-    highlight.style.width = `${Math.max(rect.width, 2)}px`;
-    highlight.style.height = `${Math.max(rect.height, 2)}px`;
-    pageViewRoot.appendChild(highlight);
-    if (!firstHighlight) {
-      firstHighlight = highlight;
+    for (const rect of getMatchClientRects(range, matchStart, matchEnd, OCR_MATCH_FOLDING)) {
+      const highlight = pageViewRoot.ownerDocument.createElement('div');
+      highlight.className = 'pdf-raw-highlight';
+      if (!placeOverlayOnPage(highlight, pageViewRoot, rect)) {
+        continue;
+      }
+      if (!firstHighlight) {
+        firstHighlight = highlight;
+      }
     }
   }
 
@@ -144,9 +134,9 @@ const PdfViewerPane: React.FC = () => {
   const linkServiceRef = useRef<PDFLinkService | null>(null);
   const loadingTaskRef = useRef<{ destroy: () => void } | null>(null);
   const documentProxyRef = useRef<PDFDocumentProxy | null>(null);
-  const pinchStartDistanceRef = useRef(0);
-  const pinchStartScaleRef = useRef(1);
+  const stageRef = useRef<HTMLDivElement | null>(null);
   const highlightAttemptedRef = useRef(false);
+  const highlightPageRef = useRef(0);
   const syncingPageFromViewerRef = useRef(false);
   const scriptureLinkedPagesRef = useRef<Set<number>>(new Set());
   const openScriptureReferenceRef = useRef(openScriptureReference);
@@ -160,7 +150,11 @@ const PdfViewerPane: React.FC = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [scale, setScale] = useState(1);
+  const [fitWidth, setFitWidth] = useState(true);
+  const fitWidthRef = useRef(fitWidth);
+  fitWidthRef.current = fitWidth;
   const [viewerReady, setViewerReady] = useState(false);
+  const [highlightEpoch, setHighlightEpoch] = useState(0);
 
   const activeSourceUrl = pdfViewer.sourceUrl;
   const activePage = Math.max(1, pdfViewer.page);
@@ -174,13 +168,14 @@ const PdfViewerPane: React.FC = () => {
     return 'Document Viewer';
   }, [pdfViewer.title]);
 
-  const goToPage = (pageNumber: number) => {
-    const next = Math.max(1, pageCount > 0 ? Math.min(pageCount, pageNumber) : pageNumber);
-    dispatch(setPdfViewerPage(next));
+  const adjustScale = (direction: -1 | 1) => {
+    setFitWidth(false);
+    setScale((current) => stepScale(current, direction));
   };
 
-  const adjustScale = (direction: -1 | 1) => {
-    setScale((current) => clampScale(current + direction * SCALE_STEP));
+  const zoomTo = (next: number) => {
+    setFitWidth(false);
+    setScale(clampScale(next));
   };
 
   // Create viewer once container mounts.
@@ -225,6 +220,31 @@ const PdfViewerPane: React.FC = () => {
       void scanRenderedPagesForLinks();
     };
     eventBus.on('pagechanging', onPageChanging);
+
+    // Keeps the toolbar percentage in sync when pdf.js resolves page-width.
+    const onScaleChanging = (evt: { scale?: number }) => {
+      if (typeof evt.scale === 'number' && Number.isFinite(evt.scale)) {
+        setScale(evt.scale);
+      }
+    };
+    eventBus.on('scalechanging', onScaleChanging);
+
+    // page-width needs page views, which exist only once pages init.
+    const onPagesInit = () => {
+      if (fitWidthRef.current) {
+        pdfViewerInstance.currentScaleValue = 'page-width';
+      }
+    };
+    eventBus.on('pagesinit', onPagesInit);
+
+    const resizeObserver = typeof ResizeObserver === 'undefined'
+      ? null
+      : new ResizeObserver(() => {
+        if (fitWidthRef.current && pdfViewerInstance.pdfDocument) {
+          pdfViewerInstance.currentScaleValue = 'page-width';
+        }
+      });
+    resizeObserver?.observe(container);
 
     const applyLinksForPage = async (pageNumber: number) => {
       const books = currentBibleRef.current?.books;
@@ -285,6 +305,10 @@ const PdfViewerPane: React.FC = () => {
       // Text layers re-render on zoom / virtualization; allow a fresh link pass.
       scriptureLinkedPagesRef.current.delete(evt.pageNumber);
       void applyLinksForPage(evt.pageNumber);
+      // pdf.js reset() strips foreign page children, taking the find highlight with it.
+      if (evt.pageNumber === highlightPageRef.current) {
+        setHighlightEpoch((value) => value + 1);
+      }
     };
     eventBus.on('textlayerrendered', onTextLayerRendered);
 
@@ -297,6 +321,9 @@ const PdfViewerPane: React.FC = () => {
     eventBus.on('pagerendered', onPageRendered);
 
     return () => {
+      resizeObserver?.disconnect();
+      eventBus.off('scalechanging', onScaleChanging);
+      eventBus.off('pagesinit', onPagesInit);
       eventBus.off('pagechanging', onPageChanging);
       eventBus.off('textlayerrendered', onTextLayerRendered);
       eventBus.off('pagerendered', onPageRendered);
@@ -358,7 +385,9 @@ const PdfViewerPane: React.FC = () => {
         setPageCount(pdfDocument.numPages);
         viewer.setDocument(pdfDocument);
         linkService.setDocument(pdfDocument, null);
-        viewer.currentScale = scale;
+        if (!fitWidthRef.current) {
+          viewer.currentScale = scale;
+        }
         viewer.currentPageNumber = activePage;
         setIsLoading(false);
       } catch (loadError) {
@@ -396,10 +425,16 @@ const PdfViewerPane: React.FC = () => {
     if (!viewer || !viewer.pdfDocument) {
       return;
     }
+    if (fitWidth) {
+      if (viewer.currentScaleValue !== 'page-width') {
+        viewer.currentScaleValue = 'page-width';
+      }
+      return;
+    }
     if (Math.abs(viewer.currentScale - scale) > 0.001) {
       viewer.currentScale = scale;
     }
-  }, [scale, viewerReady, activeSourceUrl]);
+  }, [scale, fitWidth, viewerReady, activeSourceUrl]);
 
   useEffect(() => {
     if (!matchRaw || isLoading || !viewerReady) {
@@ -412,6 +447,13 @@ const PdfViewerPane: React.FC = () => {
       return;
     }
 
+    // Only the first attempt for a navigation targets/scrolls; later runs redraw after pdf.js re-renders.
+    const isInitialAttempt = !highlightAttemptedRef.current;
+    if (isInitialAttempt) {
+      highlightPageRef.current = activePage;
+    }
+    const targetPage = highlightPageRef.current;
+
     let cancelled = false;
     let attempts = 0;
 
@@ -420,7 +462,7 @@ const PdfViewerPane: React.FC = () => {
         return;
       }
       attempts += 1;
-      const pageView = viewer.getPageView(activePage - 1) as { div?: HTMLElement } | undefined;
+      const pageView = viewer.getPageView(targetPage - 1) as { div?: HTMLElement } | undefined;
       const pageRoot = pageView?.div;
       if (!pageRoot || !pageRoot.querySelector('.textLayer span')) {
         if (attempts < 40) {
@@ -431,6 +473,9 @@ const PdfViewerPane: React.FC = () => {
 
       const highlight = highlightMatchOnPageView(pageRoot, matchRaw);
       highlightAttemptedRef.current = true;
+      if (!isInitialAttempt) {
+        return;
+      }
       if (highlight) {
         highlight.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
       } else {
@@ -442,7 +487,7 @@ const PdfViewerPane: React.FC = () => {
     return () => {
       cancelled = true;
     };
-  }, [matchRaw, activePage, isLoading, viewerReady, activeSourceUrl]);
+  }, [matchRaw, activePage, focusNonce, highlightEpoch, isLoading, viewerReady, activeSourceUrl]);
 
   useEffect(() => {
     // Zoom / document changes invalidate absolute overlay positions.
@@ -524,75 +569,18 @@ const PdfViewerPane: React.FC = () => {
     viewerReady,
   ]);
 
-  useEffect(() => {
-    if (!pdfViewer.isOpen || pdfViewer.kind === 'markup') {
-      return;
-    }
-
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.defaultPrevented) {
-        return;
-      }
-      const meta = event.ctrlKey || event.metaKey;
-      if (meta && (event.key === '=' || event.key === '+')) {
-        event.preventDefault();
-        adjustScale(1);
-        return;
-      }
-      if (meta && event.key === '-') {
-        event.preventDefault();
-        adjustScale(-1);
-      }
-    };
-
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, [pdfViewer.isOpen, pdfViewer.kind]);
+  useViewerZoomInputs({
+    enabled: pdfViewer.isOpen && pdfViewer.kind !== 'markup',
+    stageRef,
+    scale,
+    onZoomStep: adjustScale,
+    onZoomReset: () => setFitWidth(true),
+    onZoomTo: zoomTo,
+  });
 
   if (!pdfViewer.isOpen || pdfViewer.kind === 'markup') {
     return null;
   }
-
-  const canGoBack = activePage > 1;
-  const canGoForward = pageCount > 0 && activePage < pageCount;
-
-  const handleTouchStart = (event: React.TouchEvent<HTMLDivElement>) => {
-    if (event.touches.length < 2) {
-      return;
-    }
-    pinchStartDistanceRef.current = getTouchDistance(event);
-    pinchStartScaleRef.current = scale;
-  };
-
-  const handleTouchMove = (event: React.TouchEvent<HTMLDivElement>) => {
-    if (event.touches.length < 2 || pinchStartDistanceRef.current <= 0) {
-      return;
-    }
-    const currentDistance = getTouchDistance(event);
-    if (currentDistance <= 0) {
-      return;
-    }
-    const distanceRatio = currentDistance / pinchStartDistanceRef.current;
-    if (!Number.isFinite(distanceRatio) || Math.abs(distanceRatio - 1) < 0.02) {
-      return;
-    }
-    event.preventDefault();
-    setScale(clampScale(pinchStartScaleRef.current * distanceRatio));
-  };
-
-  const handleTouchEnd = (event: React.TouchEvent<HTMLDivElement>) => {
-    if (event.touches.length < 2) {
-      pinchStartDistanceRef.current = 0;
-    }
-  };
-
-  const handleWheel = (event: React.WheelEvent<HTMLDivElement>) => {
-    if (!(event.ctrlKey || event.metaKey)) {
-      return;
-    }
-    event.preventDefault();
-    adjustScale(event.deltaY < 0 ? 1 : -1);
-  };
 
   return (
     <div className="pdf-viewer-shell d-flex flex-column h-100">
@@ -611,27 +599,9 @@ const PdfViewerPane: React.FC = () => {
         <div className="ms-auto d-flex align-items-center gap-2">
           <FileSyncExclusionButton syncItem={pdfViewer.syncItem} documentLabel={title} />
 
-          <button
-            type="button"
-            className="btn btn-sm btn-outline-primary"
-            disabled={!canGoBack}
-            onClick={() => goToPage(activePage - 1)}
-          >
-            Prev
-          </button>
-
           <span className="small text-body-secondary">
             Page {pageCount > 0 ? activePage : '-'}{pageCount > 0 ? ` / ${pageCount}` : ''}
           </span>
-
-          <button
-            type="button"
-            className="btn btn-sm btn-outline-primary"
-            disabled={!canGoForward}
-            onClick={() => goToPage(activePage + 1)}
-          >
-            Next
-          </button>
 
           <button
             type="button"
@@ -653,37 +623,12 @@ const PdfViewerPane: React.FC = () => {
             <i className="fa-solid fa-download" aria-hidden="true"></i>
           </button>
 
-          <div className="btn-group btn-group-sm" role="group" aria-label="Zoom controls">
-            <button
-              type="button"
-              className="btn btn-outline-secondary"
-              onClick={() => adjustScale(-1)}
-              title="zoom out"
-              aria-label="zoom out"
-              disabled={scale <= MIN_SCALE}
-            >
-              <i className="fa-solid fa-magnifying-glass-minus" aria-hidden="true"></i>
-            </button>
-            <button
-              type="button"
-              className="btn btn-outline-secondary"
-              onClick={() => setScale(1)}
-              title="reset zoom"
-              aria-label="reset zoom"
-            >
-              {Math.round(scale * 100)}%
-            </button>
-            <button
-              type="button"
-              className="btn btn-outline-secondary"
-              onClick={() => adjustScale(1)}
-              title="zoom in"
-              aria-label="zoom in"
-              disabled={scale >= MAX_SCALE}
-            >
-              <i className="fa-solid fa-magnifying-glass-plus" aria-hidden="true"></i>
-            </button>
-          </div>
+          <ViewerZoomControls
+            scale={scale}
+            fitWidth={fitWidth}
+            onZoomStep={adjustScale}
+            onFitWidth={() => setFitWidth(true)}
+          />
         </div>
       </div>
 
@@ -692,13 +637,10 @@ const PdfViewerPane: React.FC = () => {
       )}
 
       <div
+        ref={stageRef}
         className="pdf-viewer-stage pdf-viewer-continuous flex-grow-1"
         tabIndex={0}
         aria-label="PDF viewer"
-        onWheel={handleWheel}
-        onTouchStart={handleTouchStart}
-        onTouchMove={handleTouchMove}
-        onTouchEnd={handleTouchEnd}
       >
         <div ref={containerRef} className="pdf-viewer-container">
           <div className="pdfViewer" />

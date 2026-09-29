@@ -2,6 +2,25 @@
   min-height: 0;
 }
 
+// The mobile main pane is content-sized, so a docked viewer would collapse to the iframe's
+// default height. Take over the screen instead, beneath the side panel drawer (z-index 1040+).
+.workspace-layout.is-mobile .workspace-pane.workspace-main .pdf-viewer-shell {
+  position: fixed;
+  inset: 0;
+  z-index: 1030;
+  padding: 0.75rem 0.75rem calc(0.75rem + env(safe-area-inset-bottom));
+  background: var(--bs-body-bg);
+}
+
+// Keep the toolbar clear of the side panel's edge tab strip.
+.workspace-layout.is-mobile.has-side-panel .workspace-pane.workspace-main .pdf-viewer-shell {
+  padding-right: 2.4rem;
+}
+
+.workspace-layout.is-mobile .workspace-pane.workspace-main .pdf-viewer-stage {
+  overscroll-behavior: contain;
+}
+
 .pdf-viewer-toolbar {
   position: sticky;
   top: 0;
@@ -51,7 +70,7 @@
 .pdf-raw-highlight {
   position: absolute;
   border-radius: 0.15rem;
-  background: color-mix(in srgb, #ff9a3b 62%, transparent);
+  background: color-mix(in srgb, #ff9a3b 45%, transparent);
   pointer-events: none;
   z-index: 4;
 }

@@ -2,10 +2,13 @@ import {
   SCRIPTURE_LINK_CLASS,
   buildTextLayerHaystack,
   findNeedleInHaystack,
+  getMatchClientRects,
   normalizeDocumentMatchText,
-  type TextNodeRange,
+  placeOverlayOnPage,
+  type TextMatchHit,
 } from './documentTextMatch';
-import type { DocumentScriptureReference } from './pageVerseReferences';
+import { toVerseContext, type DocumentScriptureReference } from './pageVerseReferences';
+import { formatVerseReference } from './selectedVerseContext';
 
 export type ScriptureLinkClickHandler = (reference: DocumentScriptureReference) => void;
 
@@ -44,16 +47,16 @@ function decodeReference(value: string | null): DocumentScriptureReference | nul
 
 function appendLinkOverlays(
   pageElement: HTMLElement,
-  hitRanges: TextNodeRange[],
+  hit: TextMatchHit,
   reference: DocumentScriptureReference,
   onClick: ScriptureLinkClickHandler
 ): void {
-  const pageRect = pageElement.getBoundingClientRect();
   const encoded = encodeReference(reference);
+  const label = formatVerseReference(toVerseContext(reference));
+  const rects = hit.ranges.flatMap((range) => getMatchClientRects(range, hit.start, hit.end));
 
-  for (const range of hitRanges) {
-    const rect = range.node.getBoundingClientRect();
-    if (rect.width < 0.5 || rect.height < 0.5 || pageRect.width < 0.5 || pageRect.height < 0.5) {
+  for (const rect of rects) {
+    if (rect.width < 0.5 || rect.height < 0.5) {
       continue;
     }
 
@@ -61,20 +64,15 @@ function appendLinkOverlays(
     link.type = 'button';
     link.className = SCRIPTURE_LINK_CLASS;
     link.dataset['scriptureRef'] = encoded;
-    link.setAttribute('aria-label', `Open ${reference.raw} in Translations`);
-    link.title = reference.raw;
-    link.style.left = `${rect.left - pageRect.left}px`;
-    link.style.top = `${rect.top - pageRect.top}px`;
-    link.style.width = `${Math.max(rect.width, 2)}px`;
-    link.style.height = `${Math.max(rect.height, 2)}px`;
+    link.setAttribute('aria-label', `Open ${label} in Translations`);
+    link.title = label;
     link.addEventListener('click', (event) => {
       event.preventDefault();
       event.stopPropagation();
       const decoded = decodeReference(link.dataset['scriptureRef'] ?? null) ?? reference;
       onClick(decoded);
     });
-    pageElement.style.position = pageElement.style.position || 'relative';
-    pageElement.appendChild(link);
+    placeOverlayOnPage(link, pageElement, rect);
   }
 }
 
@@ -117,7 +115,7 @@ export function applyScriptureLinkOverlays(
 
       const overlaps = claimed.some((span) => hit.start < span.end && hit.end > span.start);
       if (!overlaps) {
-        appendLinkOverlays(pageElement, hit.ranges, reference, onClick);
+        appendLinkOverlays(pageElement, hit, reference, onClick);
         claimed.push({ start: hit.start, end: hit.end });
         applied += 1;
       }
