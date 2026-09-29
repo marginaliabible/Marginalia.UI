@@ -638,7 +638,9 @@ function App() {
     }
   }, [safeTranslationRecords, dispatch, safeSelectedTranslationIds]);
 
-  const useWideLayout = starredTranslationIds.length + (activeTabId ? 1 : 0) > 3;
+  const isDocumentViewerInMainPane = Boolean(pdfViewer?.isOpen) && !isPanelDetached;
+  const useWideLayout = isDocumentViewerInMainPane
+    || starredTranslationIds.length + (activeTabId ? 1 : 0) > 3;
   const hasSidePanel = !isPanelDetached && Boolean(activeWorkspacePanel);
 
   const goToReference = async (target: QuickJumpTarget, translationId?: string) => {
