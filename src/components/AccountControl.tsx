@@ -46,7 +46,8 @@ import {
   setStorageSessionUserId,
 } from '../services/storageAuthenticatedFetch';
 import type { FederatedProvider, LinkedCloudAccount, MarginaliaState } from '../models/bible';
-import CloudFolderPicker, { type FolderSelectionTarget } from './CloudFolderPicker';
+import CloudFolderPicker, { type CloudFolderPickerHandle, type FolderSelectionTarget } from './CloudFolderPicker';
+import ProviderConnectModal, { type ProviderConnectMode, type ProviderSyncDraft } from './ProviderConnectModal';
 import './AccountControl.scss';
 
 type SyncState = 'idle' | 'syncing' | 'error';
@@ -61,11 +62,6 @@ const PROVIDER_SYNC_PREFERENCES_STORAGE_KEY = 'marginalia:provider-sync-preferen
 const PROVIDER_LABEL: Record<FederatedProvider, string> = {
   google: 'Google',
   microsoft: 'Microsoft',
-};
-
-const PROVIDER_ICON: Record<FederatedProvider, string> = {
-  google: 'fa-google',
-  microsoft: 'fa-microsoft',
 };
 
 interface ProviderSyncPreferences {
@@ -357,9 +353,8 @@ const AccountControl: React.FC = () => {
   const [linkedAccounts, setLinkedAccounts] = useState<LinkedCloudAccount[]>([]);
   const [sessions, setSessions] = useState(getStoredFederatedSessions());
   const [missingProviderPrompts, setMissingProviderPrompts] = useState<FederatedProvider[]>([]);
-  const [expandedProvider, setExpandedProvider] = useState<FederatedProvider | null>(null);
+  const [connectModalProvider, setConnectModalProvider] = useState<FederatedProvider | null>(null);
   const [fileSyncFocusRequest, setFileSyncFocusRequest] = useState<{ provider: FederatedProvider; requestId: number } | null>(null);
-  const [highlightedSyncFilesProvider, setHighlightedSyncFilesProvider] = useState<FederatedProvider | null>(null);
   const [hasUnsavedFileSyncChanges, setHasUnsavedFileSyncChanges] = useState(false);
   const [forceSyncRequestId, setForceSyncRequestId] = useState(0);
   const [providerSyncPreferences, setProviderSyncPreferences] = useState<ProviderSyncPreferenceMap>(() => {
@@ -368,7 +363,7 @@ const AccountControl: React.FC = () => {
     return mergeProviderPreferences(defaults, stored);
   });
   const fileSyncFocusCounterRef = useRef(0);
-  const syncFilesHighlightTimeoutRef = useRef<number | null>(null);
+  const folderPickerRef = useRef<CloudFolderPickerHandle>(null);
   const linkedAccountsRef = useRef<LinkedCloudAccount[]>([]);
   const isMountedRef = useRef(false);
   const hasBootstrappedAuthRef = useRef(false);
@@ -1040,7 +1035,7 @@ const AccountControl: React.FC = () => {
     void syncNow();
   }, [forceSyncRequestId, syncNow]);
 
-  const handleConnect = useCallback(async (provider: FederatedProvider, preferences: ProviderSyncPreferences) => {
+  const handleConnect = useCallback(async (provider: FederatedProvider, preferences: ProviderSyncDraft) => {
     setStatusMessage(null);
     try {
       await beginFederatedAuthorization(provider, {
@@ -1054,22 +1049,9 @@ const AccountControl: React.FC = () => {
   }, []);
 
   const focusFileSyncService = useCallback((provider: FederatedProvider) => {
-    setExpandedProvider(provider);
     fileSyncFocusCounterRef.current += 1;
     const requestId = fileSyncFocusCounterRef.current;
     setFileSyncFocusRequest({ provider, requestId });
-
-    setHighlightedSyncFilesProvider(null);
-    if (syncFilesHighlightTimeoutRef.current !== null) {
-      window.clearTimeout(syncFilesHighlightTimeoutRef.current);
-    }
-
-    syncFilesHighlightTimeoutRef.current = window.setTimeout(() => {
-      setHighlightedSyncFilesProvider(provider);
-      syncFilesHighlightTimeoutRef.current = window.setTimeout(() => {
-        setHighlightedSyncFilesProvider((current) => current === provider ? null : current);
-      }, 3000);
-    }, 0);
   }, []);
 
   const handleDetachProvider = useCallback((provider: FederatedProvider) => {
@@ -1105,51 +1087,6 @@ const AccountControl: React.FC = () => {
 
     setStatusMessage(`${PROVIDER_LABEL[provider]} account detached. Configuration now syncs only to remaining linked providers.`);
   }, [configUpdatedAt, lastSyncedAt, linkedAccounts, persistCloudState]);
-
-  const handleSyncPreferenceToggle = useCallback((provider: FederatedProvider, field: 'syncSettings' | 'syncFiles') => {
-    setProviderSyncPreferences((current) => {
-      const nextValue = !current[provider][field];
-      // Sync Files requires Sync Settings (marginalia-config.json is the selection SoT).
-      if (field === 'syncFiles' && nextValue) {
-        return {
-          ...current,
-          [provider]: {
-            ...current[provider],
-            syncFiles: true,
-            syncSettings: true,
-          },
-        };
-      }
-      if (field === 'syncSettings' && !nextValue) {
-        return {
-          ...current,
-          [provider]: {
-            ...current[provider],
-            syncSettings: false,
-            syncFiles: false,
-          },
-        };
-      }
-      return {
-        ...current,
-        [provider]: {
-          ...current[provider],
-          [field]: nextValue,
-        },
-      };
-    });
-  }, []);
-
-  const handleModifyFilesAccess = useCallback((provider: FederatedProvider) => {
-    const session = providerSessionByType[provider];
-    if (!session) {
-      setStatusMessage(`Reconnect ${PROVIDER_LABEL[provider]} on this device before modifying file access.`);
-      return;
-    }
-
-    setStatusMessage(null);
-    focusFileSyncService(provider);
-  }, [focusFileSyncService, providerSessionByType]);
 
   const handleApplyFolderSelections = useCallback((nextSelections: Record<FederatedProvider, FolderSelectionTarget[]>) => {
     const previousSelections = providerSyncPreferences;
@@ -1281,59 +1218,57 @@ const AccountControl: React.FC = () => {
     });
   }), [handleApplyFolderSelections, providerSyncPreferences]);
 
-  const handleProviderAction = useCallback((provider: FederatedProvider) => {
-    const connected = isProviderConnected(provider);
-    const providerSession = providerSessionByType[provider];
-    const selected = providerSyncPreferences[provider];                                                                                                                                                                     
-
-    if (!connected) {
-      if (!selected.syncSettings && !selected.syncFiles) {
-        return;
-      }
-
-      void handleConnect(provider, selected);
-      return;
+  const getConnectMode = useCallback((provider: FederatedProvider): ProviderConnectMode => {
+    if (!isProviderConnected(provider)) {
+      return 'connect';
     }
 
-    if (!providerSession) {
-      void handleConnect(provider, selected);
-      return;
+    if (!providerSessionByType[provider]) {
+      return 'reconnect';
     }
 
-    if (selected.syncFiles) {
-      const confirmed = window.confirm(DISCONNECT_FILE_SYNC_CONFIRMATION);
-      if (!confirmed) {
-        return;
-      }
-    }
-
-    handleDetachProvider(provider);
-  }, [handleConnect, handleDetachProvider, isProviderConnected, providerSessionByType, providerSyncPreferences]);
+    return providerSyncPreferences[provider].syncFiles ? 'disconnect' : 'upgrade';
+  }, [isProviderConnected, providerSessionByType, providerSyncPreferences]);
 
   const handleConnectRequestedFromPicker = useCallback((provider: FederatedProvider) => {
     focusFileSyncService(provider);
+    setConnectModalProvider(provider);
+  }, [focusFileSyncService]);
 
-    const session = providerSessionByType[provider];
-    if (!session) {
-      void handleProviderAction(provider);
+  const handleModalConnect = useCallback((provider: FederatedProvider, draft: ProviderSyncDraft) => {
+    const nextPreferences: ProviderSyncPreferenceMap = {
+      ...providerSyncPreferences,
+      [provider]: {
+        ...providerSyncPreferences[provider],
+        syncSettings: draft.syncSettings,
+        syncFiles: draft.syncFiles,
+      },
+    };
+    // OAuth may redirect before the persistence effect runs.
+    writeStoredProviderSyncPreferences(nextPreferences);
+    setProviderSyncPreferences(nextPreferences);
+    setConnectModalProvider(null);
+    void handleConnect(provider, draft);
+  }, [handleConnect, providerSyncPreferences]);
+
+  const handleModalReconnect = useCallback((provider: FederatedProvider) => {
+    setConnectModalProvider(null);
+    void handleConnect(provider, providerSyncPreferences[provider]);
+  }, [handleConnect, providerSyncPreferences]);
+
+  const handleModalDisconnect = useCallback((provider: FederatedProvider) => {
+    if (providerSyncPreferences[provider].syncFiles && !window.confirm(DISCONNECT_FILE_SYNC_CONFIRMATION)) {
       return;
     }
 
-    setProviderSyncPreferences((current) => {
-      if (current[provider].syncFiles) {
-        return current;
-      }
+    setConnectModalProvider(null);
+    handleDetachProvider(provider);
+  }, [handleDetachProvider, providerSyncPreferences]);
 
-      return {
-        ...current,
-        [provider]: {
-          ...current[provider],
-          syncFiles: true,
-          syncSettings: true,
-        },
-      };
-    });
-  }, [focusFileSyncService, handleProviderAction, providerSessionByType]);
+  const linkedProviders = useMemo<Record<FederatedProvider, boolean>>(() => ({
+    google: isProviderConnected('google'),
+    microsoft: isProviderConnected('microsoft'),
+  }), [isProviderConnected]);
 
   const closeModal = () => {
     if (hasUnsavedFileSyncChanges && !window.confirm(UNSAVED_FILE_SYNC_CONFIRMATION)) {
@@ -1341,8 +1276,20 @@ const AccountControl: React.FC = () => {
     }
 
     setHasUnsavedFileSyncChanges(false);
+    setConnectModalProvider(null);
     setIsModalOpen(false);
   };
+
+  const connectModalMode = connectModalProvider ? getConnectMode(connectModalProvider) : null;
+  const connectModalAccount = connectModalProvider ? providerAccountByType[connectModalProvider] : null;
+  const connectModalInitialDraft: ProviderSyncDraft | null = connectModalProvider && connectModalMode
+    ? (connectModalMode === 'connect' || connectModalMode === 'upgrade'
+      ? { syncSettings: true, syncFiles: true }
+      : {
+        syncSettings: providerSyncPreferences[connectModalProvider].syncSettings,
+        syncFiles: providerSyncPreferences[connectModalProvider].syncFiles,
+      })
+    : null;
 
   return (
     <div className="account-control">
@@ -1391,7 +1338,7 @@ const AccountControl: React.FC = () => {
 
                   {linkedAccounts.length === 0 && (
                     <div className="alert alert-secondary mb-0" role="alert">
-                      No linked accounts yet. Connect Google or Microsoft to enable cloud sync.
+                      Connect to show your own notes within Marginalia! When you connect a cloud provider below, any notes you have withBring your personal notes into Marginalia by connecting a cloud provider below! We'll scan your notes for Scripture references and link them to the corresponding Bible passages. As you read, any notes you've made on a verse will be viewable right within Marginalia. Ask your church if they have a library with Marginalia. If so, you can subscribe from here to access their resources alongside your own notes.
                     </div>
                   )}
 
@@ -1399,131 +1346,10 @@ const AccountControl: React.FC = () => {
                     <div className="alert alert-warning mb-0" role="alert">
                       <div className="fw-semibold mb-1">Reconnect required</div>
                       <div className="small">
-                        Reconnect {missingProviderPrompts.map((provider) => PROVIDER_LABEL[provider]).join(' and ')} on this device to continue background cloud sync.
+                        Reconnect {missingProviderPrompts.map((provider) => PROVIDER_LABEL[provider]).join(' and ')} on this device from its Manage link below to continue background cloud sync.
                       </div>
                     </div>
                   )}
-
-                  <section className="account-provider-stack">
-                    {PROVIDERS.map((provider) => {
-                      const connected = isProviderConnected(provider);
-                      const providerSession = providerSessionByType[provider];
-                      const providerAccount = providerAccountByType[provider];
-                      const providerPreferences = providerSyncPreferences[provider];
-                      const canConnect = providerPreferences.syncSettings || providerPreferences.syncFiles;
-                      const isExpanded = expandedProvider === provider;
-
-                      let actionLabel = 'Connect';
-                      if (connected) {
-                        actionLabel = providerSession ? 'Disconnect' : 'Reconnect';
-                      }
-
-                      const headerPrefix = connected ? 'Connected to' : 'Connect to';
-
-                      return (
-                        <article
-                          key={provider}
-                          className="account-provider-accordion"
-                          aria-label={`${PROVIDER_LABEL[provider]} sync options`}
-                        >
-                          <button
-                            type="button"
-                            className="account-provider-accordion-toggle"
-                            aria-expanded={isExpanded}
-                            aria-controls={`provider-panel-${provider}`}
-                            onClick={() => {
-                              setExpandedProvider((current) => current === provider ? null : provider);
-                            }}
-                          >
-                            <span className="account-provider-accordion-toggle-label">
-                              <i className={`fa-brands ${PROVIDER_ICON[provider]}`} aria-hidden="true"></i>
-                              {headerPrefix} {PROVIDER_LABEL[provider]}
-                              {connected && providerAccount && (
-                                <span className="account-provider-header-subtitle text-truncate">
-                                  {providerAccount.email || providerAccount.displayName || providerAccount.providerAccountId}
-                                </span>
-                              )}
-
-                              {connected && (
-                                <i className="fa-regular fa-circle-check account-provider-connected-icon" aria-hidden="true"></i>
-                              )}
-                            </span>
-                            <i
-                              className={`fa-solid ${isExpanded ? 'fa-chevron-up' : 'fa-chevron-down'} account-provider-accordion-chevron`}
-                              aria-hidden="true"
-                            ></i>
-                          </button>
-
-                          {isExpanded && (
-                            <div id={`provider-panel-${provider}`} className="account-provider-accordion-panel">
-                              <label className="account-provider-option" htmlFor={`${provider}-sync-settings`}>
-                                <input
-                                  id={`${provider}-sync-settings`}
-                                  type="checkbox"
-                                  checked={providerPreferences.syncSettings}
-                                  disabled={connected}
-                                  title={connected ? 'Reconnect to modify' : undefined}
-                                  onChange={() => handleSyncPreferenceToggle(provider, 'syncSettings')}
-                                />
-                                <span className="account-provider-option-content">
-                                  <span className="account-provider-option-title">Sync my settings</span>
-                                  <span className="account-provider-option-description">
-                                    Stores your Marginalia settings in {provider === 'google' ? 'Google Drive' : 'OneDrive'}. We'll only access a tiny file in your {provider === 'google' ? 'Drive' : 'OneDrive'}.
-                                  </span>
-                                </span>
-                              </label>
-
-                              <div className="account-provider-option account-provider-option-files">
-                                <input
-                                  id={`${provider}-sync-files`}
-                                  type="checkbox"
-                                  checked={providerPreferences.syncFiles}
-                                  disabled={connected}
-                                  title={connected ? 'Reconnect to modify' : undefined}
-                                  onChange={() => handleSyncPreferenceToggle(provider, 'syncFiles')}
-                                />
-                                <label className={`account-provider-option-content${highlightedSyncFilesProvider === provider ? ' is-highlighted' : ''}`} htmlFor={`${provider}-sync-files`}>
-                                  <span className="account-provider-option-title">
-                                    Sync my files
-                                    {connected && providerSession && providerPreferences.syncFiles && (
-                                      <button
-                                        type="button"
-                                        className="btn btn-link btn-sm account-provider-modify-link"
-                                        onClick={(event) => {
-                                          event.preventDefault();
-                                          event.stopPropagation();
-                                          handleModifyFilesAccess(provider);
-                                        }}
-                                      >
-                                        Modify
-                                      </button>
-                                    )}
-                                  </span>
-                                  <span className="account-provider-option-description">
-                                    Access your own Bible notes accessible directly in Marginalia, indexed by verse! 
-                                    You pick which files & folders we have access to in your {provider === 'google' ? 'Google Drive' : 'OneDrive'}. We'll only read those files.
-                                  </span>
-                                </label>
-                              </div>
-
-                              <div className="d-flex flex-column flex-md-row justify-content-md-center">
-                                <button
-                                  type="button"
-                                  className={`btn px-5 ${actionLabel === 'Disconnect' ? 'btn-danger' : 'btn-primary'} account-provider-connect-btn`}
-                                  disabled={!connected && !canConnect}
-                                  onClick={() => {
-                                    handleProviderAction(provider);
-                                  }}
-                                >
-                                  {actionLabel}
-                                </button>
-                              </div>
-                            </div>
-                          )}
-                        </article>
-                      );
-                    })}
-                  </section>
 
                   <CloudFolderPicker
                     sessions={providerSessionByType}
@@ -1535,35 +1361,75 @@ const AccountControl: React.FC = () => {
                       google: providerSyncPreferences.google.syncFiles,
                       microsoft: providerSyncPreferences.microsoft.syncFiles,
                     }}
+                    linkedProviders={linkedProviders}
                     focusRequest={fileSyncFocusRequest}
                     onSelectionsChange={handleApplyFolderSelections}
                     onConnectRequested={handleConnectRequestedFromPicker}
                     onDirtyChange={setHasUnsavedFileSyncChanges}
+                    ref={folderPickerRef}
                   />
+                </div>
 
+                <div className="modal-footer account-modal-footer">
+                  <div className="account-modal-footer-status">
+                    {(lastSyncedAt || syncState === 'syncing') && (
+                      <p className="small text-body-secondary mb-0 d-flex align-items-center gap-2">
+                        <i
+                          className="fa-solid fa-circle-notch fa-spin account-sync-spinner"
+                          style={{ visibility: syncState === 'syncing' ? 'visible' : 'hidden' }}
+                          aria-hidden="true"
+                        ></i>
+                        <span>
+                          {lastSyncedAt
+                            ? `Last synced ${new Date(lastSyncedAt).toLocaleString()}.`
+                            : 'Syncing configuration...'}
+                        </span>
+                      </p>
+                    )}
 
-                  {(lastSyncedAt || syncState === 'syncing') && (
-                    <p className="small text-body-secondary mb-0 d-flex align-items-center gap-2">
-                      <i
-                        className="fa-solid fa-circle-notch fa-spin account-sync-spinner"
-                        style={{ visibility: syncState === 'syncing' ? 'visible' : 'hidden' }}
-                        aria-hidden="true"
-                      ></i>
-                      <span>
-                        {lastSyncedAt
-                          ? `Last synced ${new Date(lastSyncedAt).toLocaleString()}.`
-                          : 'Syncing configuration...'}
-                      </span>
-                    </p>
-                  )}
+                    {statusMessage && (
+                      <p className="small mb-0 account-status-message">{statusMessage}</p>
+                    )}
+                  </div>
 
-                  {statusMessage && (
-                    <p className="small mb-0 account-status-message">{statusMessage}</p>
-                  )}
+                  <div className="d-flex gap-2">
+                    <button
+                      type="button"
+                      className="btn btn-outline-secondary"
+                      disabled={!hasUnsavedFileSyncChanges}
+                      onClick={() => folderPickerRef.current?.cancel()}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-primary"
+                      disabled={!hasUnsavedFileSyncChanges}
+                      onClick={() => folderPickerRef.current?.apply()}
+                    >
+                      Apply
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
           </div>
+
+          {connectModalProvider && connectModalMode && connectModalInitialDraft && (
+            <ProviderConnectModal
+              key={`${connectModalProvider}-${connectModalMode}`}
+              provider={connectModalProvider}
+              mode={connectModalMode}
+              accountLabel={connectModalAccount
+                ? connectModalAccount.email || connectModalAccount.displayName || connectModalAccount.providerAccountId
+                : null}
+              initialDraft={connectModalInitialDraft}
+              onConnect={(draft) => handleModalConnect(connectModalProvider, draft)}
+              onReconnect={() => handleModalReconnect(connectModalProvider)}
+              onDisconnect={() => handleModalDisconnect(connectModalProvider)}
+              onClose={() => setConnectModalProvider(null)}
+            />
+          )}
         </>
       )}
     </div>

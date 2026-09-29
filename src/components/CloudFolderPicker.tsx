@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import type { FederatedProvider } from '../models/bible';
 import type { FederatedSession } from '../services/federatedAuthService';
 import {
@@ -42,10 +42,17 @@ interface CloudFolderPickerProps {
   sessions: Record<FederatedProvider, FederatedSession | null>;
   initialSelections: Record<FederatedProvider, FolderSelectionTarget[]>;
   providerSyncFilesEnabled: Record<FederatedProvider, boolean>;
+  linkedProviders: Record<FederatedProvider, boolean>;
   focusRequest: { provider: FederatedProvider; requestId: number } | null;
   onSelectionsChange: (next: Record<FederatedProvider, FolderSelectionTarget[]>) => void;
   onConnectRequested: (provider: FederatedProvider) => void;
   onDirtyChange?: (isDirty: boolean) => void;
+  ref?: React.Ref<CloudFolderPickerHandle>;
+}
+
+export interface CloudFolderPickerHandle {
+  apply: () => void;
+  cancel: () => void;
 }
 
 interface FolderTreeNode {
@@ -489,10 +496,12 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
   sessions,
   initialSelections,
   providerSyncFilesEnabled,
+  linkedProviders,
   focusRequest,
   onSelectionsChange,
   onConnectRequested,
   onDirtyChange,
+  ref,
 }) => {
   const [loadingRoots, setLoadingRoots] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -603,7 +612,7 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
 
     const session = sessions[node.provider];
     if (!session) {
-      setErrorMessage(`Reconnect ${ROOT_LABEL[node.provider]} to browse folders.`);
+      setErrorMessage(`Connect ${ROOT_LABEL[node.provider]} to browse folders.`);
       return [];
     }
 
@@ -946,6 +955,11 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
   const handleCancel = useCallback(() => {
     setSelected(buildSelectedMapFromPayload(initialSelectionsRef.current));
   }, []);
+
+  useImperativeHandle(ref, () => ({
+    apply: handleApply,
+    cancel: handleCancel,
+  }), [handleApply, handleCancel]);
 
   const revealPath = useCallback(async (row: { key: string; provider: FederatedProvider; path: string }) => {
     const trace: string[] = [];
@@ -1308,32 +1322,7 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
   }, [rightVisibleRows, sessions, updateNodes]);
 
   return (
-    <section className="cloud-folder-picker" aria-label="Cloud folder picker">
-      <div className="cloud-folder-picker-header">
-        <div>
-          <div className="fw-semibold">File Sync</div>
-          <div className="small text-body-secondary">Select folders to allow for sync across connected providers.</div>
-        </div>
-        <div className="cloud-folder-picker-header-actions d-flex gap-2">
-          <button
-            type="button"
-            className="btn btn-outline-secondary btn-sm"
-            disabled={!isDirty}
-            onClick={handleCancel}
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            className="btn btn-primary btn-sm"
-            disabled={!isDirty}
-            onClick={handleApply}
-          >
-            Apply
-          </button>
-        </div>
-      </div>
-
+    <section className="cloud-folder-picker" aria-label="File Sync">
       <div ref={layoutRef} className="cloud-folder-picker-layout">
         <div className="cloud-folder-picker-left" style={{ flexBasis: `${splitPercent}%` }}>
           {loadingRoots && <p className="small text-body-secondary mb-0">Loading folder roots...</p>}
@@ -1356,8 +1345,7 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
                 const providerAvailable = providerSyncFilesEnabled[node.provider] && Boolean(sessions[node.provider]);
                 const disabled = ancestorSelected || !providerAvailable;
                 const isRoot = node.id === 'root';
-                const providerSyncFilesEnabledForNode = providerSyncFilesEnabled[node.provider];
-                const providerConnectedForNode = Boolean(sessions[node.provider]);
+                const rootLinkLabel = linkedProviders[node.provider] ? 'Manage' : 'Connect';
 
                 return (
                   <li key={key}>
@@ -1401,14 +1389,14 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
                         >
                           {node.name}
                         </button>
-                        {isRoot && (!providerSyncFilesEnabledForNode || !providerConnectedForNode) && (
+                        {isRoot && (
                           <button
                             type="button"
                             className="btn btn-link btn-sm cloud-folder-tree-connect-link"
-                            aria-label={`Connect ${ROOT_LABEL[node.provider]}`}
+                            aria-label={`${rootLinkLabel} ${ROOT_LABEL[node.provider]}`}
                             onClick={() => onConnectRequested(node.provider)}
                           >
-                            Connect
+                            {rootLinkLabel}
                           </button>
                         )}
                       </div>

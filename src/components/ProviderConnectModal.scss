@@ -1,0 +1,63 @@
+.provider-connect-modal-backdrop {
+  z-index: 1060;
+}
+
+.provider-connect-modal {
+  z-index: 1061;
+}
+
+.provider-connect-modal-google .fa-google {
+  color: #db4437;
+}
+
+.provider-connect-modal-microsoft .fa-microsoft {
+  color: #00a4ef;
+}
+
+.provider-connect-account {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+  padding: 0.5rem 0.65rem;
+  border: 1px solid var(--bs-border-color-translucent);
+  border-radius: 0.5rem;
+  background: var(--bs-tertiary-bg);
+  font-size: 0.875rem;
+}
+
+.provider-connect-account-icon {
+  color: #198754;
+  flex: 0 0 auto;
+}
+
+.account-provider-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.65rem;
+  margin: 0;
+}
+
+.account-provider-option input[type='checkbox'] {
+  margin-top: 0.3rem;
+}
+
+.account-provider-option-content {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.account-provider-option-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.925rem;
+  font-weight: 600;
+}
+
+.account-provider-option-description {
+  color: var(--bs-secondary-color);
+  font-size: 0.8rem;
+  line-height: 1.35;
+}

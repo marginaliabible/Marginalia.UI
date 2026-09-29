@@ -157,8 +157,9 @@ function openAccountModal() {
   fireEvent.click(screen.getByRole('button', { name: /open account controls/i }));
 }
 
-function expandProvider(provider: 'Google' | 'Microsoft') {
-  fireEvent.click(screen.getByRole('button', { name: new RegExp(`(Connect|Connected) to ${provider}`, 'i') }));
+async function openProviderModal(rootLabel: 'Google Drive' | 'OneDrive') {
+  fireEvent.click(await screen.findByRole('button', { name: new RegExp(`^(Connect|Manage) ${rootLabel}$`) }));
+  return within(await screen.findByRole('dialog', { name: /Connect(ed)? to/ }));
 }
 
 function getProviderCheckbox(id: 'google-sync-settings' | 'google-sync-files' | 'microsoft-sync-settings' | 'microsoft-sync-files') {
@@ -208,6 +209,7 @@ describe('AccountControl', () => {
     jest.useRealTimers();
     jest.clearAllMocks();
     window.localStorage.clear();
+    Element.prototype.scrollIntoView = jest.fn();
 
     mockUseAppDispatch.mockReturnValue(jest.fn());
     mockUseAppSelector.mockImplementation((selector: (state: any) => any) => selector({ ui: baseUiState }));
@@ -262,7 +264,7 @@ describe('AccountControl', () => {
     });
   });
 
-  it('offers Reconnect for the missing provider once its accordion is expanded', async () => {
+  it('offers Reconnect in the Manage modal for the missing provider', async () => {
     mockReadState.mockReturnValue({
       lastTranslationId: 'KJV',
       lastTranslationIds: ['KJV'],
@@ -277,12 +279,22 @@ describe('AccountControl', () => {
     await renderAccountControl();
     openAccountModal();
 
-    expect(screen.getByRole('button', { name: /Connected to Google/i })).toHaveAttribute('aria-expanded', 'false');
-    expandProvider('Google');
+    expect(await screen.findByRole('button', { name: 'Manage Google Drive' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Manage OneDrive' })).toBeInTheDocument();
 
-    expect(screen.getByRole('button', { name: /Connected to Google/i })).toHaveAttribute('aria-expanded', 'true');
-    expect(screen.getByRole('button', { name: 'Reconnect' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Connected to Microsoft/i })).toHaveAttribute('aria-expanded', 'false');
+    const modal = await openProviderModal('Google Drive');
+    expect(modal.getByRole('heading', { name: /Connected to Google/ })).toBeInTheDocument();
+    expect(modal.getByText('g@example.com')).toBeInTheDocument();
+    expect(modal.getByRole('button', { name: 'Reconnect' })).toBeInTheDocument();
+    expect(modal.queryByRole('button', { name: 'Disconnect' })).not.toBeInTheDocument();
+  });
+
+  it('shows Connect on file sync roots for providers that were never linked', async () => {
+    await renderAccountControl();
+    openAccountModal();
+
+    expect(await screen.findByRole('button', { name: 'Connect Google Drive' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Connect OneDrive' })).toBeInTheDocument();
   });
 
   it('does not auto-open the reconnect modal after remount when a linked provider is still missing', async () => {
@@ -715,9 +727,15 @@ describe('AccountControl', () => {
     await renderAccountControl();
 
     openAccountModal();
-    expandProvider('Google');
+    const modal = await openProviderModal('Google Drive');
 
-    const connectButton = screen.getByRole('button', { name: 'Connect' });
+    const connectButton = modal.getByRole('button', { name: 'Connect' });
+    expect(getProviderCheckbox('google-sync-settings')).toBeChecked();
+    expect(getProviderCheckbox('google-sync-files')).toBeChecked();
+    expect(connectButton).toBeEnabled();
+
+    fireEvent.click(getProviderCheckbox('google-sync-settings'));
+    expect(getProviderCheckbox('google-sync-files')).not.toBeChecked();
     expect(connectButton).toBeDisabled();
 
     fireEvent.click(getProviderCheckbox('google-sync-settings'));
@@ -728,6 +746,88 @@ describe('AccountControl', () => {
       syncSettings: true,
       syncFiles: false,
     });
+    expect(screen.queryByRole('dialog', { name: /Connect to Google/ })).not.toBeInTheDocument();
+  });
+
+  it('leaves preferences unchanged when the provider modal is cancelled', async () => {
+    await renderAccountControl();
+    openAccountModal();
+
+    const modal = await openProviderModal('Google Drive');
+    fireEvent.click(getProviderCheckbox('google-sync-settings'));
+    fireEvent.click(modal.getByRole('button', { name: 'Cancel' }));
+
+    expect(screen.queryByRole('dialog', { name: /Connect to Google/ })).not.toBeInTheDocument();
+    expect(mockBeginAuth).not.toHaveBeenCalled();
+    const stored = JSON.parse(window.localStorage.getItem('marginalia:provider-sync-preferences') ?? '{}');
+    expect(stored.google).toEqual(expect.objectContaining({ syncSettings: false, syncFiles: false }));
+
+    await openProviderModal('Google Drive');
+    expect(getProviderCheckbox('google-sync-settings')).toBeChecked();
+    expect(getProviderCheckbox('google-sync-files')).toBeChecked();
+  });
+
+  it('closes only the provider modal when its backdrop is clicked', async () => {
+    await renderAccountControl();
+    openAccountModal();
+
+    await openProviderModal('Google Drive');
+    fireEvent.click(document.querySelector('.provider-connect-modal-backdrop') as HTMLElement);
+
+    expect(screen.queryByRole('dialog', { name: /Connect to Google/ })).not.toBeInTheDocument();
+    expect(screen.getByRole('region', { name: 'File Sync' })).toBeInTheDocument();
+  });
+
+  it('re-runs authorization with file scope when a settings-only provider enables file sync', async () => {
+    mockReadState.mockReturnValue({
+      lastTranslationId: 'KJV',
+      lastTranslationIds: ['KJV'],
+      cloudLinkedAccounts: [
+        {
+          provider: 'google',
+          providerAccountId: 'g-user-1',
+          email: 'g@example.com',
+          linkedAt: Date.now() - 5000,
+        },
+      ],
+      cloudConfigUpdatedAt: Date.now() - 10_000,
+      cloudConfigLastSyncedAt: Date.now() - 10_000,
+    });
+
+    window.localStorage.setItem('marginalia:provider-sync-preferences', JSON.stringify({
+      google: {
+        syncSettings: true,
+        syncFiles: false,
+        selectedTargets: [],
+      },
+      microsoft: {
+        syncSettings: false,
+        syncFiles: false,
+        selectedTargets: [],
+      },
+    }));
+
+    mockGetStoredSessions.mockReturnValue({ google: googleSession });
+    mockGetFreshSessions.mockResolvedValue({ google: googleSession });
+
+    await renderAccountControl();
+    openAccountModal();
+
+    const modal = await openProviderModal('Google Drive');
+    expect(getProviderCheckbox('google-sync-settings')).toBeChecked();
+    expect(getProviderCheckbox('google-sync-settings')).toBeDisabled();
+    expect(getProviderCheckbox('google-sync-files')).toBeChecked();
+    expect(getProviderCheckbox('google-sync-files')).toBeEnabled();
+    expect(modal.getByRole('button', { name: 'Disconnect' })).toBeInTheDocument();
+
+    fireEvent.click(modal.getByRole('button', { name: 'Connect' }));
+
+    expect(mockBeginAuth).toHaveBeenCalledWith('google', {
+      syncSettings: true,
+      syncFiles: true,
+    });
+    const stored = JSON.parse(window.localStorage.getItem('marginalia:provider-sync-preferences') ?? '{}');
+    expect(stored.google).toEqual(expect.objectContaining({ syncSettings: true, syncFiles: true }));
   });
 
   it('shows disabled options and reconnect action when linked provider is missing local session', async () => {
@@ -756,7 +856,7 @@ describe('AccountControl', () => {
       expect(screen.getByText(/Reconnect Google on this device/i)).toBeInTheDocument();
     });
 
-    expandProvider('Google');
+    const modal = await openProviderModal('Google Drive');
     const syncSettingsCheckbox = getProviderCheckbox('google-sync-settings');
     const syncFilesCheckbox = getProviderCheckbox('google-sync-files');
 
@@ -764,8 +864,8 @@ describe('AccountControl', () => {
     expect(syncFilesCheckbox).toBeDisabled();
     expect(syncSettingsCheckbox).toHaveAttribute('title', 'Reconnect to modify');
     expect(syncFilesCheckbox).toHaveAttribute('title', 'Reconnect to modify');
-    expect(screen.getByRole('button', { name: 'Reconnect' })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Modify' })).not.toBeInTheDocument();
+    expect(modal.getByRole('button', { name: 'Reconnect' })).toBeInTheDocument();
+    expect(modal.queryByRole('button', { name: 'Modify' })).not.toBeInTheDocument();
   });
 
   it('asks for confirmation before disconnect when file sync was selected', async () => {
@@ -783,9 +883,9 @@ describe('AccountControl', () => {
 
     const firstRender = await renderAccountControl();
     openAccountModal();
-    expandProvider('Google');
-    fireEvent.click(getProviderCheckbox('google-sync-files'));
-    fireEvent.click(screen.getByRole('button', { name: 'Connect' }));
+    const connectModal = await openProviderModal('Google Drive');
+    expect(getProviderCheckbox('google-sync-files')).toBeChecked();
+    fireEvent.click(connectModal.getByRole('button', { name: 'Connect' }));
     expect(mockBeginAuth).toHaveBeenCalledWith('google', {
       syncSettings: true,
       syncFiles: true,
@@ -812,12 +912,12 @@ describe('AccountControl', () => {
 
     await renderAccountControl();
     openAccountModal();
-    expandProvider('Google');
+    const manageModal = await openProviderModal('Google Drive');
 
-    expect(screen.getByRole('button', { name: /Connected to Google/i })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Disconnect' })).toHaveClass('btn-danger');
+    expect(manageModal.getByRole('heading', { name: /Connected to Google/ })).toBeInTheDocument();
+    expect(manageModal.getByRole('button', { name: 'Disconnect' })).toHaveClass('btn-danger');
 
-    fireEvent.click(screen.getByRole('button', { name: 'Disconnect' }));
+    fireEvent.click(manageModal.getByRole('button', { name: 'Disconnect' }));
 
     expect(confirmSpy).toHaveBeenCalledWith(
       'Your synchronization data will be kept for 10 days. If you reconnect after 10 days then you may incur additional data usage to reprocess your files. Are you sure you wish to disconnect this service from file sync?'
@@ -828,11 +928,12 @@ describe('AccountControl', () => {
     }));
 
     confirmSpy.mockReturnValue(true);
-    fireEvent.click(screen.getByRole('button', { name: 'Disconnect' }));
+    fireEvent.click(manageModal.getByRole('button', { name: 'Disconnect' }));
 
     expect(mockPersistState).toHaveBeenCalledWith(expect.objectContaining({
       cloudLinkedAccounts: [],
     }));
+    expect(screen.queryByRole('dialog', { name: /Connected to Google/ })).not.toBeInTheDocument();
 
     confirmSpy.mockRestore();
   });
@@ -881,9 +982,8 @@ describe('AccountControl', () => {
 
     await renderAccountControl();
     openAccountModal();
-    expandProvider('Google');
 
-    expect(screen.getByText('File Sync')).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: 'File Sync' })).toBeInTheDocument();
 
     await waitFor(() => {
       expect(screen.getByText('Google Drive')).toBeInTheDocument();
@@ -1043,7 +1143,6 @@ describe('AccountControl', () => {
 
     await renderAccountControl();
     openAccountModal();
-    expandProvider('Google');
 
     await waitFor(() => {
       expect(screen.getByText('Google Drive')).toBeInTheDocument();
@@ -1125,7 +1224,6 @@ describe('AccountControl', () => {
 
     await renderAccountControl();
     openAccountModal();
-    expandProvider('Google');
 
     await waitFor(() => {
       expect(screen.getByText('Google Drive')).toBeInTheDocument();
@@ -1203,7 +1301,6 @@ describe('AccountControl', () => {
 
     await renderAccountControl();
     openAccountModal();
-    expandProvider('Google');
 
     await waitFor(() => {
       expect(screen.getByText('Google Drive')).toBeInTheDocument();
@@ -1282,7 +1379,6 @@ describe('AccountControl', () => {
 
     await renderAccountControl();
     openAccountModal();
-    expandProvider('Google');
 
     await waitFor(() => {
       expect(screen.getByText('Google Drive')).toBeInTheDocument();
@@ -1363,7 +1459,6 @@ describe('AccountControl', () => {
 
     await renderAccountControl();
     openAccountModal();
-    expandProvider('Google');
 
     await waitFor(() => {
       expect(screen.getByText('Google Drive')).toBeInTheDocument();
@@ -1438,7 +1533,6 @@ describe('AccountControl', () => {
 
     await renderAccountControl();
     openAccountModal();
-    expandProvider('Google');
 
     const rightPanel = within(document.querySelector('.cloud-folder-picker-right') as HTMLElement);
 
@@ -1562,7 +1656,6 @@ describe('AccountControl', () => {
 
     await renderAccountControl();
     openAccountModal();
-    expandProvider('Google');
 
     await waitFor(() => {
       expect(screen.getByText('Google Drive')).toBeInTheDocument();
@@ -1663,7 +1756,6 @@ describe('AccountControl', () => {
 
     await renderAccountControl();
     openAccountModal();
-    expandProvider('Google');
 
     await waitFor(() => {
       expect(screen.getByText('Google Drive')).toBeInTheDocument();
@@ -1735,7 +1827,6 @@ describe('AccountControl', () => {
 
     await renderAccountControl();
     openAccountModal();
-    expandProvider('Google');
 
     await waitFor(() => {
       expect(screen.getByText('Google Drive')).toBeInTheDocument();
@@ -1817,7 +1908,6 @@ describe('AccountControl', () => {
 
     await renderAccountControl();
     openAccountModal();
-    expandProvider('Google');
 
     await waitFor(() => {
       expect(screen.getByText('Google Drive')).toBeInTheDocument();
@@ -1881,7 +1971,6 @@ describe('AccountControl', () => {
 
     await renderAccountControl();
     openAccountModal();
-    expandProvider('Google');
 
     await waitFor(() => {
       expect(screen.getByText('Google Drive')).toBeInTheDocument();
@@ -1949,9 +2038,8 @@ describe('AccountControl', () => {
 
     await renderAccountControl();
     openAccountModal();
-    expandProvider('Google');
 
-    expect(screen.getByText('File Sync')).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: 'File Sync' })).toBeInTheDocument();
 
     await waitFor(() => {
       expect(screen.getByText('Google Drive')).toBeInTheDocument();
@@ -2024,7 +2112,6 @@ describe('AccountControl', () => {
 
     await renderAccountControl();
     openAccountModal();
-    expandProvider('Google');
 
     const rightPanel = within(document.querySelector('.cloud-folder-picker-right') as HTMLElement);
 
@@ -2072,9 +2159,8 @@ describe('AccountControl', () => {
 
     await renderAccountControl();
     openAccountModal();
-    expandProvider('Microsoft');
 
-    expect(screen.getByText('File Sync')).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: 'File Sync' })).toBeInTheDocument();
     await waitFor(() => {
       expect(screen.getByText('OneDrive')).toBeInTheDocument();
       expect(screen.getByText('Google Drive')).toBeInTheDocument();
@@ -2116,7 +2202,6 @@ describe('AccountControl', () => {
 
     await renderAccountControl();
     openAccountModal();
-    expandProvider('Microsoft');
 
     await waitFor(() => {
       expect(screen.getByText('OneDrive')).toBeInTheDocument();
