@@ -7,6 +7,7 @@ import {
   completeFederatedAuthorizationFromUrl,
   getFreshFederatedSessions,
   getStoredFederatedSessions,
+  rekeyStoredRefreshTokens,
 } from '../services/federatedAuthService';
 import {
   listFolderChildrenForSession,
@@ -30,6 +31,8 @@ jest.mock('../store/slices/bibleSlice', () => ({
 
 jest.mock('../store/slices/uiSlice', () => ({
   addSourceUrl: jest.fn((payload: unknown) => ({ type: 'ui/addSourceUrl', payload })),
+  removeSourceUrl: jest.fn((payload: unknown) => ({ type: 'ui/removeSourceUrl', payload })),
+  replaceUserId: jest.fn((payload: unknown) => ({ type: 'ui/replaceUserId', payload })),
   restoreState: jest.fn((payload: unknown) => ({ type: 'ui/restoreState', payload })),
   setUserId: jest.fn((payload: unknown) => ({ type: 'ui/setUserId', payload })),
 }));
@@ -38,6 +41,7 @@ jest.mock('../services/bibleService', () => ({
   bibleService: {
     readState: jest.fn(),
     persistState: jest.fn(),
+    replaceUserId: jest.fn(),
   },
 }));
 
@@ -52,6 +56,7 @@ jest.mock('../services/federatedAuthService', () => ({
     delete sessions[provider];
     return sessions;
   }),
+  rekeyStoredRefreshTokens: jest.fn(),
   revokeStoredRefreshToken: jest.fn(),
   writeStoredSessions: jest.fn(),
 }));
@@ -88,6 +93,7 @@ const mockComputeSupportedFolderSizeForSession = computeSupportedFolderSizeForSe
 const mockReadCloudConfigForSession = readCloudConfigForSession as jest.Mock;
 const mockWriteCloudConfigForSession = writeCloudConfigForSession as jest.Mock;
 const mockQueueCloudFolderSelection = queueCloudFolderSelection as jest.Mock;
+const mockRekeyStoredRefreshTokens = rekeyStoredRefreshTokens as jest.Mock;
 const mockAddSourceUrl = addSourceUrl as jest.Mock;
 
 const baseUiState = {
@@ -226,6 +232,7 @@ describe('AccountControl', () => {
     mockReadCloudConfigForSession.mockResolvedValue(null);
     mockWriteCloudConfigForSession.mockResolvedValue(undefined);
     mockQueueCloudFolderSelection.mockResolvedValue(null);
+    mockRekeyStoredRefreshTokens.mockResolvedValue(true);
     mockGetFreshSessions.mockResolvedValue({});
     mockGetStoredSessions.mockReturnValue({});
     mockReadState.mockReturnValue({
@@ -575,6 +582,141 @@ describe('AccountControl', () => {
 
     const persisted = JSON.parse(window.localStorage.getItem('marginalia:provider-sync-preferences') || '{}');
     expect(persisted.microsoft.selectedTargets).toEqual([msTarget]);
+  });
+
+  it('copies the User ID\'s original establishment time to a newly linked provider and never advances it', async () => {
+    jest.useFakeTimers();
+    window.localStorage.setItem('marginalia:provider-sync-preferences', JSON.stringify({
+      google: { syncSettings: true, syncFiles: false, selectedTargets: [] },
+      microsoft: { syncSettings: true, syncFiles: false, selectedTargets: [] },
+    }));
+    const establishedAt = Date.now() - 90 * 24 * 60 * 60 * 1000;
+    const localStamp = Date.now() - 60_000;
+    mockReadState.mockReturnValue({
+      userId: 'owner@example.com',
+      lastTranslationId: 'KJV',
+      lastTranslationIds: ['KJV'],
+      cloudLinkedAccounts: [
+        { provider: 'microsoft', providerAccountId: 'ms-user-1', email: 'ms@example.com', linkedAt: establishedAt },
+      ],
+      cloudConfigUpdatedAt: localStamp,
+      cloudConfigLastSyncedAt: localStamp,
+      cloudFieldUpdatedAt: { userId: establishedAt, theme: localStamp },
+    });
+    const cloud = installFakeCloud({
+      microsoft: {
+        schemaVersion: 1,
+        updatedAt: localStamp,
+        linkedAccounts: [],
+        config: {
+          lastTranslationId: 'KJV',
+          lastTranslationIds: ['KJV'],
+          translationRecords: [{ id: 'KJV', starred: true }],
+          languages: [],
+          sourceUrls: [],
+          resourceHiddenTags: [],
+          theme: 'light',
+          userId: 'owner@example.com',
+        },
+        fieldUpdatedAt: { userId: establishedAt, theme: localStamp },
+      },
+    });
+    mockGetStoredSessions.mockReturnValue({ microsoft: msSession });
+    mockGetFreshSessions.mockResolvedValue({ google: googleSession, microsoft: msSession });
+    mockCompleteAuth.mockResolvedValue({ handled: true, provider: 'google', session: googleSession });
+
+    await renderAccountControl();
+    await act(async () => {
+      jest.advanceTimersByTime(1500);
+    });
+
+    await waitFor(() => {
+      expect(cloud.google?.config.userId).toBe('owner@example.com');
+    });
+    expect(cloud.google.fieldUpdatedAt.userId).toBe(establishedAt);
+    expect(cloud.microsoft.fieldUpdatedAt.userId).toBe(establishedAt);
+    const persistedStamps = mockPersistState.mock.calls
+      .map(([update]) => update?.cloudFieldUpdatedAt?.userId)
+      .filter((stamp) => stamp !== undefined);
+    expect(persistedStamps.length).toBeGreaterThan(0);
+    expect(persistedStamps.every((stamp) => stamp === establishedAt)).toBe(true);
+  });
+
+  describe('when this device holds a placeholder User ID', () => {
+    const placeholderLibrary = 'https://storage.example/users/placeholder@example.com/library.json';
+    const ownerLibrary = 'https://storage.example/users/owner@example.com/library.json';
+
+    function setUpPlaceholderDevice(placeholderStamp: number) {
+      const dispatch = jest.fn();
+      mockUseAppDispatch.mockReturnValue(dispatch);
+      window.localStorage.setItem('marginalia:provider-sync-preferences', JSON.stringify({
+        google: { syncSettings: true, syncFiles: false, selectedTargets: [] },
+        microsoft: { syncSettings: true, syncFiles: false, selectedTargets: [] },
+      }));
+      const localStamp = Date.now() - 60_000;
+      mockReadState.mockReturnValue({
+        userId: 'placeholder@example.com',
+        lastTranslationId: 'KJV',
+        lastTranslationIds: ['KJV'],
+        cloudLinkedAccounts: linkedBothProviders(),
+        cloudConfigUpdatedAt: localStamp,
+        cloudConfigLastSyncedAt: localStamp,
+        cloudFieldUpdatedAt: { userId: placeholderStamp },
+      });
+      const cloud = installFakeCloud({
+        microsoft: {
+          schemaVersion: 1,
+          updatedAt: localStamp,
+          linkedAccounts: linkedBothProviders(),
+          config: {
+            lastTranslationId: 'KJV',
+            lastTranslationIds: ['KJV'],
+            translationRecords: [{ id: 'KJV', starred: true }],
+            languages: [],
+            sourceUrls: [placeholderLibrary],
+            resourceHiddenTags: [],
+            theme: 'light',
+            userId: 'owner@example.com',
+          },
+          fieldUpdatedAt: { userId: Date.now() - 30 * 24 * 60 * 60 * 1000 },
+        },
+      });
+      mockGetStoredSessions.mockReturnValue({ microsoft: msSession });
+      mockGetFreshSessions.mockResolvedValue({ microsoft: msSession });
+      return { dispatch, cloud };
+    }
+
+    it('adopts the account\'s older established User ID, moves its tokens there, and subscribes to its library', async () => {
+      const { dispatch, cloud } = setUpPlaceholderDevice(Date.now() - 2 * 60 * 60 * 1000);
+
+      await renderAccountControl();
+
+      await waitFor(() => {
+        expect(mockRekeyStoredRefreshTokens).toHaveBeenCalledWith('placeholder@example.com', 'owner@example.com', ['google', 'microsoft']);
+      });
+      expect(bibleService.replaceUserId).toHaveBeenCalledWith('owner@example.com');
+      expect(dispatch).toHaveBeenCalledWith({ type: 'ui/replaceUserId', payload: 'owner@example.com' });
+      expect(dispatch).toHaveBeenCalledWith({ type: 'ui/removeSourceUrl', payload: placeholderLibrary });
+      expect(dispatch).toHaveBeenCalledWith({ type: 'ui/addSourceUrl', payload: ownerLibrary });
+      expect(cloud.microsoft.config.userId).toBe('owner@example.com');
+    });
+
+    it('asks before switching when its own User ID has no recorded time, and keeps it when declined', async () => {
+      const confirmSpy = jest.spyOn(window, 'confirm').mockReturnValue(false);
+      const { dispatch } = setUpPlaceholderDevice(0);
+
+      try {
+        await renderAccountControl();
+
+        await waitFor(() => {
+          expect(confirmSpy).toHaveBeenCalledWith(expect.stringContaining('Switch this device to owner@example.com?'));
+        });
+        expect(mockRekeyStoredRefreshTokens).not.toHaveBeenCalled();
+        expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'ui/replaceUserId' }));
+      } finally {
+        confirmSpy.mockRestore();
+      }
+    });
   });
 
   it('writes only to available sessions when another linked provider is missing on this device', async () => {

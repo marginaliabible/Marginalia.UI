@@ -22,6 +22,15 @@ import {
   type ResourcesFileLike,
 } from '../utils/resourceLibraryConfig';
 import { fetchStorageAware } from './storageAuthenticatedFetch';
+import {
+  applyResourceTagOverride,
+  BUILT_IN_LIBRARY_KEY,
+  hasSourcePreferences,
+  isResourceDisabled,
+  resolveLibraryKey,
+  resourceDocumentKey,
+  type SourcePreferences,
+} from '../utils/sourceSubscriptions';
 
 const SEARCH_LIMIT = 5000;
 const DEFAULT_LIBRARY_PATH = 'data/library.json';
@@ -54,6 +63,8 @@ interface ResourceLibraryCandidate {
   documentStoreAddress: string;
   documentViewer: DocumentViewerKind | null;
   documents?: ResourceLibraryIndexDoc[];
+  /** Subscription library the candidate was reached through; not persisted in snapshots. */
+  libraryKey?: string;
 }
 
 interface ResourceLibraryIndexDoc extends ResourceDocumentEntry {
@@ -74,7 +85,8 @@ const librarySearchSnapshots = new Map<string, ResourceLibrarySearchSnapshot>();
 
 export async function searchResourceDocumentTitles(
   queryInput: string,
-  sourceUrls: string[] = []
+  sourceUrls: string[] = [],
+  preferences?: SourcePreferences
 ): Promise<ResourceDocumentTitleSearchResultSet | null> {
   const query = queryInput.trim();
   if (!query) {
@@ -91,7 +103,11 @@ export async function searchResourceDocumentTitles(
     };
   }
 
-  const documents = await loadResourceLibraryDocuments(candidates);
+  const documents = applySourcePreferencesToDocuments(
+    await loadResourceLibraryDocuments(candidates),
+    candidates,
+    preferences
+  );
   if (documents.length === 0) {
     return {
       query,
@@ -164,9 +180,10 @@ export async function searchResourceDocumentTitles(
 }
 
 async function loadResourceLibraryCandidates(sourceUrls: string[]): Promise<ResourceLibraryCandidate[]> {
+  const normalizedSourceUrls = sourceUrls.map((entry) => entry.trim()).filter((entry) => entry.length > 0);
   const libraryUrls = Array.from(new Set([
     DEFAULT_LIBRARY_PATH,
-    ...sourceUrls.map((entry) => entry.trim()).filter((entry) => entry.length > 0),
+    ...normalizedSourceUrls,
   ])).sort();
 
   const settled = await Promise.allSettled(libraryUrls.map(async (libraryUrl) => {
@@ -176,17 +193,44 @@ async function loadResourceLibraryCandidates(sourceUrls: string[]): Promise<Reso
 
   const candidates = new Map<string, ResourceLibraryCandidate>();
 
-  for (const result of settled) {
+  settled.forEach((result, index) => {
     if (result.status !== 'fulfilled') {
-      continue;
+      return;
     }
 
+    const libraryKey = resolveLibraryKey(libraryUrls[index], normalizedSourceUrls);
     for (const candidate of result.value) {
-      candidates.set(candidate.resourcesUrl, candidate);
+      candidates.set(candidate.resourcesUrl, { ...candidate, libraryKey });
     }
-  }
+  });
 
   return Array.from(candidates.values());
+}
+
+function applySourcePreferencesToDocuments(
+  documents: ResourceLibraryIndexDoc[],
+  candidates: ResourceLibraryCandidate[],
+  preferences: SourcePreferences | undefined
+): ResourceLibraryIndexDoc[] {
+  if (!hasSourcePreferences(preferences)) {
+    return documents;
+  }
+
+  const libraryKeyByResourcesUrl = new Map(
+    candidates.map((candidate) => [candidate.resourcesUrl, candidate.libraryKey ?? BUILT_IN_LIBRARY_KEY])
+  );
+  const disabled = new Set(preferences.disabledSourceItems);
+
+  return documents.flatMap((document) => {
+    const libraryKey = libraryKeyByResourcesUrl.get(document.resourcesUrl) ?? BUILT_IN_LIBRARY_KEY;
+    const resourceKey = resourceDocumentKey(document.resourcesUrl, document.documentId);
+    if (isResourceDisabled(disabled, libraryKey, resourceKey)) {
+      return [];
+    }
+
+    const override = preferences.resourceTagOverrides[resourceKey];
+    return override ? [{ ...document, tags: applyResourceTagOverride(document.tags ?? [], override) }] : [document];
+  });
 }
 
 async function loadResourceLibraryDocuments(candidates: ResourceLibraryCandidate[]): Promise<ResourceLibraryIndexDoc[]> {

@@ -4,6 +4,7 @@ import { useAppDispatch, useAppSelector } from '../store/hooks';
 import { bibleService } from '../services/bibleService';
 import type { PanelTab } from '../models/tab';
 import type { VerseResourcesPayload } from '../services/bibleService';
+import { EMPTY_SOURCE_PREFERENCES } from '../utils/sourceSubscriptions';
 
 jest.mock('../hooks/useDocumentScriptureNavigation', () => ({
   useRevealVerseSelectionInBible: () => jest.fn(),
@@ -79,7 +80,7 @@ describe('ResourcesPanel visibility gating', () => {
       isActive={false}
     />);
 
-    expect(bibleService.getResourcesForVerse).not.toHaveBeenCalledWith('Romans', 10, 9, []);
+    expect(bibleService.getResourcesForVerse).not.toHaveBeenCalledWith('Romans', 10, 9, [], EMPTY_SOURCE_PREFERENCES);
   });
 
   it('fetches the selected verse when the tab becomes active', async () => {
@@ -96,7 +97,7 @@ describe('ResourcesPanel visibility gating', () => {
     />);
 
     await waitFor(() => {
-      expect(bibleService.getResourcesForVerse).toHaveBeenCalledWith('Romans', 10, 9, []);
+      expect(bibleService.getResourcesForVerse).toHaveBeenCalledWith('Romans', 10, 9, [], EMPTY_SOURCE_PREFERENCES);
     });
   });
 });
@@ -189,8 +190,8 @@ describe('ResourcesPanel multi-verse selection', () => {
     const { findByText } = render(<ResourcesPanel tab={multiVerseTab} isActive={true} />);
 
     await waitFor(() => {
-      expect(bibleService.getResourcesForVerse).toHaveBeenCalledWith('Genesis', 1, 1, []);
-      expect(bibleService.getResourcesForVerse).toHaveBeenCalledWith('Genesis', 1, 2, []);
+      expect(bibleService.getResourcesForVerse).toHaveBeenCalledWith('Genesis', 1, 1, [], EMPTY_SOURCE_PREFERENCES);
+      expect(bibleService.getResourcesForVerse).toHaveBeenCalledWith('Genesis', 1, 2, [], EMPTY_SOURCE_PREFERENCES);
     });
 
     expect(await findByText('Genesis 1:1-2')).toBeTruthy();

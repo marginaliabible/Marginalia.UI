@@ -7,6 +7,7 @@ import { buildMarkupDocumentShellUrl } from '../utils/resourceLibraryConfig';
 import { searchResourceDocumentTitles, type ResourceDocumentTitleSearchResultSet } from '../services/resourceLibrarySearchService';
 import { normalizeEnglishTerm } from '../services/searchNormalizer';
 import { isNewTestamentBook } from '../utils/book-aliases';
+import { useSourcePreferences } from '../hooks/useSourcePreferences';
 
 const escapeRegex = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
@@ -79,6 +80,7 @@ type SearchViewMode = 'scripture' | 'documents';
 const SearchResults: React.FC<SearchResultsProps> = ({ tab, goToReference, onBeforeNavigate }) => {
   const dispatch = useAppDispatch();
   const { sourceUrls } = useAppSelector((state) => state.ui);
+  const sourcePreferences = useSourcePreferences();
   const searchResults = tab.searchResults;
   const [displayedCount, setDisplayedCount] = React.useState(PAGE_SIZE);
   const [searchView, setSearchView] = React.useState<SearchViewMode>('scripture');
@@ -126,7 +128,7 @@ const SearchResults: React.FC<SearchResultsProps> = ({ tab, goToReference, onBef
       setDocumentSearchError(null);
 
       try {
-        const nextResults = await searchResourceDocumentTitles(searchResults.query, sourceUrls);
+        const nextResults = await searchResourceDocumentTitles(searchResults.query, sourceUrls, sourcePreferences);
         if (!cancelled) {
           setDocumentResults(nextResults);
         }
@@ -147,7 +149,7 @@ const SearchResults: React.FC<SearchResultsProps> = ({ tab, goToReference, onBef
     return () => {
       cancelled = true;
     };
-  }, [searchView, searchResults?.query, sourceUrls]);
+  }, [searchView, searchResults?.query, sourceUrls, sourcePreferences]);
 
   useEffect(() => {
     setDisplayedCount(PAGE_SIZE);

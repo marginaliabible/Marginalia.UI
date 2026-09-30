@@ -8,9 +8,18 @@ import {
   inferSourceFileKindFromPayload,
   inferSourceFileKindFromUrl,
   isPlainObject,
+  readLibrarySourceAddresses,
   readString,
+  resolveAddress,
   validateHyperlinksFile,
+  validateLibraryFile,
 } from '../utils/resourceLibraryConfig';
+import {
+  BUILT_IN_LIBRARY_KEY,
+  hasSourcePreferences,
+  isHyperlinkDisabled,
+  type SourcePreferences,
+} from '../utils/sourceSubscriptions';
 import { fetchStorageAware } from './storageAuthenticatedFetch';
 
 export const BUILT_IN_HYPERLINKS_SOURCE = 'data/hyperlinks.json';
@@ -26,6 +35,17 @@ interface StoredHyperlinkSet {
 
 interface HyperlinkServiceDependencies {
   getDatabase: () => Promise<IDBPDatabase<any>>;
+}
+
+interface HyperlinkTarget {
+  sourceUrl: string;
+  librarySourceUrl: string;
+}
+
+/** Subscription library key for a set: 'builtin' for the bundled file, else the saved source URL. */
+export function toHyperlinkLibraryKey(set: HyperlinkSet): string {
+  const library = set.librarySourceUrl ?? set.sourceUrl;
+  return library === BUILT_IN_HYPERLINKS_SOURCE ? BUILT_IN_LIBRARY_KEY : library;
 }
 
 const readEntries = (payload: unknown): HyperlinkEntry[] => {
@@ -58,31 +78,81 @@ export class HyperlinkService {
     this.getDatabase = dependencies.getDatabase;
   }
 
+  /**
+   * Built-in hyperlinks, saved hyperlinks.json URLs, and hyperlinks.json files listed in the `sources`
+   * of saved library.json URLs.
+   */
   async getHyperlinkSets(sourceUrls: string[] = []): Promise<HyperlinkSet[]> {
-    const hyperlinkSourceUrls = sourceUrls.filter((url) => inferSourceFileKindFromUrl(url) === 'hyperlinks');
-    const cacheKey = JSON.stringify(hyperlinkSourceUrls);
+    const relevantSourceUrls = sourceUrls.filter((url) => {
+      const kind = inferSourceFileKindFromUrl(url);
+      return kind === 'hyperlinks' || kind === 'library';
+    });
+    const cacheKey = JSON.stringify(relevantSourceUrls);
 
     if (this.setsPromise && this.setsBySourceKey === cacheKey) {
       return this.setsPromise;
     }
 
     this.setsBySourceKey = cacheKey;
-    this.setsPromise = this.loadHyperlinkSets([BUILT_IN_HYPERLINKS_SOURCE, ...hyperlinkSourceUrls]);
+    this.setsPromise = this.resolveHyperlinkTargets(relevantSourceUrls)
+      .then((targets) => this.loadHyperlinkSets(targets));
     return this.setsPromise;
   }
 
-  async getHyperlinksForVerse(verse: VerseContext, sourceUrls: string[] = []): Promise<ResolvedHyperlink[]> {
+  async getHyperlinksForVerse(
+    verse: VerseContext,
+    sourceUrls: string[] = [],
+    preferences?: SourcePreferences
+  ): Promise<ResolvedHyperlink[]> {
     const sets = await this.getHyperlinkSets(sourceUrls);
+    const disabled = hasSourcePreferences(preferences) ? new Set(preferences.disabledSourceItems) : null;
 
-    return sets.flatMap((set) =>
-      set.entries.reduce<ResolvedHyperlink[]>((accumulator, entry) => {
+    return sets.flatMap((set) => {
+      const libraryKey = toHyperlinkLibraryKey(set);
+      return set.entries.reduce<ResolvedHyperlink[]>((accumulator, entry) => {
+        if (disabled && isHyperlinkDisabled(disabled, libraryKey, entry.url)) {
+          return accumulator;
+        }
+
         const href = resolveHyperlinkTemplate(entry.url, verse);
         if (href) {
           accumulator.push({ label: entry.label, href, sourceUrl: set.sourceUrl });
         }
         return accumulator;
-      }, [])
-    );
+      }, []);
+    });
+  }
+
+  private async resolveHyperlinkTargets(sourceUrls: string[]): Promise<HyperlinkTarget[]> {
+    const targets: HyperlinkTarget[] = [{ sourceUrl: BUILT_IN_HYPERLINKS_SOURCE, librarySourceUrl: BUILT_IN_HYPERLINKS_SOURCE }];
+
+    for (const sourceUrl of sourceUrls) {
+      if (inferSourceFileKindFromUrl(sourceUrl) === 'hyperlinks') {
+        targets.push({ sourceUrl, librarySourceUrl: sourceUrl });
+        continue;
+      }
+
+      try {
+        const library = validateLibraryFile(await this.fetchPayload(sourceUrl), sourceUrl);
+        for (const address of readLibrarySourceAddresses(library)) {
+          const childUrl = resolveAddress(address, sourceUrl);
+          if (inferSourceFileKindFromUrl(childUrl) === 'hyperlinks') {
+            targets.push({ sourceUrl: childUrl, librarySourceUrl: sourceUrl });
+          }
+        }
+      } catch (error) {
+        console.warn(`Failed to read hyperlink sources from ${sourceUrl}`, error);
+      }
+    }
+
+    const seen = new Set<string>();
+    return targets.filter((target) => {
+      if (seen.has(target.sourceUrl)) {
+        return false;
+      }
+      seen.add(target.sourceUrl);
+      return true;
+    });
   }
 
   async purgeSource(sourceUrl: string): Promise<void> {
@@ -101,13 +171,13 @@ export class HyperlinkService {
     this.setsPromise = null;
   }
 
-  private async loadHyperlinkSets(sourceUrls: string[]): Promise<HyperlinkSet[]> {
+  private async loadHyperlinkSets(targets: HyperlinkTarget[]): Promise<HyperlinkSet[]> {
     const sets: HyperlinkSet[] = [];
 
-    for (const sourceUrl of sourceUrls) {
-      const set = await this.loadHyperlinkSet(sourceUrl);
+    for (const target of targets) {
+      const set = await this.loadHyperlinkSet(target.sourceUrl);
       if (set) {
-        sets.push(set);
+        sets.push({ ...set, librarySourceUrl: target.librarySourceUrl });
       }
     }
 

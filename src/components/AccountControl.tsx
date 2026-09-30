@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAppDispatch, useAppSelector } from '../store/hooks';
-import { addSourceUrl, restoreState, setUserId } from '../store/slices/uiSlice';
+import { addSourceUrl, removeSourceUrl, replaceUserId, restoreState, setUserId } from '../store/slices/uiSlice';
 import { loadTranslation, setCurrentBibleFromId } from '../store/slices/bibleSlice';
 import { bibleService } from '../services/bibleService';
 import {
@@ -9,6 +9,7 @@ import {
   getFreshFederatedSessions,
   getMostRecentlyGrantedSession,
   getStoredFederatedSessions,
+  rekeyStoredRefreshTokens,
   removeStoredFederatedSession,
   revokeStoredRefreshToken,
   type FederatedSession,
@@ -28,7 +29,9 @@ import {
   mergeSyncedCloudConfigs,
   nextStamp,
   normalizeFieldStamps,
+  readConfigOwner,
   removedFolderIds,
+  sourceRegistryFingerprint,
   stableStringify,
   syncedConfigsEqual,
   type SyncedConfigField,
@@ -46,8 +49,16 @@ import {
   setStorageSessionUserId,
 } from '../services/storageAuthenticatedFetch';
 import type { FederatedProvider, LinkedCloudAccount, MarginaliaState } from '../models/bible';
+import type { SubscriptionsBinding } from '../models/subscription';
 import CloudFolderPicker, { type CloudFolderPickerHandle, type FolderSelectionTarget } from './CloudFolderPicker';
 import ProviderConnectModal, { type ProviderConnectMode, type ProviderSyncDraft } from './ProviderConnectModal';
+import {
+  isOwnLibraryUrl,
+  ownLibraryUrlFor,
+  normalizeDisabledSourceItems,
+  normalizeResourceTagOverrides,
+  normalizeTimestampMap,
+} from '../utils/sourceSubscriptions';
 import './AccountControl.scss';
 
 type SyncState = 'idle' | 'syncing' | 'error';
@@ -56,7 +67,7 @@ const SYNC_ACTIVITY_THROTTLE_MS = 5 * 60 * 1000;
 const SYNC_ACTIVITY_FORCE_GAP_MS = 60 * 60 * 1000;
 const PROVIDERS: FederatedProvider[] = ['google', 'microsoft'];
 const DISCONNECT_FILE_SYNC_CONFIRMATION = 'Your synchronization data will be kept for 10 days. If you reconnect after 10 days then you may incur additional data usage to reprocess your files. Are you sure you wish to disconnect this service from file sync?';
-const UNSAVED_FILE_SYNC_CONFIRMATION = 'You have unapplied File Sync folder changes. Discard them?';
+const UNSAVED_FILE_SYNC_CONFIRMATION = 'You have unapplied File Sync changes. Discard them?';
 const PROVIDER_SYNC_PREFERENCES_STORAGE_KEY = 'marginalia:provider-sync-preferences';
 
 const PROVIDER_LABEL: Record<FederatedProvider, string> = {
@@ -295,6 +306,10 @@ function toLocalConfigView(
     lastChapter: lastBook ? remote.lastChapter || 1 : undefined,
     languages: Array.isArray(remote.languages) ? remote.languages : [],
     sourceUrls: Array.isArray(remote.sourceUrls) ? remote.sourceUrls : [],
+    sourceUrlAddedAt: normalizeTimestampMap(remote.sourceUrlAddedAt),
+    sourceUrlTombstones: normalizeTimestampMap(remote.sourceUrlTombstones),
+    disabledSourceItems: normalizeDisabledSourceItems(remote.disabledSourceItems),
+    resourceTagOverrides: normalizeResourceTagOverrides(remote.resourceTagOverrides),
     resourceHiddenTags: Array.isArray(remote.resourceHiddenTags) ? remote.resourceHiddenTags : [],
     theme: remote.theme || 'light',
     translatorItalics: typeof remote.translatorItalics === 'boolean' ? remote.translatorItalics : true,
@@ -309,11 +324,11 @@ function toLocalConfigView(
 function localConfigDiffers(local: SyncedCloudConfig['config'], next: SyncedCloudConfig['config']): boolean {
   const localPrints = fieldFingerprints(local);
   const nextPrints = fieldFingerprints(next);
-  // A user ID never changes once set locally, so only an empty local one can be filled in.
+  // Replacing an established user ID goes through adoptEstablishedUserId, so only an empty one is filled in here.
   const userIdDiffers = !String(local.userId ?? '').trim() && Boolean(String(next.userId ?? '').trim());
   return userIdDiffers
     || SYNCED_CONFIG_FIELDS.some((field) => field !== 'userId' && localPrints[field] !== nextPrints[field])
-    || stableStringify(local.sourceUrls ?? []) !== stableStringify(next.sourceUrls ?? []);
+    || sourceRegistryFingerprint(local) !== sourceRegistryFingerprint(next);
 }
 
 interface ReconcileResult {
@@ -325,7 +340,11 @@ interface ReconcileResult {
   libraryUrls: string[];
 }
 
-const AccountControl: React.FC = () => {
+interface AccountControlProps {
+  subscriptions?: SubscriptionsBinding;
+}
+
+const AccountControl: React.FC<AccountControlProps> = ({ subscriptions }) => {
   const dispatch = useAppDispatch();
 
   const {
@@ -336,6 +355,10 @@ const AccountControl: React.FC = () => {
     selectedChapter,
     selectedLanguages,
     sourceUrls,
+    sourceUrlAddedAt,
+    sourceUrlTombstones,
+    disabledSourceItems,
+    resourceTagOverrides,
     resourceHiddenTags,
     theme,
     translatorItalics,
@@ -356,7 +379,6 @@ const AccountControl: React.FC = () => {
   const [connectModalProvider, setConnectModalProvider] = useState<FederatedProvider | null>(null);
   const [fileSyncFocusRequest, setFileSyncFocusRequest] = useState<{ provider: FederatedProvider; requestId: number } | null>(null);
   const [hasUnsavedFileSyncChanges, setHasUnsavedFileSyncChanges] = useState(false);
-  const [forceSyncRequestId, setForceSyncRequestId] = useState(0);
   const [providerSyncPreferences, setProviderSyncPreferences] = useState<ProviderSyncPreferenceMap>(() => {
     const defaults = createDefaultProviderPreferences();
     const stored = readStoredProviderSyncPreferences();
@@ -380,6 +402,7 @@ const AccountControl: React.FC = () => {
   // Fingerprints of the last config pulled from the cloud; state catching up to it is not a local edit.
   const appliedFingerprintsRef = useRef<Record<SyncedConfigField, string> | null>(null);
   const appliedSourceUrlsFingerprintRef = useRef<string | null>(null);
+  const declinedUserIdRef = useRef<string | null>(null);
 
   const configSnapshot = useMemo<SyncedCloudConfig['config']>(() => {
     return {
@@ -390,6 +413,10 @@ const AccountControl: React.FC = () => {
       lastChapter: selectedBook ? selectedChapter : undefined,
       languages: selectedLanguages,
       sourceUrls,
+      sourceUrlAddedAt,
+      sourceUrlTombstones,
+      disabledSourceItems,
+      resourceTagOverrides,
       resourceHiddenTags,
       theme,
       translatorItalics,
@@ -408,6 +435,10 @@ const AccountControl: React.FC = () => {
     selectedChapter,
     selectedLanguages,
     sourceUrls,
+    sourceUrlAddedAt,
+    sourceUrlTombstones,
+    disabledSourceItems,
+    resourceTagOverrides,
     resourceHiddenTags,
     theme,
     translatorItalics,
@@ -417,7 +448,7 @@ const AccountControl: React.FC = () => {
   ]);
 
   const syncedFieldFingerprints = useMemo(() => fieldFingerprints(configSnapshot), [configSnapshot]);
-  const sourceUrlsFingerprint = useMemo(() => stableStringify(configSnapshot.sourceUrls ?? []), [configSnapshot]);
+  const sourceUrlsFingerprint = useMemo(() => sourceRegistryFingerprint(configSnapshot), [configSnapshot]);
 
   const activeSession = useMemo(() => getMostRecentlyGrantedSession(sessions), [sessions]);
 
@@ -494,7 +525,7 @@ const AccountControl: React.FC = () => {
 
   const applyRemoteConfig = useCallback(async (remote: SyncedCloudConfig['config']) => {
     appliedFingerprintsRef.current = fieldFingerprints(remote);
-    appliedSourceUrlsFingerprintRef.current = stableStringify(remote.sourceUrls ?? []);
+    appliedSourceUrlsFingerprintRef.current = sourceRegistryFingerprint(remote);
 
     dispatch(restoreState({
       selectedTranslationId: remote.lastTranslationId || 'KJV',
@@ -504,6 +535,10 @@ const AccountControl: React.FC = () => {
       selectedChapter: remote.lastChapter || 1,
       selectedLanguages: remote.languages ?? [],
       sourceUrls: remote.sourceUrls ?? [],
+      sourceUrlAddedAt: normalizeTimestampMap(remote.sourceUrlAddedAt),
+      sourceUrlTombstones: normalizeTimestampMap(remote.sourceUrlTombstones),
+      disabledSourceItems: normalizeDisabledSourceItems(remote.disabledSourceItems),
+      resourceTagOverrides: normalizeResourceTagOverrides(remote.resourceTagOverrides),
       resourceHiddenTags: remote.resourceHiddenTags ?? [],
       theme: remote.theme || 'light',
       translatorItalics: typeof remote.translatorItalics === 'boolean' ? remote.translatorItalics : true,
@@ -533,6 +568,60 @@ const AccountControl: React.FC = () => {
       await dispatch(loadTranslation(remote.lastTranslationId));
       dispatch(setCurrentBibleFromId(remote.lastTranslationId));
     }
+  }, [dispatch]);
+
+  /**
+   * The account's User ID is whichever was established first on any device. A device that linked
+   * before it could see that ID holds a placeholder until its tokens are re-keyed to the established one.
+   */
+  const adoptEstablishedUserId = useCallback(async (
+    placeholderUserId: string,
+    placeholderStamp: number,
+    merged: SyncedCloudConfig
+  ): Promise<'adopted' | 'kept' | 'failed'> => {
+    const establishedUserId = String(merged.config.userId ?? '').trim();
+    const establishedStamp = merged.fieldUpdatedAt?.userId ?? 0;
+    if (!placeholderUserId || !establishedUserId || establishedUserId === placeholderUserId || establishedStamp <= 0) {
+      return 'kept';
+    }
+
+    if (placeholderStamp > 0) {
+      if (establishedStamp >= placeholderStamp) {
+        return 'kept';
+      }
+    } else {
+      // No recorded time for this device's own ID, so which came first is a guess: ask.
+      if (declinedUserIdRef.current === establishedUserId) {
+        return 'kept';
+      }
+      if (!window.confirm(
+        `This device uses ${placeholderUserId} as its Marginalia User ID, but your account was set up as ${establishedUserId}. Switch this device to ${establishedUserId}?`
+      )) {
+        declinedUserIdRef.current = establishedUserId;
+        return 'kept';
+      }
+    }
+
+    if (!(await rekeyStoredRefreshTokens(placeholderUserId, establishedUserId, PROVIDERS))) {
+      return 'failed';
+    }
+
+    bibleService.replaceUserId(establishedUserId);
+    dispatch(replaceUserId(establishedUserId));
+    setStorageSessionUserId(establishedUserId);
+    void establishStorageSession(establishedUserId);
+    // CloudControlService releases the placeholder's File Sync library and re-claims its documents
+    // under the established ID, which publishes them at the same location under that ID.
+    for (const url of merged.config.sourceUrls ?? []) {
+      if (isOwnLibraryUrl(url, placeholderUserId)) {
+        dispatch(removeSourceUrl(url));
+        const establishedUrl = ownLibraryUrlFor(url, establishedUserId);
+        if (establishedUrl) {
+          dispatch(addSourceUrl(establishedUrl));
+        }
+      }
+    }
+    return 'adopted';
   }, [dispatch]);
 
   /**
@@ -581,10 +670,24 @@ const AccountControl: React.FC = () => {
       await applyRemoteConfig(merged.config);
     }
 
-    // Keep any stamp a local edit made while the reads were in flight.
+    const localUserId = String(persistedState.userId ?? '').trim();
+    const establishedUserId = String(merged.config.userId ?? '').trim();
+    const adoption = await adoptEstablishedUserId(localUserId, fieldStampsRef.current.userId, merged);
+    if (adoption === 'failed') {
+      failures.push(`Could not move this device to your account's User ID (${establishedUserId}); will retry.`);
+    }
+    const ownerUserId = adoption === 'adopted' || !localUserId ? establishedUserId : localUserId;
+
+    // Keep any stamp a local edit made while the reads were in flight. The userId stamp records when
+    // that ID was established, so it is never raised; a kept placeholder keeps its own.
     const mergedStamps = normalizeFieldStamps(merged.fieldUpdatedAt, 0);
     for (const field of SYNCED_CONFIG_FIELDS) {
-      mergedStamps[field] = Math.max(mergedStamps[field], fieldStampsRef.current[field]);
+      if (field !== 'userId') {
+        mergedStamps[field] = Math.max(mergedStamps[field], fieldStampsRef.current[field]);
+      }
+    }
+    if (ownerUserId !== establishedUserId) {
+      mergedStamps.userId = fieldStampsRef.current.userId;
     }
     fieldStampsRef.current = mergedStamps;
     setConfigUpdatedAt(merged.updatedAt);
@@ -621,7 +724,6 @@ const AccountControl: React.FC = () => {
 
     // CloudControlService reads each provider's folder selection from that provider's own copy.
     const libraryUrls: string[] = [];
-    const ownerUserId = String(persistedState.userId ?? '').trim();
     if (options.queueFolderChanges && ownerUserId) {
       await Promise.all(written.map(async (provider) => {
         if (!providerSyncPreferences[provider].syncFiles) {
@@ -659,7 +761,7 @@ const AccountControl: React.FC = () => {
       failures,
       libraryUrls,
     };
-  }, [applyRemoteConfig, persistCloudState, providerSyncPreferences]);
+  }, [adoptEstablishedUserId, applyRemoteConfig, persistCloudState, providerSyncPreferences]);
 
   const buildLocalDoc = useCallback((): SyncedCloudConfig => ({
     ...toSyncedCloudConfig(configSnapshot, linkedAccounts, configUpdatedAt),
@@ -725,15 +827,41 @@ const AccountControl: React.FC = () => {
     await runSync(reason);
   }, [ready, runSync]);
 
+  // The first cloud account ever connected, on any device, is the account's User ID. A device's first
+  // link adopts the ID this provider's settings already name; only a brand-new account uses the email.
+  const establishUserIdForSession = useCallback(async (session: FederatedSession): Promise<string> => {
+    const existing = String((bibleService.readState() as MarginaliaState).userId ?? '').trim();
+    const email = String(session.profile.email ?? '').trim();
+    if (existing || !email) {
+      return existing;
+    }
+
+    let owner: { userId: string; stamp: number } | null = null;
+    try {
+      const cloudDoc = await readCloudConfigForSession(session);
+      owner = cloudDoc ? readConfigOwner(cloudDoc) : null;
+    } catch {
+      // Settings unreadable: start with the email; reconcile adopts the owner once it can read them.
+    }
+
+    // With no User ID yet, the broker stored this link's refresh token under the email.
+    const adopted = owner !== null
+      && (owner.userId === email || await rekeyStoredRefreshTokens(email, owner.userId, [session.provider]));
+    const userId = adopted && owner ? owner.userId : email;
+    dispatch(setUserId(userId));
+    fieldStampsRef.current = { ...fieldStampsRef.current, userId: adopted && owner ? owner.stamp : Date.now() };
+    persistCloudState({ cloudFieldUpdatedAt: fieldStampsRef.current });
+    return userId;
+  }, [dispatch, persistCloudState]);
+
   const handleSessionAfterSignIn = useCallback(async (session: FederatedSession) => {
     const localSessions = await getFreshFederatedSessions();
     setSessions(localSessions);
 
-    // The first cloud account ever connected becomes the internal User ID reference; no-op once set.
-    if (session.profile.email) {
-      dispatch(setUserId(session.profile.email));
-      setStorageSessionUserId(session.profile.email);
-      void establishStorageSession(session.profile.email);
+    const userId = await establishUserIdForSession(session);
+    if (userId) {
+      setStorageSessionUserId(userId);
+      void establishStorageSession(userId);
     }
 
     const persistedState = bibleService.readState() as MarginaliaState;
@@ -754,7 +882,7 @@ const AccountControl: React.FC = () => {
     // Reconcile (read every copy, merge, write back) through the normal sync path, which runs
     // with current state rather than this first-render closure.
     setHasPendingSync(true);
-  }, [dispatch, persistCloudState]);
+  }, [establishUserIdForSession, persistCloudState]);
 
   useEffect(() => {
     if (hasBootstrappedAuthRef.current) {
@@ -884,8 +1012,10 @@ const AccountControl: React.FC = () => {
     }
 
     const applied = appliedFingerprintsRef.current;
+    // userId is stamped where it is established, with that time; it is never an edit.
     const changedFields = SYNCED_CONFIG_FIELDS.filter((field) => (
-      previous[field] !== syncedFieldFingerprints[field]
+      field !== 'userId'
+      && previous[field] !== syncedFieldFingerprints[field]
       && applied?.[field] !== syncedFieldFingerprints[field]
     ));
     const sourceUrlsChanged = previousSourceUrls !== sourceUrlsFingerprint
@@ -1026,14 +1156,6 @@ const AccountControl: React.FC = () => {
       window.clearTimeout(timeout);
     };
   }, [configUpdatedAt, hasPendingSync, linkedAccounts.length, ready, syncNow]);
-
-  useEffect(() => {
-    if (forceSyncRequestId === 0) {
-      return;
-    }
-
-    void syncNow();
-  }, [forceSyncRequestId, syncNow]);
 
   const handleConnect = useCallback(async (provider: FederatedProvider, preferences: ProviderSyncDraft) => {
     setStatusMessage(null);
@@ -1181,11 +1303,17 @@ const AccountControl: React.FC = () => {
         dispatch(addSourceUrl(libraryUrl));
       }
 
+      const mergedAddedAt = result.merged.config.sourceUrlAddedAt ?? {};
+      const mergedTombstones = result.merged.config.sourceUrlTombstones ?? {};
+      const libraryAddedAt = Object.fromEntries(result.libraryUrls
+        .filter((url) => !((mergedAddedAt[url] ?? 0) > (mergedTombstones[url] ?? -1)))
+        .map((url) => [url, Math.max(Date.now(), (mergedTombstones[url] ?? 0) + 1)]));
       const withLibrary: SyncedCloudConfig = {
         ...result.merged,
         config: {
           ...result.merged.config,
-          sourceUrls: [...(result.merged.config.sourceUrls ?? []), ...result.libraryUrls],
+          sourceUrls: Array.from(new Set([...(result.merged.config.sourceUrls ?? []), ...result.libraryUrls])),
+          sourceUrlAddedAt: { ...mergedAddedAt, ...libraryAddedAt },
         },
       };
       const followUp = await reconcileWithCloud(withLibrary, currentSessions, { queueFolderChanges: false });
@@ -1338,7 +1466,7 @@ const AccountControl: React.FC = () => {
 
                   {linkedAccounts.length === 0 && (
                     <div className="alert alert-secondary mb-0" role="alert">
-                      Connect to show your own notes within Marginalia! When you connect a cloud provider below, any notes you have withBring your personal notes into Marginalia by connecting a cloud provider below! We'll scan your notes for Scripture references and link them to the corresponding Bible passages. As you read, any notes you've made on a verse will be viewable right within Marginalia. Ask your church if they have a library with Marginalia. If so, you can subscribe from here to access their resources alongside your own notes.
+                      Bring your personal notes into Marginalia by connecting a cloud provider below! We'll scan your notes for Scripture references and link them to the corresponding Bible passages. As you read, any notes you've made on a verse will be viewable right within Marginalia. Ask your church if they have a library with Marginalia. If so, you can subscribe from here to access their resources alongside your own notes.
                     </div>
                   )}
 
@@ -1366,31 +1494,27 @@ const AccountControl: React.FC = () => {
                     onSelectionsChange={handleApplyFolderSelections}
                     onConnectRequested={handleConnectRequestedFromPicker}
                     onDirtyChange={setHasUnsavedFileSyncChanges}
+                    subscriptions={subscriptions}
                     ref={folderPickerRef}
                   />
                 </div>
 
                 <div className="modal-footer account-modal-footer">
-                  <div className="account-modal-footer-status">
+                  <p className="account-modal-footer-status small text-body-secondary mb-0 me-auto">
                     {(lastSyncedAt || syncState === 'syncing') && (
-                      <p className="small text-body-secondary mb-0 d-flex align-items-center gap-2">
-                        <i
-                          className="fa-solid fa-circle-notch fa-spin account-sync-spinner"
-                          style={{ visibility: syncState === 'syncing' ? 'visible' : 'hidden' }}
-                          aria-hidden="true"
-                        ></i>
-                        <span>
-                          {lastSyncedAt
-                            ? `Last synced ${new Date(lastSyncedAt).toLocaleString()}.`
-                            : 'Syncing configuration...'}
-                        </span>
-                      </p>
+                      <span>
+                        {lastSyncedAt
+                          ? `Last synced ${new Date(lastSyncedAt).toLocaleString()}.`
+                          : 'Syncing configuration...'}
+                      </span>
                     )}
-
+                    {syncState === 'syncing' && (
+                      <>{' '}<i className="fa-solid fa-circle-notch fa-spin account-sync-spinner" aria-hidden="true"></i></>
+                    )}
                     {statusMessage && (
-                      <p className="small mb-0 account-status-message">{statusMessage}</p>
+                      <>{' '}<span className="account-status-message">{statusMessage}</span></>
                     )}
-                  </div>
+                  </p>
 
                   <div className="d-flex gap-2">
                     <button

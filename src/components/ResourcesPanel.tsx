@@ -16,6 +16,7 @@ import { versesFromContext } from '../utils/selectedVerseContext';
 import { mergeVerseResourcePayloads, type ResourceVerseMatchMode } from '../utils/verseResources';
 import { markupFlagsFromBible } from '../utils/verseMarkup';
 import { useRevealVerseSelectionInBible } from '../hooks/useDocumentScriptureNavigation';
+import { useSourcePreferences } from '../hooks/useSourcePreferences';
 import { VerseReferenceLabel, VerseTextList } from './VersePreview';
 
 interface ResourcesPanelProps {
@@ -40,6 +41,7 @@ const ResourcesPanel: React.FC<ResourcesPanelProps> = ({ tab, isActive }) => {
   } = useAppSelector((state) => state.ui);
   const { currentBible, isPanelDetached } = useAppSelector((state) => state.bible);
   const revealInBible = useRevealVerseSelectionInBible();
+  const sourcePreferences = useSourcePreferences();
   const verseMarkupSettings = useMemo(() => ({
     italics: translatorItalics,
     paragraphMarks: translatorParagraphMarks,
@@ -82,7 +84,8 @@ const ResourcesPanel: React.FC<ResourcesPanelProps> = ({ tab, isActive }) => {
               verseContext.book,
               verseContext.chapter,
               verse,
-              sourceUrls
+              sourceUrls,
+              sourcePreferences
             )
           ))
         );
@@ -111,7 +114,7 @@ const ResourcesPanel: React.FC<ResourcesPanelProps> = ({ tab, isActive }) => {
     return () => {
       cancelled = true;
     };
-  }, [isActive, verseContext, sourceUrls]);
+  }, [isActive, verseContext, sourceUrls, sourcePreferences]);
 
   const hiddenTags = useMemo(() => new Set(resourceHiddenTags), [resourceHiddenTags]);
   const matchMode: ResourceVerseMatchMode = selectedVerseNumbers.length > 1

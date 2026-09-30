@@ -59,10 +59,8 @@
 }
 
 .account-modal-footer-status {
-  display: flex;
-  flex-direction: column;
-  gap: 0.15rem;
   min-width: 0;
+  text-align: left;
 }
 
 .account-modal-backdrop {
@@ -194,6 +192,14 @@
   justify-content: center;
 }
 
+.cloud-folder-tree-row.no-checkbox {
+  grid-template-columns: auto 1fr;
+}
+
+.cloud-folder-tree-row.is-active {
+  background: var(--bs-tertiary-bg);
+}
+
 .cloud-folder-tree-chevron {
   border: 0;
   background: transparent;
@@ -254,6 +260,9 @@
   cursor: pointer;
 }
 
+.cloud-folder-selected-row.is-highlighted {
+  animation: cloud-folder-highlight-fade 3s ease forwards;
+}
 .cloud-folder-selected-file-icon {
   width: 1rem;
   display: inline-flex;

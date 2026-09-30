@@ -17,6 +17,7 @@ import { searchIndexService } from '../services/searchIndexService';
 import { scrollToVerse } from '../App';
 import type { BibleChapter, BibleTranslationMeta, QuickJumpTarget } from '../models/bible';
 import { markupFlagsFromBible } from '../utils/verseMarkup';
+import { useSourcePreferences } from '../hooks/useSourcePreferences';
 import type { WorkspacePanelKey } from '../App';
 
 interface WorkspaceMainPaneProps {
@@ -81,6 +82,7 @@ const WorkspaceMainPane: React.FC<WorkspaceMainPaneProps> = ({
     translatorItalics,
     translatorParagraphMarks,
   } = useAppSelector((state) => state.ui);
+  const sourcePreferences = useSourcePreferences();
 
   const [loadedChapterView, setLoadedChapterView] = useState<{
     book: string;
@@ -189,7 +191,13 @@ const WorkspaceMainPane: React.FC<WorkspaceMainPaneProps> = ({
 
       const settled = await Promise.all(
         verseNumbers.map(async (verseNumber) => {
-          const payload = await bibleService.getResourcesForVerse(selectedBook, selectedChapter, verseNumber, sourceUrls);
+          const payload = await bibleService.getResourcesForVerse(
+            selectedBook,
+            selectedChapter,
+            verseNumber,
+            sourceUrls,
+            sourcePreferences
+          );
           return [verseNumber, payload.tags] as const;
         })
       );
@@ -203,7 +211,7 @@ const WorkspaceMainPane: React.FC<WorkspaceMainPaneProps> = ({
     return () => {
       cancelled = true;
     };
-  }, [selectedBook, selectedChapter, selectedBookEntry, sourceUrls]);
+  }, [selectedBook, selectedChapter, selectedBookEntry, sourceUrls, sourcePreferences]);
 
   const handleBookSelectionChange = (bookName: string) => {
     const nextBook = currentBible?.books.find((book) => book.name === bookName);
@@ -236,7 +244,13 @@ const WorkspaceMainPane: React.FC<WorkspaceMainPaneProps> = ({
 
     if (selectedBook) {
       void (async () => {
-        const hasResources = await bibleService.hasResourcesForVerse(selectedBook, selectedChapter, verse, sourceUrls);
+        const hasResources = await bibleService.hasResourcesForVerse(
+          selectedBook,
+          selectedChapter,
+          verse,
+          sourceUrls,
+          sourcePreferences
+        );
         dispatch(openVerseTabs({ book: selectedBook, chapter: selectedChapter, verse, hasResources }));
       })();
     }

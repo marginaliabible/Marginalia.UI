@@ -143,6 +143,57 @@ describe('mergeSyncedCloudConfigs', () => {
     ]);
   });
 
+  it('drops a source URL whose tombstone is newer than its last add', () => {
+    const a = 'https://a.example/library.json';
+    const b = 'https://b.example/library.json';
+    const stale = makeDoc({ sourceUrls: [a, b], sourceUrlAddedAt: { [a]: 1000, [b]: 1000 } });
+    const disconnected = makeDoc({
+      sourceUrls: [a],
+      sourceUrlAddedAt: { [a]: 1000, [b]: 1000 },
+      sourceUrlTombstones: { [b]: 2000 },
+    });
+
+    const merged = mergeSyncedCloudConfigs([stale, disconnected]);
+
+    expect(merged.config.sourceUrls).toEqual([a]);
+    expect(merged.config.sourceUrlTombstones).toEqual({ [b]: 2000 });
+  });
+
+  it('keeps a legacy source URL without stamps unless another device tombstoned it', () => {
+    const a = 'https://a.example/library.json';
+    const legacy = makeDoc({ sourceUrls: [a] });
+
+    expect(mergeSyncedCloudConfigs([legacy, makeDoc({})]).config.sourceUrls).toEqual([a]);
+    expect(mergeSyncedCloudConfigs([legacy, makeDoc({ sourceUrlTombstones: { [a]: 500 } })]).config.sourceUrls).toEqual([]);
+  });
+
+  it('lets a re-add after a disconnect win over the older tombstone', () => {
+    const b = 'https://b.example/library.json';
+    const readded = makeDoc({ sourceUrls: [b], sourceUrlAddedAt: { [b]: 3000 }, sourceUrlTombstones: { [b]: 2000 } });
+    const other = makeDoc({ sourceUrls: [], sourceUrlTombstones: { [b]: 2000 } });
+
+    const merged = mergeSyncedCloudConfigs([other, readded]);
+
+    expect(merged.config.sourceUrls).toEqual([b]);
+    expect(merged.config.sourceUrlAddedAt).toEqual({ [b]: 3000 });
+  });
+
+  it('merges disabled source items and resource tag overrides by last writer', () => {
+    const older = makeDoc(
+      { disabledSourceItems: ['builtin|translation|ASV'], resourceTagOverrides: { 'abc:doc': { added: ['Old'], removed: [] } } },
+      { disabledSourceItems: 1000, resourceTagOverrides: 3000 }
+    );
+    const newer = makeDoc(
+      { disabledSourceItems: ['builtin|translation|KJV'], resourceTagOverrides: {} },
+      { disabledSourceItems: 2000, resourceTagOverrides: 1000 }
+    );
+
+    const merged = mergeSyncedCloudConfigs([older, newer]);
+
+    expect(merged.config.disabledSourceItems).toEqual(['builtin|translation|KJV']);
+    expect(merged.config.resourceTagOverrides).toEqual({ 'abc:doc': { added: ['Old'], removed: [] } });
+  });
+
   it('keeps the earliest non-empty userId', () => {
     const original = makeDoc({ userId: 'first@example.com' }, { userId: 1000 });
     const later = makeDoc({ userId: 'second@example.com' }, { userId: 9000 });
@@ -152,6 +203,14 @@ describe('mergeSyncedCloudConfigs', () => {
 
     expect(merged.config.userId).toBe('first@example.com');
     expect(merged.fieldUpdatedAt?.userId).toBe(1000);
+  });
+
+  it('ranks a userId with no recorded establishment time after any recorded one', () => {
+    const established = makeDoc({ userId: 'owner@example.com' }, { userId: 5000 });
+    const unstamped = makeDoc({ userId: 'another@example.com' }, { userId: 0 });
+
+    expect(mergeSyncedCloudConfigs([unstamped, established]).config.userId).toBe('owner@example.com');
+    expect(mergeSyncedCloudConfigs([established, unstamped]).fieldUpdatedAt?.userId).toBe(5000);
   });
 
   it('lets a never-synced device adopt the cloud copy, including folder selections', () => {

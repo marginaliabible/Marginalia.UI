@@ -89,6 +89,13 @@ export interface MarginaliaState {
   lastSearch?: string;
   languages?: string[];
   sourceUrls?: string[];
+  // When each source URL was last added / removed; lets a removal on one device win over stale copies.
+  sourceUrlAddedAt?: Record<string, number>;
+  sourceUrlTombstones?: Record<string, number>;
+  // Subscription entries (whole document types or single documents) the user turned off.
+  disabledSourceItems?: string[];
+  // User tag edits layered on the publisher's tags, keyed by resource document key.
+  resourceTagOverrides?: Record<string, { added: string[]; removed: string[] }>;
   resourceHiddenTags?: string[];
   theme?: ThemePreference;
   /** Italicize translator-added words in opted-in translations (default true). */

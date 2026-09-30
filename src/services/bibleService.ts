@@ -24,7 +24,8 @@ import {
   parseGitHubPrivateBibleData,
   resolveGitHubPrivateSourceVersion,
 } from './githubPrivateSourceService';
-import { ResourceLibraryService } from './resourceLibraryService';
+import { ResourceLibraryService, type ResourceLibraryDocumentList } from './resourceLibraryService';
+import type { SourcePreferences } from '../utils/sourceSubscriptions';
 import { fetchStorageAware } from './storageAuthenticatedFetch';
 import {
   buildFetchUrlCandidates,
@@ -199,48 +200,6 @@ const DEFAULT_LOCAL_TRANSLATION: BibleTranslationMeta = {
 
 const BOOK_CANONICAL_BY_ALIAS = buildBookCanonicalAliasMap();
 
-export interface SourceArtifactSummary {
-  translation: number;
-  translationLibrary: number;
-  resourceLibrary: number;
-}
-
-export interface SourceLibraryRecord {
-  id: string;
-  label: string;
-  source: string;
-  configuredSourceUrl?: string;
-  repositoryType: RepositoryType;
-  artifactType: 'translation-library' | 'resource-library';
-}
-
-export interface SourceArtifactStatus {
-  summary: SourceArtifactSummary;
-  libraries: SourceLibraryRecord[];
-}
-
-export interface SourceRepositorySummary {
-  hosted: number;
-  local: number;
-  githubPublic: number;
-  githubPrivate: number;
-}
-
-export interface SourceArtifactInventoryItem {
-  id: string;
-  label: string;
-  source: string;
-  configuredSourceUrl?: string;
-  repositoryType: RepositoryType;
-  artifactType: ArtifactType;
-}
-
-export interface SourceArtifactInventory {
-  summary: SourceArtifactSummary;
-  repositorySummary: SourceRepositorySummary;
-  items: SourceArtifactInventoryItem[];
-}
-
 export interface VerseResourceDocumentLink {
   page: number;
   url: string;
@@ -257,6 +216,8 @@ export interface VerseResourceDocument {
   tags: string[];
   pages: number[];
   pageLinks: VerseResourceDocumentLink[];
+  libraryKey?: string;
+  resourceKey?: string;
 }
 
 export interface VerseResourcesPayload {
@@ -490,39 +451,33 @@ class BibleService {
     return [...this.extraLanguages];
   }
 
-  async getSourceArtifactSummary(sourceUrls: string[] = []): Promise<SourceArtifactSummary> {
-    return this.resourceLibraryService.getSourceArtifactSummary(sourceUrls);
-  }
-
   // Shared connection so sibling services do not race the version upgrade.
   async openDatabase(): Promise<IDBPDatabase<any>> {
     return this.getDatabase();
-  }
-
-  async getSourceArtifactStatus(sourceUrls: string[] = []): Promise<SourceArtifactStatus> {
-    return this.resourceLibraryService.getSourceArtifactStatus(sourceUrls);
-  }
-
-  async getSourceArtifactInventory(sourceUrls: string[] = []): Promise<SourceArtifactInventory> {
-    return this.resourceLibraryService.getSourceArtifactInventory(sourceUrls);
   }
 
   async hasResourcesForVerse(
     book: string,
     chapter: number,
     verse: number,
-    sourceUrls: string[] = []
+    sourceUrls: string[] = [],
+    preferences?: SourcePreferences
   ): Promise<boolean> {
-    return this.resourceLibraryService.hasResourcesForVerse(book, chapter, verse, sourceUrls);
+    return this.resourceLibraryService.hasResourcesForVerse(book, chapter, verse, sourceUrls, preferences);
   }
 
   async getResourcesForVerse(
     book: string,
     chapter: number,
     verse: number,
-    sourceUrls: string[] = []
+    sourceUrls: string[] = [],
+    preferences?: SourcePreferences
   ): Promise<VerseResourcesPayload> {
-    return this.resourceLibraryService.getResourcesForVerse(book, chapter, verse, sourceUrls);
+    return this.resourceLibraryService.getResourcesForVerse(book, chapter, verse, sourceUrls, preferences);
+  }
+
+  async listResourceLibraryDocuments(sourceUrls: string[] = []): Promise<ResourceLibraryDocumentList[]> {
+    return this.resourceLibraryService.listResourceLibraryDocuments(sourceUrls);
   }
 
   async probeSourceUrl(sourceUrl: string): Promise<SourceProbeResult> {
@@ -1430,6 +1385,20 @@ class BibleService {
     }
 
     return next;
+  }
+
+  /** The one way past persistState's guard: adopting the account's established (earliest) User ID. */
+  replaceUserId(userId: string): void {
+    const next = userId.trim();
+    if (typeof window === 'undefined' || !next) {
+      return;
+    }
+
+    try {
+      window.localStorage.setItem(STATE_CACHE_KEY, JSON.stringify({ ...this.readState(), userId: next }));
+    } catch (error) {
+      console.warn('Unable to persist state', error);
+    }
   }
 
   private mergeTranslations(

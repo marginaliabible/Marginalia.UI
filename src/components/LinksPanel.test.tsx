@@ -3,6 +3,7 @@ import LinksPanel from './LinksPanel';
 import { useAppSelector } from '../store/hooks';
 import { hyperlinkService } from '../services/hyperlinkService';
 import type { PanelTab } from '../models/tab';
+import { EMPTY_SOURCE_PREFERENCES } from '../utils/sourceSubscriptions';
 
 jest.mock('../store/hooks', () => ({
   useAppSelector: jest.fn(),
@@ -62,7 +63,7 @@ describe('LinksPanel visibility gating', () => {
     expect(hyperlinkService.getHyperlinksForVerse).not.toHaveBeenCalledWith({
       ...nextVerse,
       verses: [9],
-    }, []);
+    }, [], EMPTY_SOURCE_PREFERENCES);
   });
 
   it('fetches the selected verse when the tab becomes active', async () => {
@@ -83,7 +84,7 @@ describe('LinksPanel visibility gating', () => {
       expect(hyperlinkService.getHyperlinksForVerse).toHaveBeenCalledWith({
         ...selected,
         verses: [9],
-      }, []);
+      }, [], EMPTY_SOURCE_PREFERENCES);
     });
   });
 
@@ -97,7 +98,7 @@ describe('LinksPanel visibility gating', () => {
         chapter: 1,
         verse: 1,
         verses: [1],
-      }, []);
+      }, [], EMPTY_SOURCE_PREFERENCES);
     });
 
     expect(await findByText('Genesis 1:1-3')).toBeTruthy();

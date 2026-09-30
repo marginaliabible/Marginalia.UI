@@ -3,6 +3,7 @@ import type { PanelTab, VerseContext } from '../models/tab';
 import type { ResolvedHyperlink } from '../models/hyperlink';
 import { useAppSelector } from '../store/hooks';
 import { hyperlinkService } from '../services/hyperlinkService';
+import { useSourcePreferences } from '../hooks/useSourcePreferences';
 import { firstVerseContext, formatVerseReference } from '../utils/selectedVerseContext';
 
 interface LinksPanelProps {
@@ -13,6 +14,7 @@ interface LinksPanelProps {
 const LinksPanel: React.FC<LinksPanelProps> = ({ tab, isActive }) => {
   const verseContext = tab.verseContext as VerseContext | undefined;
   const { sourceUrls } = useAppSelector((state) => state.ui);
+  const sourcePreferences = useSourcePreferences();
 
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -41,7 +43,8 @@ const LinksPanel: React.FC<LinksPanelProps> = ({ tab, isActive }) => {
       try {
         const resolved = await hyperlinkService.getHyperlinksForVerse(
           firstVerseContext(verseContext),
-          sourceUrls
+          sourceUrls,
+          sourcePreferences
         );
         if (cancelled) {
           return;
@@ -67,7 +70,7 @@ const LinksPanel: React.FC<LinksPanelProps> = ({ tab, isActive }) => {
     return () => {
       cancelled = true;
     };
-  }, [isActive, verseContext, sourceUrls]);
+  }, [isActive, verseContext, sourceUrls, sourcePreferences]);
 
   if (!verseContext) {
     return <div className="links-panel-empty">Select a verse to see external links.</div>;

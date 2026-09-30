@@ -1,5 +1,5 @@
 import type { DBSchema, IDBPDatabase } from 'idb';
-import type { BibleTranslationMeta, ArtifactType, FederatedProvider, RepositoryType } from '../models/bible';
+import type { BibleTranslationMeta, FederatedProvider } from '../models/bible';
 import { BOOK_ALIAS_CONFIG, normalizeBookName } from '../utils/book-aliases';
 import {
   DEFAULT_DOCUMENT_STORE_ADDRESS,
@@ -18,6 +18,14 @@ import {
   type ResourceDocumentEntry,
   type ResourcesFileLike,
 } from '../utils/resourceLibraryConfig';
+import {
+  applyResourceTagOverride,
+  hasSourcePreferences,
+  isResourceDisabled,
+  resolveLibraryKey,
+  resourceDocumentKey,
+  type SourcePreferences,
+} from '../utils/sourceSubscriptions';
 import { fetchStorageAware } from './storageAuthenticatedFetch';
 
 interface ResourceLibraryDB extends DBSchema {
@@ -61,48 +69,6 @@ interface FetchSettingsResult {
   translationLibraryUrls: string[];
 }
 
-export interface SourceArtifactSummary {
-  translation: number;
-  translationLibrary: number;
-  resourceLibrary: number;
-}
-
-export interface SourceLibraryRecord {
-  id: string;
-  label: string;
-  source: string;
-  configuredSourceUrl?: string;
-  repositoryType: RepositoryType;
-  artifactType: 'translation-library' | 'resource-library';
-}
-
-export interface SourceArtifactStatus {
-  summary: SourceArtifactSummary;
-  libraries: SourceLibraryRecord[];
-}
-
-export interface SourceRepositorySummary {
-  hosted: number;
-  local: number;
-  githubPublic: number;
-  githubPrivate: number;
-}
-
-export interface SourceArtifactInventoryItem {
-  id: string;
-  label: string;
-  source: string;
-  configuredSourceUrl?: string;
-  repositoryType: RepositoryType;
-  artifactType: ArtifactType;
-}
-
-export interface SourceArtifactInventory {
-  summary: SourceArtifactSummary;
-  repositorySummary: SourceRepositorySummary;
-  items: SourceArtifactInventoryItem[];
-}
-
 export interface VerseResourceDocumentLink {
   page: number;
   url: string;
@@ -120,6 +86,18 @@ export interface VerseResourceDocument {
   tags: string[];
   pages: number[];
   pageLinks: VerseResourceDocumentLink[];
+  /** Subscription library this document came from ('builtin' or the saved source URL). */
+  libraryKey?: string;
+  /** Stable key for per-document subscription preferences (see resourceDocumentKey). */
+  resourceKey?: string;
+}
+
+export interface ResourceLibraryDocumentList {
+  libraryId: string;
+  label: string;
+  resourcesUrl: string;
+  configuredSourceUrl?: string;
+  documents: ResourceDocumentEntry[];
 }
 
 export interface VerseResourcesPayload {
@@ -155,6 +133,7 @@ interface ResolvedResourceLibrary {
   id: string;
   label: string;
   resourcesUrl: string;
+  configuredSourceUrl?: string;
   documentManifestAddress: string;
   documentStoreAddress: string;
   documentViewer: DocumentViewerKind | null;
@@ -181,8 +160,6 @@ const BOOK_CANONICAL_BY_ALIAS = buildBookCanonicalAliasMap();
 export class ResourceLibraryService {
   private readonly fetchSettings: ResourceLibraryServiceDependencies['fetchSettings'];
   private readonly getDatabase: ResourceLibraryServiceDependencies['getDatabase'];
-  private sourceArtifacts: BibleTranslationMeta[] = [];
-  private sourceTranslationLibraryUrls: string[] = [];
   private resourceLibraryCacheKey: string | null = null;
   private resourceLibrarySourceKey: string | null = null;
   private resourceLibrariesLoadedAt = 0;
@@ -197,51 +174,15 @@ export class ResourceLibraryService {
     this.getDatabase = dependencies.getDatabase;
   }
 
-  async getSourceArtifactSummary(sourceUrls: string[] = []): Promise<SourceArtifactSummary> {
-    const status = await this.getSourceArtifactStatus(sourceUrls);
-    return status.summary;
-  }
-
-  async getSourceArtifactStatus(sourceUrls: string[] = []): Promise<SourceArtifactStatus> {
-    try {
-      const fetched = await this.fetchSettings(sourceUrls);
-      this.sourceArtifacts = fetched.artifacts;
-      this.sourceTranslationLibraryUrls = fetched.translationLibraryUrls;
-
-      return {
-        summary: summarizeArtifacts(fetched.artifacts, fetched.translationLibraryUrls),
-        libraries: buildSourceLibraries(fetched.artifacts, fetched.translationLibraryUrls),
-      };
-    } catch (error) {
-      console.warn('Failed to summarize source artifacts:', error);
-
-      return {
-        summary: summarizeArtifacts(this.sourceArtifacts, this.sourceTranslationLibraryUrls),
-        libraries: buildSourceLibraries(this.sourceArtifacts, this.sourceTranslationLibraryUrls),
-      };
-    }
-  }
-
-  async getSourceArtifactInventory(sourceUrls: string[] = []): Promise<SourceArtifactInventory> {
-    try {
-      const fetched = await this.fetchSettings(sourceUrls);
-      this.sourceArtifacts = fetched.artifacts;
-      this.sourceTranslationLibraryUrls = fetched.translationLibraryUrls;
-      return buildArtifactInventory(fetched.artifacts, fetched.translationLibraryUrls);
-    } catch (error) {
-      console.warn('Failed to build source artifact inventory:', error);
-      return buildArtifactInventory(this.sourceArtifacts, this.sourceTranslationLibraryUrls);
-    }
-  }
-
   async hasResourcesForVerse(
     book: string,
     chapter: number,
     verse: number,
-    sourceUrls: string[] = []
+    sourceUrls: string[] = [],
+    preferences?: SourcePreferences
   ): Promise<boolean> {
     try {
-      const payload = await this.getResourcesForVerse(book, chapter, verse, sourceUrls);
+      const payload = await this.getResourcesForVerse(book, chapter, verse, sourceUrls, preferences);
       return payload.documents.length > 0;
     } catch {
       return false;
@@ -252,7 +193,31 @@ export class ResourceLibraryService {
     book: string,
     chapter: number,
     verse: number,
-    sourceUrls: string[] = []
+    sourceUrls: string[] = [],
+    preferences?: SourcePreferences
+  ): Promise<VerseResourcesPayload> {
+    const payload = await this.getUnfilteredResourcesForVerse(book, chapter, verse, sourceUrls);
+    return applySourcePreferencesToVersePayload(payload, preferences);
+  }
+
+  /** Every document of every resource library reachable from the given sources (built-in included). */
+  async listResourceLibraryDocuments(sourceUrls: string[] = []): Promise<ResourceLibraryDocumentList[]> {
+    const libraries = await this.loadResourceLibraries(sourceUrls);
+    return libraries.map((library) => ({
+      libraryId: library.id,
+      label: library.label,
+      resourcesUrl: library.resourcesUrl,
+      configuredSourceUrl: library.configuredSourceUrl,
+      // documentsById also indexes each entry under its content hash.
+      documents: Array.from(new Set(library.documentsById.values())).sort((a, b) => a.title.localeCompare(b.title)),
+    }));
+  }
+
+  private async getUnfilteredResourcesForVerse(
+    book: string,
+    chapter: number,
+    verse: number,
+    sourceUrls: string[]
   ): Promise<VerseResourcesPayload> {
     const normalizedSourceUrls = Array.from(new Set(sourceUrls.map((entry) => entry.trim()).filter((entry) => entry.length > 0))).sort();
     const cacheKey = `${normalizedSourceUrls.join('|')}::${normalizeReferenceBookToken(book)}.${chapter}.${verse}`;
@@ -316,6 +281,8 @@ export class ResourceLibraryService {
             raw: rawByPage.get(page),
             viewer: library.documentViewer === 'markup' ? 'markup' : 'pdf',
           })),
+          libraryKey: resolveLibraryKey(library.configuredSourceUrl, normalizedSourceUrls),
+          resourceKey: resourceDocumentKey(library.resourcesUrl, document.documentId),
         };
 
         aggregated.set(key, nextDoc);
@@ -356,8 +323,6 @@ export class ResourceLibraryService {
       // forceRefresh so library.json snapshot cache does not stick with empty child resources
       // after cloud sync fills resources.json (library.modifiedOn may be unchanged).
       const fetched = await this.fetchSettings(normalizedSourceUrls, { forceRefresh: true });
-      this.sourceArtifacts = fetched.artifacts;
-      this.sourceTranslationLibraryUrls = fetched.translationLibraryUrls;
 
       const resourceEntries = fetched.artifacts
         .filter((entry) => entry.artifactType === 'resource-library')
@@ -413,6 +378,7 @@ export class ResourceLibraryService {
         id: fromDb.id,
         label: fromDb.label,
         resourcesUrl: fromDb.resourcesUrl,
+        configuredSourceUrl: meta.configuredSourceUrl,
         documentManifestAddress: fromDb.documentManifestAddress,
         documentStoreAddress: fromDb.documentStoreAddress,
         documentViewer: fromDb.documentViewer ?? null,
@@ -463,6 +429,7 @@ export class ResourceLibraryService {
       id: meta.id,
       label: meta.label,
       resourcesUrl,
+      configuredSourceUrl: meta.configuredSourceUrl,
       documentManifestAddress,
       documentStoreAddress,
       documentViewer,
@@ -581,6 +548,38 @@ export class ResourceLibraryService {
   }
 }
 
+/** Drops disabled documents and applies the user's tag edits; returns the payload untouched when neither applies. */
+export function applySourcePreferencesToVersePayload(
+  payload: VerseResourcesPayload,
+  preferences: SourcePreferences | undefined
+): VerseResourcesPayload {
+  if (!hasSourcePreferences(preferences)) {
+    return payload;
+  }
+
+  const disabled = new Set(preferences.disabledSourceItems);
+  const documents = payload.documents
+    .filter((document) => !(document.libraryKey && document.resourceKey
+      && isResourceDisabled(disabled, document.libraryKey, document.resourceKey)))
+    .map((document) => {
+      const override = document.resourceKey ? preferences.resourceTagOverrides[document.resourceKey] : undefined;
+      return override ? { ...document, tags: applyResourceTagOverride(document.tags, override) } : document;
+    });
+
+  const tags = new Set<string>();
+  for (const document of documents) {
+    for (const tag of document.tags) {
+      tags.add(tag);
+    }
+  }
+
+  return {
+    ...payload,
+    tags: Array.from(tags).sort((a, b) => a.localeCompare(b)),
+    documents,
+  };
+}
+
 async function fetchJsonPayload(sourceUrl: string): Promise<unknown> {
   const failures: string[] = [];
 
@@ -600,183 +599,6 @@ async function fetchJsonPayload(sourceUrl: string): Promise<unknown> {
   }
 
   throw new Error(`Resource JSON unavailable at ${sourceUrl}: ${failures.join('; ')}`);
-}
-
-function summarizeArtifacts(
-  entries: BibleTranslationMeta[],
-  translationLibraryUrls: string[] = []
-): SourceArtifactSummary {
-  const distinctLibraryUrls = new Set(
-    translationLibraryUrls
-      .map((url) => url.trim())
-      .filter((url) => url.length > 0)
-  );
-
-  const summary: SourceArtifactSummary = {
-    translation: 0,
-    translationLibrary: distinctLibraryUrls.size,
-    resourceLibrary: 0,
-  };
-
-  let translationLibraryArtifacts = 0;
-
-  for (const entry of entries) {
-    const kind = entry.artifactType ?? 'translation';
-    if (kind === 'translation') {
-      summary.translation += 1;
-      continue;
-    }
-    if (kind === 'translation-library') {
-      translationLibraryArtifacts += 1;
-      continue;
-    }
-    if (kind === 'resource-library') {
-      summary.resourceLibrary += 1;
-    }
-  }
-
-  summary.translationLibrary = Math.max(summary.translationLibrary, translationLibraryArtifacts);
-
-  return summary;
-}
-
-function summarizeRepositories(entries: BibleTranslationMeta[]): SourceRepositorySummary {
-  const summary: SourceRepositorySummary = {
-    hosted: 0,
-    local: 0,
-    githubPublic: 0,
-    githubPrivate: 0,
-  };
-
-  for (const entry of entries) {
-    const repositoryType = entry.repositoryType ?? normalizeRepositoryType(entry.source);
-    if (repositoryType === 'hosted') {
-      summary.hosted += 1;
-      continue;
-    }
-    if (repositoryType === 'local') {
-      summary.local += 1;
-      continue;
-    }
-    if (repositoryType === 'github-public') {
-      summary.githubPublic += 1;
-      continue;
-    }
-    if (repositoryType === 'github-private') {
-      summary.githubPrivate += 1;
-    }
-  }
-
-  return summary;
-}
-
-function buildSourceLibraries(
-  entries: BibleTranslationMeta[],
-  translationLibraryUrls: string[] = []
-): SourceLibraryRecord[] {
-  const byKey = new Map<string, SourceLibraryRecord>();
-
-  const addLibrary = (library: SourceLibraryRecord) => {
-    const key = `${library.artifactType}:${library.source}`;
-    if (!byKey.has(key)) {
-      byKey.set(key, library);
-    }
-  };
-
-  for (const entry of entries) {
-    const artifactType = entry.artifactType;
-    if (artifactType !== 'translation-library' && artifactType !== 'resource-library') {
-      continue;
-    }
-
-    addLibrary({
-      id: entry.id,
-      label: entry.label,
-      source: entry.source,
-      configuredSourceUrl: entry.configuredSourceUrl,
-      repositoryType: entry.repositoryType ?? normalizeRepositoryType(entry.source),
-      artifactType,
-    });
-  }
-
-  for (const url of translationLibraryUrls) {
-    const trimmed = url.trim();
-    if (!trimmed) {
-      continue;
-    }
-
-    addLibrary({
-      id: `settings-${hashText(trimmed).slice(0, 8)}`,
-      label: prettifyLibraryLabel(trimmed),
-      source: trimmed,
-      configuredSourceUrl: trimmed,
-      repositoryType: normalizeRepositoryType(trimmed),
-      artifactType: 'translation-library',
-    });
-  }
-
-  return Array.from(byKey.values()).sort((a, b) => {
-    const kindCompare = a.artifactType.localeCompare(b.artifactType);
-    if (kindCompare !== 0) {
-      return kindCompare;
-    }
-    return a.label.localeCompare(b.label);
-  });
-}
-
-function buildArtifactInventory(
-  entries: BibleTranslationMeta[],
-  translationLibraryUrls: string[] = []
-): SourceArtifactInventory {
-  const items = entries
-    .map((entry) => ({
-      id: entry.id,
-      label: entry.label,
-      source: entry.source,
-      configuredSourceUrl: entry.configuredSourceUrl,
-      repositoryType: entry.repositoryType ?? normalizeRepositoryType(entry.source),
-      artifactType: entry.artifactType ?? 'translation',
-    }))
-    .sort((a, b) => {
-      const artifactCompare = a.artifactType.localeCompare(b.artifactType);
-      if (artifactCompare !== 0) {
-        return artifactCompare;
-      }
-      return a.id.localeCompare(b.id);
-    });
-
-  return {
-    summary: summarizeArtifacts(entries, translationLibraryUrls),
-    repositorySummary: summarizeRepositories(entries),
-    items,
-  };
-}
-
-function prettifyLibraryLabel(urlText: string): string {
-  const stem = extractFilenameStem(urlText).trim();
-  if (stem) {
-    return stem
-      .replace(/[-_]/g, ' ')
-      .replace(/\b\w/g, (char) => char.toUpperCase());
-  }
-
-  try {
-    const parsed = new URL(urlText);
-    return parsed.hostname;
-  } catch {
-    return 'Translation Library';
-  }
-}
-
-function extractFilenameStem(urlText: string): string {
-  try {
-    const parsed = new URL(urlText);
-    const path = parsed.pathname;
-    const filename = path.split('/').filter(Boolean).pop() ?? '';
-    return filename.replace(/\.[^.]+$/, '');
-  } catch {
-    return '';
-  }
 }
 
 function buildReferenceBookCandidates(book: string): string[] {
@@ -1022,18 +844,6 @@ function normalizeLookupBookName(value: string): string {
     .replace(/\./g, '')
     .replace(/\s+/g, ' ')
     .trim();
-}
-
-function normalizeRepositoryType(source: string): RepositoryType {
-  if (!/^https?:\/\//i.test(source)) {
-    return 'local';
-  }
-
-  if (/^https?:\/\/raw\.githubusercontent\.com\//i.test(source)) {
-    return 'github-public';
-  }
-
-  return 'hosted';
 }
 
 function hashText(value: string): string {

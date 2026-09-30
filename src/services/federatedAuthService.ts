@@ -668,6 +668,35 @@ async function persistRefreshToken(
   }
 }
 
+/**
+ * Moves refresh tokens stored under a placeholder User ID to the established one and signs the
+ * placeholder out of sync. Resolves false when the broker could not be reached, so the caller can
+ * keep the placeholder and retry on the next sync.
+ */
+export async function rekeyStoredRefreshTokens(
+  fromUserId: string,
+  toUserId: string,
+  providers: FederatedProvider[]
+): Promise<boolean> {
+  const lambdaBaseUrl = readAwsLambdaBaseUrl();
+  if (!lambdaBaseUrl) {
+    return true;
+  }
+
+  try {
+    const endpoint = new URL(lambdaBaseUrl);
+    endpoint.pathname = `${endpoint.pathname.replace(/\/$/, '')}/oauth/token-rekey`;
+    const response = await fetch(endpoint.toString(), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fromUserId, toUserId, providers }),
+    });
+    return response.ok;
+  } catch {
+    return false;
+  }
+}
+
 export async function revokeStoredRefreshToken(provider: FederatedProvider): Promise<void> {
   const lambdaBaseUrl = readAwsLambdaBaseUrl();
   const userId = readCurrentUserId();

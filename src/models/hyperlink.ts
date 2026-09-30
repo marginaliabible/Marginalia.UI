@@ -5,6 +5,8 @@ export interface HyperlinkEntry {
 
 export interface HyperlinkSet {
   sourceUrl: string;
+  /** Saved source URL (or the built-in hyperlinks file) this set was reached from. */
+  librarySourceUrl?: string;
   modifiedOn?: string;
   entries: HyperlinkEntry[];
 }

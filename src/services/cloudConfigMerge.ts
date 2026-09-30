@@ -7,13 +7,16 @@ import {
 
 type SyncedConfig = SyncedCloudConfig['config'];
 
-// sourceUrls is intentionally absent: it merges as a union and carries no timestamp.
+// sourceUrls (with its sourceUrlAddedAt / sourceUrlTombstones stamps) is intentionally absent: it
+// merges per URL instead of per field.
 export const SYNCED_CONFIG_FIELDS = [
   'lastTranslationId',
   'lastTranslationIds',
   'translationRecords',
   'position',
   'languages',
+  'disabledSourceItems',
+  'resourceTagOverrides',
   'resourceHiddenTags',
   'theme',
   'translatorItalics',
@@ -121,6 +124,17 @@ export function fieldFingerprints(config: SyncedConfig): Record<SyncedConfigFiel
   ) as Record<SyncedConfigField, string>;
 }
 
+/**
+ * Orders userId stamps oldest first. A zero stamp means the establishment time was never recorded, so
+ * it ranks after every recorded one rather than passing for the oldest.
+ */
+export function compareOwnerStamps(left: number, right: number): number {
+  const known = (stamp: number) => (stamp > 0 ? stamp : Number.POSITIVE_INFINITY);
+  const leftKnown = known(left);
+  const rightKnown = known(right);
+  return leftKnown === rightKnown ? 0 : leftKnown < rightKnown ? -1 : 1;
+}
+
 function fieldStamp(doc: SyncedCloudConfig, field: SyncedConfigField): number {
   // Files written by clients that predate per-field stamps: every field is as new as the file.
   if (!doc.fieldUpdatedAt) {
@@ -131,24 +145,67 @@ function fieldStamp(doc: SyncedCloudConfig, field: SyncedConfigField): number {
   return typeof stamp === 'number' && Number.isFinite(stamp) ? stamp : 0;
 }
 
-function unionSourceUrls(docs: SyncedCloudConfig[]): string[] {
+/** The User ID a copy names as the account owner, with its establishment stamp. */
+export function readConfigOwner(doc: SyncedCloudConfig): { userId: string; stamp: number } | null {
+  const userId = String(doc.config.userId ?? '').trim();
+  return userId ? { userId, stamp: fieldStamp(doc, 'userId') } : null;
+}
+
+function maxStampsByUrl(docs: SyncedCloudConfig[], read: (doc: SyncedCloudConfig) => unknown): Record<string, number> {
+  const merged: Record<string, number> = {};
+  for (const doc of docs) {
+    const stamps = read(doc);
+    if (!stamps || typeof stamps !== 'object') {
+      continue;
+    }
+
+    for (const [url, stamp] of Object.entries(stamps as Record<string, unknown>)) {
+      if (typeof stamp === 'number' && Number.isFinite(stamp) && url.trim()) {
+        merged[url.trim()] = Math.max(merged[url.trim()] ?? 0, stamp);
+      }
+    }
+  }
+
+  return merged;
+}
+
+/**
+ * Union of every copy's sourceUrls, minus URLs whose newest removal is newer than their newest add.
+ * URLs saved before add stamps existed count as added at time 0, so any recorded removal wins.
+ */
+function mergeSourceUrls(docs: SyncedCloudConfig[]): Pick<SyncedConfig, 'sourceUrls' | 'sourceUrlAddedAt' | 'sourceUrlTombstones'> {
+  const addedAt = maxStampsByUrl(docs, (doc) => doc.config.sourceUrlAddedAt);
+  const tombstones = maxStampsByUrl(docs, (doc) => doc.config.sourceUrlTombstones);
   const seen = new Set<string>();
   for (const doc of docs) {
     for (const entry of Array.isArray(doc.config.sourceUrls) ? doc.config.sourceUrls : []) {
       const url = String(entry ?? '').trim();
-      if (url) {
+      if (url && !((tombstones[url] ?? -1) >= (addedAt[url] ?? 0))) {
         seen.add(url);
       }
     }
   }
 
-  return Array.from(seen);
+  return {
+    sourceUrls: Array.from(seen),
+    sourceUrlAddedAt: addedAt,
+    sourceUrlTombstones: tombstones,
+  };
+}
+
+/** Everything that decides the merged sourceUrls; a change to any of it must be synced. */
+export function sourceRegistryFingerprint(config: SyncedConfig): string {
+  return stableStringify({
+    sourceUrls: config.sourceUrls ?? [],
+    sourceUrlAddedAt: config.sourceUrlAddedAt ?? {},
+    sourceUrlTombstones: config.sourceUrlTombstones ?? {},
+  });
 }
 
 /**
  * Commutative, idempotent merge: each field takes the value with the newest stamp (ties broken by
  * value so every device picks the same winner), userId keeps the earliest owner, and sourceUrls is
- * the union of all copies.
+ * the union of all copies minus URLs removed after they were last added.
  */
 export function mergeSyncedCloudConfigs(docs: SyncedCloudConfig[]): SyncedCloudConfig {
   if (docs.length === 0) {
@@ -183,15 +240,15 @@ export function mergeSyncedCloudConfigs(docs: SyncedCloudConfig[]): SyncedCloudC
   }
 
   const owners = docs
-    .map((doc) => ({ userId: String(doc.config.userId ?? '').trim(), stamp: fieldStamp(doc, 'userId') }))
-    .filter((entry) => entry.userId.length > 0)
-    .sort((left, right) => left.stamp - right.stamp || left.userId.localeCompare(right.userId));
+    .map(readConfigOwner)
+    .filter((entry): entry is { userId: string; stamp: number } => entry !== null)
+    .sort((left, right) => compareOwnerStamps(left.stamp, right.stamp) || left.userId.localeCompare(right.userId));
   if (owners.length > 0) {
     config.userId = owners[0].userId;
     stamps.userId = owners[0].stamp;
   }
 
-  config.sourceUrls = unionSourceUrls(docs);
+  Object.assign(config, mergeSourceUrls(docs));
 
   const linkedAccounts = docs.reduce(
     (accounts, doc) => mergeLinkedAccounts(accounts, doc.linkedAccounts),

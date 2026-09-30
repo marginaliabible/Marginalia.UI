@@ -41,15 +41,17 @@ import {
   removeTranslationRecord,
   toggleStarTranslation,
   reorderTranslations,
+  setDisabledSourceItems,
+  setResourceTagOverrides,
+  dropTranslationRecords,
 } from './store/slices/uiSlice';
 import {
   bibleService,
   normalizeSourceUrlInput,
   type SourceProbeResult,
-  type SourceArtifactInventory,
-  type SourceLibraryRecord,
-  type SourceArtifactSummary,
 } from './services/bibleService';
+import { loadSubscriptionCatalog, type SubscriptionLibrary } from './services/subscriptionCatalogService';
+import type { AddSourceUrlResult, SubscriptionChanges, SubscriptionsBinding } from './models/subscription';
 import { hyperlinkService } from './services/hyperlinkService';
 import { hasValidGitHubAuthSession } from './services/githubPrivateSourceService';
 import type { QuickJumpTarget } from './models/bible';
@@ -73,6 +75,13 @@ import { useMobilePanelEffects } from './hooks/useMobilePanelEffects';
 import { useHashRouteSync } from './hooks/useHashRouteSync';
 import { useVerseTabContextSync } from './hooks/useVerseTabContextSync';
 import { beginGitHubAuthorization, initializeGitHubAuthFlow } from './services/githubAuthFlowService';
+import {
+  computeDisabledTranslationIds,
+  normalizeDisabledSourceItems,
+  normalizeResourceTagOverrides,
+  normalizeTimestampMap,
+  parseSourceItemKey,
+} from './utils/sourceSubscriptions';
 import './App.scss';
 
 const STATE_CACHE_KEY = 'marginalia:state';
@@ -114,14 +123,10 @@ function App() {
   const [isMobilePanelOpen, setIsMobilePanelOpen] = useState(false);
   const [miniSearchFocusToken, setMiniSearchFocusToken] = useState(0);
   const [isMiniSearchVisible, setIsMiniSearchVisible] = useState(false);
-  const [sourceArtifactSummary, setSourceArtifactSummary] = useState<SourceArtifactSummary>({
-    translation: 0,
-    translationLibrary: 0,
-    resourceLibrary: 0,
-  });
-  const [sourceLibraries, setSourceLibraries] = useState<SourceLibraryRecord[]>([]);
-  const [sourceArtifactInventory, setSourceArtifactInventory] = useState<SourceArtifactInventory | null>(null);
-  const [isSourceDiagnosticsLoading, setIsSourceDiagnosticsLoading] = useState(false);
+  const [subscriptionLibraries, setSubscriptionLibraries] = useState<SubscriptionLibrary[]>([]);
+  const [isSubscriptionCatalogLoading, setIsSubscriptionCatalogLoading] = useState(false);
+  const [subscriptionCatalogRequest, setSubscriptionCatalogRequest] = useState(0);
+  const subscriptionCatalogGenerationRef = useRef(0);
   const [isGitHubAuthPromptOpen, setIsGitHubAuthPromptOpen] = useState(false);
   const [gitHubAuthPromptContext, setGitHubAuthPromptContext] = useState<string | null>(null);
   const [gitHubAuthPromptError, setGitHubAuthPromptError] = useState<string | null>(null);
@@ -152,6 +157,10 @@ function App() {
     selectedVerseTranslationId,
     selectedLanguages,
     sourceUrls,
+    sourceUrlAddedAt,
+    sourceUrlTombstones,
+    disabledSourceItems,
+    resourceTagOverrides,
     resourceHiddenTags,
     pdfViewer,
     theme,
@@ -461,6 +470,10 @@ function App() {
           : true,
         selectedLanguages: finalLanguages,
         sourceUrls: Array.isArray(savedState?.sourceUrls) ? savedState.sourceUrls : [],
+        sourceUrlAddedAt: normalizeTimestampMap(savedState?.sourceUrlAddedAt),
+        sourceUrlTombstones: normalizeTimestampMap(savedState?.sourceUrlTombstones),
+        disabledSourceItems: normalizeDisabledSourceItems(savedState?.disabledSourceItems),
+        resourceTagOverrides: normalizeResourceTagOverrides(savedState?.resourceTagOverrides),
         resourceHiddenTags: Array.isArray(savedState?.resourceHiddenTags) ? savedState.resourceHiddenTags : [],
         searchTerm: initialSearchTerm,
         userId: typeof savedState?.userId === 'string' && savedState.userId.trim().length > 0 ? savedState.userId : null,
@@ -500,6 +513,10 @@ function App() {
       translatorParagraphMarks,
       languages: safeSelectedLanguages,
       sourceUrls,
+      sourceUrlAddedAt,
+      sourceUrlTombstones,
+      disabledSourceItems,
+      resourceTagOverrides,
       resourceHiddenTags,
       userId: userId ?? undefined,
     });
@@ -514,6 +531,10 @@ function App() {
     translatorParagraphMarks,
     safeSelectedLanguages,
     sourceUrls,
+    sourceUrlAddedAt,
+    sourceUrlTombstones,
+    disabledSourceItems,
+    resourceTagOverrides,
     resourceHiddenTags,
     userId,
     ready,
@@ -619,12 +640,35 @@ function App() {
     }
   }, [safeTranslationRecords, selectedTranslationId, dispatch]);
 
+  const languageFilteredSubscriptionLibraries = useMemo(() => {
+    const visibleIds = new Set(filteredTranslations.map((translation) => translation.id));
+    return subscriptionLibraries.map((library) => {
+      const translations = library.types.translation;
+      if (!translations) {
+        return library;
+      }
+
+      const visible = translations.filter((document) => visibleIds.has(document.itemId));
+      if (visible.length === translations.length) {
+        return library;
+      }
+
+      const { translation: _hidden, ...otherTypes } = library.types;
+      return { ...library, types: visible.length > 0 ? { ...otherTypes, translation: visible } : otherTypes };
+    });
+  }, [filteredTranslations, subscriptionLibraries]);
+
+  const disabledTranslationIds = useMemo(
+    () => computeDisabledTranslationIds(safeAvailableTranslations, sourceUrls, disabledSourceItems),
+    [disabledSourceItems, safeAvailableTranslations, sourceUrls]
+  );
+
   const addableTranslations = useMemo(() => {
     const selectedIds = new Set(safeTranslationRecords.map((record) => record.id));
     return filteredTranslations
-      .filter((translation) => !selectedIds.has(translation.id))
+      .filter((translation) => !selectedIds.has(translation.id) && !disabledTranslationIds.has(translation.id))
       .sort((a, b) => a.label.localeCompare(b.label));
-  }, [filteredTranslations, safeTranslationRecords]);
+  }, [disabledTranslationIds, filteredTranslations, safeTranslationRecords]);
 
   const starredTranslationIds = useMemo(() => {
     return safeTranslationRecords.filter((r) => r.starred).map((r) => r.id);
@@ -742,35 +786,35 @@ function App() {
     openGitHubAuthPrompt('Authentication is required before this source can be accessed.');
   }, [openGitHubAuthPrompt]);
 
-  const refreshSourceArtifactSummary = useCallback(async (urls?: string[]) => {
-    const status = await bibleService.getSourceArtifactStatus(urls ?? sourceUrls);
-    setSourceArtifactSummary(status.summary);
-    setSourceLibraries(status.libraries);
-  }, [sourceUrls]);
+  const requestSubscriptionCatalog = useCallback(() => {
+    setSubscriptionCatalogRequest((current) => current + 1);
+  }, []);
 
-  const refreshSelectedSources = useCallback(async () => {
-    await dispatch(refreshTranslations(true));
-    await dispatch(loadTranslation(selectedTranslationId));
-    dispatch(setCurrentBibleFromId(selectedTranslationId));
-    setSourceArtifactInventory(null);
-    await refreshSourceArtifactSummary();
-  }, [dispatch, refreshSourceArtifactSummary, selectedTranslationId]);
-
-  const loadSourceArtifactInventory = useCallback(async (urls?: string[]) => {
-    if (isSourceDiagnosticsLoading || sourceArtifactInventory) {
+  useEffect(() => {
+    if (subscriptionCatalogRequest === 0) {
       return;
     }
 
-    setIsSourceDiagnosticsLoading(true);
-    try {
-      const inventory = await bibleService.getSourceArtifactInventory(urls ?? sourceUrls);
-      setSourceArtifactInventory(inventory);
-    } finally {
-      setIsSourceDiagnosticsLoading(false);
-    }
-  }, [isSourceDiagnosticsLoading, sourceArtifactInventory, sourceUrls]);
+    const generation = ++subscriptionCatalogGenerationRef.current;
+    setIsSubscriptionCatalogLoading(true);
+    const translations = Array.isArray(availableTranslations) ? availableTranslations : [];
+    void loadSubscriptionCatalog({ sourceUrls, userId, translations })
+      .then((libraries) => {
+        if (generation === subscriptionCatalogGenerationRef.current) {
+          setSubscriptionLibraries(libraries);
+        }
+      })
+      .catch((catalogError) => {
+        console.warn('Failed to load subscription catalog.', catalogError);
+      })
+      .finally(() => {
+        if (generation === subscriptionCatalogGenerationRef.current) {
+          setIsSubscriptionCatalogLoading(false);
+        }
+      });
+  }, [availableTranslations, sourceUrls, subscriptionCatalogRequest, userId]);
 
-  const handleAddSourceUrl = async (url: string): Promise<{ ok: boolean; message: string; suggestGitHubAuth?: boolean }> => {
+  const handleAddSourceUrl = async (url: string): Promise<AddSourceUrlResult> => {
     const normalizedUrl = normalizeSourceUrlInput(url);
 
     if (sourceUrls.includes(normalizedUrl)) {
@@ -791,19 +835,14 @@ function App() {
       return { ok: false, message: formatSourceProbeFailure(probe) };
     }
 
-    const nextSourceUrls = Array.from(new Set([...sourceUrls, normalizedUrl])).filter((entry) => entry.length > 0);
-
     dispatch(addSourceUrl(normalizedUrl));
     hyperlinkService.invalidate();
     await dispatch(refreshTranslations(true));
-    setSourceArtifactInventory(null);
-    await refreshSourceArtifactSummary(nextSourceUrls);
-    return { ok: true, message: probe.message };
+    return { ok: true, message: probe.message, url: normalizedUrl };
   };
 
   const handleRemoveSourceUrl = async (url: string) => {
     const normalizedUrl = url.trim();
-    const nextSourceUrls = sourceUrls.filter((entry) => entry.trim() !== normalizedUrl);
     const affectedIds = safeAvailableTranslations
       .filter((translation) => {
         return translation.configuredSourceUrl === normalizedUrl || translation.source === normalizedUrl;
@@ -821,13 +860,51 @@ function App() {
     }
 
     await dispatch(refreshTranslations(true));
-    setSourceArtifactInventory(null);
-    await refreshSourceArtifactSummary(nextSourceUrls);
+  };
+
+  const handleSubscriptionsApply = async (changes: SubscriptionChanges) => {
+    const disconnected = new Set(changes.disconnectLibraryKeys);
+    const nextDisabledSourceItems = changes.disabledSourceItems.filter((key) => {
+      const parsed = parseSourceItemKey(key);
+      return !parsed || !disconnected.has(parsed.libraryKey);
+    });
+    const remainingSourceUrls = sourceUrls.filter((url) => !disconnected.has(url));
+    const nextDisabledIds = computeDisabledTranslationIds(
+      safeAvailableTranslations,
+      remainingSourceUrls,
+      nextDisabledSourceItems
+    );
+    const recordIdsToDrop = safeTranslationRecords
+      .map((record) => record.id)
+      .filter((id) => nextDisabledIds.has(id));
+
+    dispatch(setDisabledSourceItems(nextDisabledSourceItems));
+    dispatch(setResourceTagOverrides(changes.resourceTagOverrides));
+    if (recordIdsToDrop.length > 0) {
+      dispatch(dropTranslationRecords(recordIdsToDrop));
+    }
+
+    for (const url of disconnected) {
+      await handleRemoveSourceUrl(url);
+    }
+
+    requestSubscriptionCatalog();
+  };
+
+  const subscriptionsBinding: SubscriptionsBinding = {
+    sourceUrls,
+    libraries: languageFilteredSubscriptionLibraries,
+    isCatalogLoading: isSubscriptionCatalogLoading,
+    translationRecords: safeTranslationRecords,
+    disabledSourceItems,
+    resourceTagOverrides,
+    onRequestCatalog: requestSubscriptionCatalog,
+    onAddSourceUrl: handleAddSourceUrl,
+    onRequestGitHubAuth: handleRequestGitHubAuth,
+    onSubscriptionsApply: handleSubscriptionsApply,
   };
 
   const openSettingsModal = async () => {
-    await refreshSourceArtifactSummary();
-
     const el = document.getElementById('settingsModal');
     if (!el) return;
 
@@ -927,7 +1004,7 @@ function App() {
       <div className={`container app-shell ${useWideLayout ? 'app-shell-wide' : ''}`}>
         <AppHeader
           onOpenSettings={openSettingsModal}
-          accountControl={<AccountControl />}
+          accountControl={<AccountControl subscriptions={subscriptionsBinding} />}
         />
 
         <SearchBar
@@ -1020,16 +1097,6 @@ function App() {
           handleLanguagesChange={handleLanguagesChange}
           languageOptions={languageOptions}
           getLanguageDisplayName={getLoadedLanguageDisplayName}
-          sourceUrls={sourceUrls}
-          sourceArtifactSummary={sourceArtifactSummary}
-          sourceLibraries={sourceLibraries}
-          sourceArtifactInventory={sourceArtifactInventory}
-          onLoadSourceDiagnostics={loadSourceArtifactInventory}
-          onRefreshSources={refreshSelectedSources}
-          onRequestGitHubAuth={handleRequestGitHubAuth}
-          isSourceDiagnosticsLoading={isSourceDiagnosticsLoading}
-          onAddSourceUrl={handleAddSourceUrl}
-          onRemoveSourceUrl={handleRemoveSourceUrl}
           closeSettingsModal={closeSettingsModal}
           userId={userId}
         />

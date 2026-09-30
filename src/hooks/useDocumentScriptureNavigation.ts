@@ -13,6 +13,7 @@ import { versesFromContext } from '../utils/selectedVerseContext';
 import { scrollToVerse, VERSE_REFERENCE_SCROLL_OPTIONS } from '../App';
 import type { DocumentScriptureReference } from '../utils/pageVerseReferences';
 import { toVerseContext } from '../utils/pageVerseReferences';
+import { useSourcePreferences } from './useSourcePreferences';
 
 /**
  * Open a document scripture citation in the Translations panel (full verse set).
@@ -21,6 +22,7 @@ export function useOpenDocumentScriptureReference(): (reference: DocumentScriptu
   const dispatch = useAppDispatch();
   const selectedTranslationId = useAppSelector((state) => state.ui.selectedTranslationId);
   const sourceUrls = useAppSelector((state) => state.ui.sourceUrls);
+  const sourcePreferences = useSourcePreferences();
 
   return useCallback(async (reference: DocumentScriptureReference) => {
     const context = toVerseContext(reference);
@@ -41,7 +43,8 @@ export function useOpenDocumentScriptureReference(): (reference: DocumentScriptu
       context.book,
       context.chapter,
       verses[0],
-      sourceUrls
+      sourceUrls,
+      sourcePreferences
     );
 
     dispatch(openVerseTabs({
@@ -52,7 +55,7 @@ export function useOpenDocumentScriptureReference(): (reference: DocumentScriptu
       hasResources,
       preferPanel: 'translations',
     }));
-  }, [dispatch, selectedTranslationId, sourceUrls]);
+  }, [dispatch, selectedTranslationId, sourcePreferences, sourceUrls]);
 }
 
 /**

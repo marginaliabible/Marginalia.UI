@@ -9,7 +9,17 @@ import { getMarkupFileIcon } from '../utils/supportedMarkupFileTypes';
 import { useHorizontalSplit } from '../hooks/useHorizontalSplit';
 import WorkspaceDivider from './WorkspaceDivider';
 import FileSyncTagModal from './FileSyncTagModal';
+import FileSyncTagRowTags from './FileSyncTagRowTags';
+import SubscriptionsPanel, {
+  libraryRowKey,
+  visibleSubscriptionLibraries,
+  type SubscriptionRevealTarget,
+  type SubscriptionsPanelHandle,
+} from './SubscriptionsPanel';
+import SubscriptionConnectModal from './SubscriptionConnectModal';
 import { getStoredResourceTagColors } from '../utils/resourceTagColors';
+import type { SubscriptionsBinding } from '../models/subscription';
+import { findStarredTranslationBlock, useSubscriptionStaging } from '../hooks/useSubscriptionStaging';
 
 const ROOT_LABEL: Record<FederatedProvider, string> = {
   google: 'Google Drive',
@@ -47,8 +57,11 @@ interface CloudFolderPickerProps {
   onSelectionsChange: (next: Record<FederatedProvider, FolderSelectionTarget[]>) => void;
   onConnectRequested: (provider: FederatedProvider) => void;
   onDirtyChange?: (isDirty: boolean) => void;
+  subscriptions?: SubscriptionsBinding;
   ref?: React.Ref<CloudFolderPickerHandle>;
 }
+
+type RightPanelMode = 'files' | 'subscriptions';
 
 export interface CloudFolderPickerHandle {
   apply: () => void;
@@ -449,49 +462,6 @@ function buildSelectedMapFromPayload(
   return nextSelected;
 }
 
-const FileSyncTagRowTags: React.FC<{
-  effectiveTags: string[];
-  ownTags: string[];
-  tagColors: Map<string, string>;
-  flashAddButton?: boolean;
-  onAdd: (event: React.MouseEvent) => void;
-  onEditOwn: (event: React.MouseEvent) => void;
-  onFlashEnd?: () => void;
-}> = ({ effectiveTags, ownTags, tagColors, flashAddButton = false, onAdd, onEditOwn, onFlashEnd }) => {
-  const ownTagSet = new Set(ownTags);
-
-  return (
-    <>
-      {effectiveTags.map((tag) => {
-        const color = tagColors.get(tag) ?? '#6c757d';
-        const isOwn = ownTagSet.has(tag);
-        const style = { ['--resource-tag-color' as '--resource-tag-color']: color } as React.CSSProperties;
-
-        return (
-          <button
-            key={tag}
-            type="button"
-            className={`cloud-folder-tag-chip${isOwn ? '' : ' is-inherited'}`}
-            style={style}
-            title={isOwn ? tag : `${tag} (inherited)`}
-            onClick={onEditOwn}
-          >
-            {tag}
-          </button>
-        );
-      })}
-      <button
-        type="button"
-        className={`btn btn-outline-secondary btn-sm cloud-folder-tag-add-btn${flashAddButton ? ' is-flashing' : ''}`}
-        onClick={onAdd}
-        onAnimationEnd={flashAddButton ? onFlashEnd : undefined}
-      >
-        {effectiveTags.length === 0 ? '+ Tags' : '+'}
-      </button>
-    </>
-  );
-};
-
 const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
   sessions,
   initialSelections,
@@ -501,9 +471,16 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
   onSelectionsChange,
   onConnectRequested,
   onDirtyChange,
+  subscriptions,
   ref,
 }) => {
   const [loadingRoots, setLoadingRoots] = useState(true);
+  const [rightPanelMode, setRightPanelMode] = useState<RightPanelMode>('files');
+  const [isSubscriptionsExpanded, setIsSubscriptionsExpanded] = useState(false);
+  const [isConnectModalOpen, setIsConnectModalOpen] = useState(false);
+  const [pendingSubscriptionReveal, setPendingSubscriptionReveal] = useState<SubscriptionRevealTarget | null>(null);
+  const subscriptionsPanelRef = useRef<SubscriptionsPanelHandle | null>(null);
+  const subscriptionStaging = useSubscriptionStaging(subscriptions);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [rootKeys, setRootKeys] = useState<string[]>([]);
   const [nodes, setNodes] = useState<Record<string, FolderTreeNode>>({});
@@ -912,21 +889,57 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
     });
   }, [nodes]);
 
-  const isDirty = useMemo(() => {
+  const areFilesDirty = useMemo(() => {
     if (!hasBootstrappedSelectionsRef.current) {
       return false;
     }
 
     return !areSelectionPayloadsEqual(toSelectionPayload(selectedRows, nodes), initialSelections);
   }, [initialSelections, nodes, selectedRows]);
+  const areSubscriptionsDirty = Boolean(subscriptions) && subscriptionStaging.isDirty;
+  const isDirty = areFilesDirty || areSubscriptionsDirty;
 
   useEffect(() => {
     onDirtyChange?.(isDirty);
   }, [isDirty, onDirtyChange]);
 
+  const requestCatalogRef = useRef(subscriptions?.onRequestCatalog);
+  requestCatalogRef.current = subscriptions?.onRequestCatalog;
+  useEffect(() => {
+    requestCatalogRef.current?.();
+  }, []);
+
+  const subscriptionLibraries = useMemo(
+    () => (subscriptions ? visibleSubscriptionLibraries(subscriptions) : []),
+    [subscriptions]
+  );
+
+  useEffect(() => {
+    if (!pendingSubscriptionReveal || rightPanelMode !== 'subscriptions') {
+      return;
+    }
+    if (!subscriptionLibraries.some((library) => library.key === pendingSubscriptionReveal.libraryKey)) {
+      return;
+    }
+
+    subscriptionsPanelRef.current?.reveal(pendingSubscriptionReveal);
+    setPendingSubscriptionReveal(null);
+  }, [pendingSubscriptionReveal, rightPanelMode, subscriptionLibraries]);
+
+  const showSubscriptions = useCallback((target?: SubscriptionRevealTarget) => {
+    setRightPanelMode('subscriptions');
+    if (target) {
+      setPendingSubscriptionReveal(target);
+    }
+  }, []);
+
   const handleApply = useCallback(() => {
-    const untagged = findFirstUntaggedSelection(selectedRows, nodes, providerSyncFilesEnabled, sessions);
+    const shouldApplyFiles = areFilesDirty || !areSubscriptionsDirty;
+    const untagged = shouldApplyFiles
+      ? findFirstUntaggedSelection(selectedRows, nodes, providerSyncFilesEnabled, sessions)
+      : null;
     if (untagged) {
+      setRightPanelMode('files');
       window.alert('You must supply tags for all files before saving.');
 
       setRightExpandedKeyByParent((current) => {
@@ -948,13 +961,44 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
       return;
     }
 
-    setErrorMessage(null);
-    onSelectionsChange(toSelectionPayload(selectedRows, nodes));
-  }, [nodes, onSelectionsChange, providerSyncFilesEnabled, selectedRows, sessions]);
+    if (subscriptions && areSubscriptionsDirty) {
+      const blocked = findStarredTranslationBlock(
+        subscriptions.libraries,
+        subscriptions.translationRecords,
+        subscriptionStaging.staging
+      );
+      if (blocked) {
+        window.alert('At least one of your starred translations must stay enabled.');
+        showSubscriptions({ ...blocked, flash: true });
+        return;
+      }
+    }
 
+    setErrorMessage(null);
+    if (shouldApplyFiles) {
+      onSelectionsChange(toSelectionPayload(selectedRows, nodes));
+    }
+    if (subscriptions && areSubscriptionsDirty) {
+      void subscriptions.onSubscriptionsApply(subscriptionStaging.toChanges());
+    }
+  }, [
+    areFilesDirty,
+    areSubscriptionsDirty,
+    nodes,
+    onSelectionsChange,
+    providerSyncFilesEnabled,
+    selectedRows,
+    sessions,
+    showSubscriptions,
+    subscriptionStaging,
+    subscriptions,
+  ]);
+
+  const resetSubscriptionStaging = subscriptionStaging.reset;
   const handleCancel = useCallback(() => {
     setSelected(buildSelectedMapFromPayload(initialSelectionsRef.current));
-  }, []);
+    resetSubscriptionStaging();
+  }, [resetSubscriptionStaging]);
 
   useImperativeHandle(ref, () => ({
     apply: handleApply,
@@ -1358,6 +1402,7 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
                       }}
                       className={`cloud-folder-tree-row${highlightNodeKey === key ? ' is-highlighted' : ''}${isRoot && highlightServiceProvider === node.provider ? ' is-service-highlighted' : ''}`}
                       style={{ paddingLeft: `${depth * 0.55}rem` }}
+                      onClickCapture={() => setRightPanelMode('files')}
                     >
                       {node.hasChildren ? (
                         <button
@@ -1410,6 +1455,63 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
               })}
             </ul>
           )}
+
+          {subscriptions && (
+            <ul className="cloud-folder-tree-list" aria-label="Subscriptions">
+              <li>
+                <div
+                  className={`cloud-folder-tree-row no-checkbox${rightPanelMode === 'subscriptions' ? ' is-active' : ''}`}
+                  style={{ paddingLeft: 0 }}
+                >
+                  <button
+                    type="button"
+                    className="cloud-folder-tree-chevron"
+                    aria-label={isSubscriptionsExpanded ? 'Collapse Subscriptions' : 'Expand Subscriptions'}
+                    onClick={() => {
+                      setIsSubscriptionsExpanded((current) => !current);
+                      showSubscriptions();
+                    }}
+                  >
+                    <i className={`fa-solid ${isSubscriptionsExpanded ? 'fa-chevron-down' : 'fa-chevron-right'}`} aria-hidden="true"></i>
+                  </button>
+                  <div className="cloud-folder-tree-name-wrap">
+                    <button
+                      type="button"
+                      className="cloud-folder-tree-name"
+                      onClick={() => showSubscriptions()}
+                    >
+                      Subscriptions
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-link btn-sm cloud-folder-tree-connect-link"
+                      aria-label="Connect a subscription"
+                      onClick={() => setIsConnectModalOpen(true)}
+                    >
+                      Connect
+                    </button>
+                  </div>
+                </div>
+              </li>
+              {isSubscriptionsExpanded && subscriptionLibraries.map((library) => (
+                <li key={libraryRowKey(library.key)}>
+                  <div className="cloud-folder-tree-row no-checkbox" style={{ paddingLeft: '0.55rem' }}>
+                    <span className="cloud-folder-tree-chevron-spacer" aria-hidden="true"></span>
+                    <div className="cloud-folder-tree-name-wrap">
+                      <button
+                        type="button"
+                        className="cloud-folder-tree-name"
+                        title={library.isBuiltIn ? undefined : library.key}
+                        onClick={() => showSubscriptions({ libraryKey: library.key, flash: true })}
+                      >
+                        {library.name}
+                      </button>
+                    </div>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
 
         <WorkspaceDivider
@@ -1419,16 +1521,32 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
         />
 
         <div className="cloud-folder-picker-right" style={{ flexBasis: `${selectedPanePercent}%` }}>
-          <div className="cloud-folder-selected-header">
-            <span className="cloud-folder-selected-header-name">Selected Files & Folders</span>
-            <span className="cloud-folder-selected-header-size text-end" title="Shows file sync size and status. Unsupported file types are excluded.">Synchronization</span>
-          </div>
+          {rightPanelMode === 'subscriptions' ? (
+            <div className="cloud-folder-selected-header">
+              <span className="cloud-folder-selected-header-name">Subscriptions</span>
+              <span className="cloud-folder-selected-header-size text-end" title="Disable libraries, document types, or individual documents.">Enabled</span>
+            </div>
+          ) : (
+            <div className="cloud-folder-selected-header">
+              <span className="cloud-folder-selected-header-name">Selected Files & Folders</span>
+              <span className="cloud-folder-selected-header-size text-end" title="Shows file sync size and status. Unsupported file types are excluded.">Synchronization</span>
+            </div>
+          )}
 
-          {selectedRows.length === 0 && (
+          {subscriptions && (
+            <SubscriptionsPanel
+              ref={subscriptionsPanelRef}
+              binding={subscriptions}
+              staging={subscriptionStaging}
+              hidden={rightPanelMode !== 'subscriptions'}
+            />
+          )}
+
+          {rightPanelMode === 'files' && selectedRows.length === 0 && (
             <p className="small text-body-secondary mb-0">No folders selected yet.</p>
           )}
 
-          {selectedRows.length > 0 && (
+          {rightPanelMode === 'files' && selectedRows.length > 0 && (
             <ul className="cloud-folder-selected-list">
               {rightVisibleRows.map((visibleRow) => {
                 const node = nodes[visibleRow.key];
@@ -1670,6 +1788,20 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
             setTagModalTarget(null);
           }}
           onClose={() => setTagModalTarget(null)}
+        />
+      )}
+
+      {subscriptions && isConnectModalOpen && (
+        <SubscriptionConnectModal
+          sourceUrls={subscriptions.sourceUrls}
+          onAddSourceUrl={subscriptions.onAddSourceUrl}
+          onRequestGitHubAuth={subscriptions.onRequestGitHubAuth}
+          onConnected={(url) => {
+            setIsConnectModalOpen(false);
+            setIsSubscriptionsExpanded(true);
+            showSubscriptions({ libraryKey: url, flash: true });
+          }}
+          onClose={() => setIsConnectModalOpen(false)}
         />
       )}
     </section>

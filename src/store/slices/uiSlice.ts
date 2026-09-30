@@ -1,6 +1,11 @@
 import { createSlice, type PayloadAction } from '@reduxjs/toolkit';
 import type { FederatedProvider, ThemePreference } from '../../models/bible';
 import type { ResourceVerseMatchMode } from '../../utils/verseResources';
+import {
+  normalizeDisabledSourceItems,
+  normalizeResourceTagOverrides,
+  type ResourceTagOverrides,
+} from '../../utils/sourceSubscriptions';
 
 export interface TranslationRecord {
   id: string;
@@ -25,6 +30,10 @@ interface UiState {
   searchTerm: string;
   selectedLanguages: string[];
   sourceUrls: string[];
+  sourceUrlAddedAt: Record<string, number>;
+  sourceUrlTombstones: Record<string, number>;
+  disabledSourceItems: string[];
+  resourceTagOverrides: ResourceTagOverrides;
   resourceHiddenTags: string[];
   resourceVerseMatchMode: ResourceVerseMatchMode;
   pdfViewer: {
@@ -58,6 +67,10 @@ const initialState: UiState = {
   searchTerm: '',
   selectedLanguages: [],
   sourceUrls: [],
+  sourceUrlAddedAt: {},
+  sourceUrlTombstones: {},
+  disabledSourceItems: [],
+  resourceTagOverrides: {},
   resourceHiddenTags: [],
   resourceVerseMatchMode: 'all',
   pdfViewer: {
@@ -240,10 +253,55 @@ const uiSlice = createSlice({
       }
 
       state.sourceUrls.push(next);
+      state.sourceUrlAddedAt = {
+        ...state.sourceUrlAddedAt,
+        [next]: Math.max(Date.now(), (state.sourceUrlTombstones[next] ?? 0) + 1),
+      };
     },
     removeSourceUrl: (state, action: PayloadAction<string>) => {
       const target = action.payload.trim();
       state.sourceUrls = state.sourceUrls.filter((entry) => entry !== target);
+      if (target) {
+        state.sourceUrlTombstones = {
+          ...state.sourceUrlTombstones,
+          [target]: Math.max(Date.now(), (state.sourceUrlAddedAt[target] ?? 0) + 1),
+        };
+      }
+    },
+    setDisabledSourceItems: (state, action: PayloadAction<string[]>) => {
+      state.disabledSourceItems = normalizeDisabledSourceItems(action.payload);
+    },
+    setResourceTagOverrides: (state, action: PayloadAction<ResourceTagOverrides>) => {
+      state.resourceTagOverrides = normalizeResourceTagOverrides(action.payload);
+    },
+    /** Drops records for disabled translations (KJV included); callers keep at least one starred record. */
+    dropTranslationRecords: (state, action: PayloadAction<string[]>) => {
+      const dropped = new Set(action.payload.map((entry) => entry.trim()).filter((entry) => entry.length > 0));
+      const remaining = state.translationRecords.filter((record) => !dropped.has(record.id));
+      if (dropped.size === 0 || remaining.length === 0) {
+        return;
+      }
+
+      state.translationRecords = remaining;
+      if (!state.translationRecords.some((record) => record.starred)) {
+        state.translationRecords[0].starred = true;
+      }
+
+      state.selectedTranslationIds = state.selectedTranslationIds.filter((id) => !dropped.has(id));
+      if (state.selectedTranslationIds.length === 0) {
+        state.selectedTranslationIds = state.translationRecords.map((record) => record.id);
+      }
+
+      if (!state.selectedTranslationIds.includes(state.selectedTranslationId)) {
+        state.selectedTranslationId = state.translationRecords.find((record) => record.starred)?.id
+          ?? state.selectedTranslationIds[0];
+      }
+
+      if (state.selectedVerseTranslationId && dropped.has(state.selectedVerseTranslationId)) {
+        state.selectedVerseTranslationId = null;
+        state.selectedVerses = [];
+        state.selectionAnchorVerse = null;
+      }
     },
     removeTranslationsByIds: (state, action: PayloadAction<string[]>) => {
       const blocked = new Set(
@@ -295,6 +353,13 @@ const uiSlice = createSlice({
         state.userId = action.payload;
       }
     },
+    /** Only for adopting the account's established (earliest) User ID after its tokens were re-keyed to it. */
+    replaceUserId: (state, action: PayloadAction<string>) => {
+      const next = action.payload.trim();
+      if (next) {
+        state.userId = next;
+      }
+    },
     setReady: (state, action: PayloadAction<boolean>) => {
       state.ready = action.payload;
     },
@@ -323,6 +388,14 @@ const uiSlice = createSlice({
       }
       if (typeof next.translatorParagraphMarks !== 'boolean') {
         next.translatorParagraphMarks = true;
+      }
+      next.disabledSourceItems = normalizeDisabledSourceItems(next.disabledSourceItems);
+      next.resourceTagOverrides = normalizeResourceTagOverrides(next.resourceTagOverrides);
+      if (!next.sourceUrlAddedAt || typeof next.sourceUrlAddedAt !== 'object') {
+        next.sourceUrlAddedAt = {};
+      }
+      if (!next.sourceUrlTombstones || typeof next.sourceUrlTombstones !== 'object') {
+        next.sourceUrlTombstones = {};
       }
       return next;
     },
@@ -441,11 +514,15 @@ export const {
   toggleResourceHiddenTag,
   addSourceUrl,
   removeSourceUrl,
+  setDisabledSourceItems,
+  setResourceTagOverrides,
+  dropTranslationRecords,
   removeTranslationsByIds,
   setTheme,
   setTranslatorItalics,
   setTranslatorParagraphMarks,
   setUserId,
+  replaceUserId,
   setReady,
   restoreState,
   setTranslationRecords,
