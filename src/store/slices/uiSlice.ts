@@ -42,7 +42,8 @@ interface UiState {
     sourceUrl: string | null;
     title: string | null;
     page: number;
-    matchRaw: string | null;
+    /** Every reference text to highlight on `page`; the viewer scrolls to the first hit in page order. */
+    matchRaws: string[];
     /** Bumps on every open so re-clicking the same page still triggers scroll-into-view. */
     focusNonce: number;
     syncItem: DocumentSyncItem | null;
@@ -79,7 +80,7 @@ const initialState: UiState = {
     sourceUrl: null,
     title: null,
     page: 1,
-    matchRaw: null,
+    matchRaws: [],
     focusNonce: 0,
     syncItem: null,
   },
@@ -89,6 +90,44 @@ const initialState: UiState = {
   ready: false,
   userId: null
 };
+
+interface OpenDocumentViewerPayload {
+  sourceUrl: string;
+  title?: string;
+  page?: number;
+  matchRaws?: readonly string[] | null;
+  kind?: 'pdf' | 'markup';
+  syncItem?: DocumentSyncItem | null;
+}
+
+function normalizeMatchRaws(value: readonly unknown[] | null | undefined): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return Array.from(new Set(
+    value
+      .filter((entry): entry is string => typeof entry === 'string')
+      .map((entry) => entry.trim())
+      .filter((entry) => entry.length > 0)
+  ));
+}
+
+function buildOpenViewerState(previousFocusNonce: number, payload: OpenDocumentViewerPayload): UiState['pdfViewer'] {
+  const nextPage = typeof payload.page === 'number' && Number.isFinite(payload.page)
+    ? Math.max(1, Math.floor(payload.page))
+    : 1;
+
+  return {
+    isOpen: true,
+    kind: payload.kind === 'markup' ? 'markup' : 'pdf',
+    sourceUrl: payload.sourceUrl,
+    title: payload.title?.trim() || null,
+    page: nextPage,
+    matchRaws: normalizeMatchRaws(payload.matchRaws),
+    focusNonce: (previousFocusNonce || 0) + 1,
+    syncItem: payload.syncItem ?? null,
+  };
+}
 
 const uiSlice = createSlice({
   name: 'ui',
@@ -167,57 +206,11 @@ const uiSlice = createSlice({
     setResourceVerseMatchMode: (state, action: PayloadAction<ResourceVerseMatchMode>) => {
       state.resourceVerseMatchMode = action.payload === 'any' ? 'any' : 'all';
     },
-    openPdfViewer: (
-      state,
-      action: PayloadAction<{
-        sourceUrl: string;
-        title?: string;
-        page?: number;
-        matchRaw?: string | null;
-        kind?: 'pdf' | 'markup';
-        syncItem?: DocumentSyncItem | null;
-      }>
-    ) => {
-      const nextPage = typeof action.payload.page === 'number' && Number.isFinite(action.payload.page)
-        ? Math.max(1, Math.floor(action.payload.page))
-        : 1;
-
-      state.pdfViewer = {
-        isOpen: true,
-        kind: action.payload.kind === 'markup' ? 'markup' : 'pdf',
-        sourceUrl: action.payload.sourceUrl,
-        title: action.payload.title?.trim() || null,
-        page: nextPage,
-        matchRaw: action.payload.matchRaw?.trim() || null,
-        focusNonce: (state.pdfViewer.focusNonce || 0) + 1,
-        syncItem: action.payload.syncItem ?? null,
-      };
+    openPdfViewer: (state, action: PayloadAction<OpenDocumentViewerPayload>) => {
+      state.pdfViewer = buildOpenViewerState(state.pdfViewer.focusNonce, action.payload);
     },
-    openDocumentViewer: (
-      state,
-      action: PayloadAction<{
-        sourceUrl: string;
-        title?: string;
-        page?: number;
-        matchRaw?: string | null;
-        kind?: 'pdf' | 'markup';
-        syncItem?: DocumentSyncItem | null;
-      }>
-    ) => {
-      const nextPage = typeof action.payload.page === 'number' && Number.isFinite(action.payload.page)
-        ? Math.max(1, Math.floor(action.payload.page))
-        : 1;
-
-      state.pdfViewer = {
-        isOpen: true,
-        kind: action.payload.kind === 'markup' ? 'markup' : 'pdf',
-        sourceUrl: action.payload.sourceUrl,
-        title: action.payload.title?.trim() || null,
-        page: nextPage,
-        matchRaw: action.payload.matchRaw?.trim() || null,
-        focusNonce: (state.pdfViewer.focusNonce || 0) + 1,
-        syncItem: action.payload.syncItem ?? null,
-      };
+    openDocumentViewer: (state, action: PayloadAction<OpenDocumentViewerPayload>) => {
+      state.pdfViewer = buildOpenViewerState(state.pdfViewer.focusNonce, action.payload);
     },
     closePdfViewer: (state) => {
       state.pdfViewer.isOpen = false;
@@ -379,6 +372,10 @@ const uiSlice = createSlice({
       }
       if (next.pdfViewer && typeof next.pdfViewer.syncItem === 'undefined') {
         next.pdfViewer = { ...next.pdfViewer, syncItem: null };
+      }
+      if (next.pdfViewer && !Array.isArray(next.pdfViewer.matchRaws)) {
+        const legacyMatchRaw = (next.pdfViewer as { matchRaw?: unknown }).matchRaw;
+        next.pdfViewer = { ...next.pdfViewer, matchRaws: normalizeMatchRaws([legacyMatchRaw]) };
       }
       if (next.resourceVerseMatchMode !== 'any' && next.resourceVerseMatchMode !== 'all') {
         next.resourceVerseMatchMode = 'all';

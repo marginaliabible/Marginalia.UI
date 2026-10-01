@@ -1,4 +1,4 @@
-import { mergeVerseResourcePayloads } from './verseResources';
+import { mergePageLinks, mergeVerseResourcePayloads } from './verseResources';
 import type { VerseResourceDocument, VerseResourcesPayload } from '../services/bibleService';
 
 const document = (
@@ -54,5 +54,41 @@ describe('mergeVerseResourcePayloads', () => {
 
     expect(merged?.documents.map((entry) => entry.documentId)).toEqual(['a', 'b']);
     expect(merged?.tags).toEqual(['commentary', 'map']);
+  });
+
+  it('keeps one link per page carrying every verse reference text on that page', () => {
+    const withRaws = (raws: string[]): VerseResourceDocument => ({
+      ...document('a', 'Alpha', [2]),
+      pageLinks: [{ page: 2, url: 'https://example.com/a#2', raws }],
+    });
+
+    const merged = mergeVerseResourcePayloads([
+      payload(6, [withRaws(['Romans 12:6-8'])]),
+      payload(7, [withRaws(['Rom 12:7', 'Romans 12:6-8'])]),
+    ], 'all');
+
+    expect(merged?.documents[0].pageLinks).toEqual([
+      { page: 2, url: 'https://example.com/a#2', raws: ['Romans 12:6-8', 'Rom 12:7'] },
+    ]);
+  });
+});
+
+describe('mergePageLinks', () => {
+  it('collapses links for the same page and unions their reference texts', () => {
+    const merged = mergePageLinks(
+      [
+        { page: 5, url: 'u#5', raws: ['1 Pet. 2:24'] },
+        { page: 2, url: 'u#2' },
+      ],
+      [
+        { page: 2, url: 'u#2', raws: ['1Pe 2:24'] },
+        { page: 5, url: 'u#5', raws: ['1Pe 2:24', '1 Pet. 2:24'] },
+      ]
+    );
+
+    expect(merged).toEqual([
+      { page: 2, url: 'u#2', raws: ['1Pe 2:24'] },
+      { page: 5, url: 'u#5', raws: ['1 Pet. 2:24', '1Pe 2:24'] },
+    ]);
   });
 });

@@ -13,7 +13,7 @@ import { bibleService, type VerseResourcesPayload } from '../services/bibleServi
 import { buildPdfProxyUrl } from '../utils/pdfProxy';
 import { getOrAssignResourceTagColors, TAG_COLOR_PALETTE } from '../utils/resourceTagColors';
 import { versesFromContext } from '../utils/selectedVerseContext';
-import { mergeVerseResourcePayloads, type ResourceVerseMatchMode } from '../utils/verseResources';
+import { mergePageLinks, mergeVerseResourcePayloads, type ResourceVerseMatchMode } from '../utils/verseResources';
 import { markupFlagsFromBible } from '../utils/verseMarkup';
 import { useRevealVerseSelectionInBible } from '../hooks/useDocumentScriptureNavigation';
 import { useSourcePreferences } from '../hooks/useSourcePreferences';
@@ -206,7 +206,7 @@ const ResourcesPanel: React.FC<ResourcesPanelProps> = ({ tab, isActive }) => {
     url: string,
     page: number,
     title: string,
-    raw?: string,
+    raws: string[] = [],
     viewer: DocumentViewerKind = 'pdf',
     syncItem: DocumentSyncItem | null = null
   ) => {
@@ -219,7 +219,7 @@ const ResourcesPanel: React.FC<ResourcesPanelProps> = ({ tab, isActive }) => {
       sourceUrl: viewerUrl,
       page,
       title,
-      matchRaw: raw ?? null,
+      matchRaws: raws,
       kind: viewer,
       syncItem,
     }));
@@ -377,7 +377,7 @@ const ResourcesPanel: React.FC<ResourcesPanelProps> = ({ tab, isActive }) => {
                                 link.url,
                                 link.page,
                                 document.title,
-                                link.raw,
+                                link.raws,
                                 link.viewer,
                                 document.cloudProvider ? { provider: document.cloudProvider, itemId: document.documentId } : null
                               )}
@@ -399,30 +399,6 @@ const ResourcesPanel: React.FC<ResourcesPanelProps> = ({ tab, isActive }) => {
     </div>
   );
 };
-
-function mergePageLinks(
-  left: { page: number; url: string; raw?: string }[],
-  right: { page: number; url: string; raw?: string }[]
-): { page: number; url: string; raw?: string }[] {
-  const byPage = new Map<number, { page: number; url: string; raw?: string }>();
-
-  for (const link of [...left, ...right]) {
-    const existing = byPage.get(link.page);
-    if (!existing) {
-      byPage.set(link.page, link);
-      continue;
-    }
-
-    if (!existing.raw && link.raw) {
-      byPage.set(link.page, {
-        ...existing,
-        raw: link.raw,
-      });
-    }
-  }
-
-  return Array.from(byPage.values()).sort((a, b) => a.page - b.page);
-}
 
 function pickReadableTextColor(color: string): string {
   const rgb = parseColorToRgb(color);

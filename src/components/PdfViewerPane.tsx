@@ -17,6 +17,7 @@ import { loadPageScriptureReferences } from '../utils/loadPageScriptureReference
 import { applyScriptureLinkOverlays, clearScriptureLinks } from '../utils/scriptureLinkOverlays';
 import {
   buildTextLayerHaystack,
+  findAllMatchRanges,
   getMatchClientRects,
   placeOverlayOnPage,
   type MatchTextFolding,
@@ -75,9 +76,10 @@ function resolvePagesBaseUrlForPdf(sourceUrl: string | null | undefined): string
   return null;
 }
 
-function highlightMatchOnPageView(pageViewRoot: HTMLElement, rawMatchText: string): HTMLElement | null {
-  const normalizedNeedle = normalizeMatchText(rawMatchText).toLowerCase();
-  if (!normalizedNeedle) {
+/** Highlights every occurrence of every raw on the page; returns the first overlay in page order. */
+function highlightMatchesOnPageView(pageViewRoot: HTMLElement, rawMatchTexts: readonly string[]): HTMLElement | null {
+  const normalizedNeedles = rawMatchTexts.map((raw) => normalizeMatchText(raw).toLowerCase()).filter(Boolean);
+  if (normalizedNeedles.length === 0) {
     return null;
   }
 
@@ -95,27 +97,23 @@ function highlightMatchOnPageView(pageViewRoot: HTMLElement, rawMatchText: strin
 
   const { haystack, ranges } = buildTextLayerHaystack(spans, (value) => normalizeMatchText(value).toLowerCase());
 
-  const matchStart = haystack.indexOf(normalizedNeedle);
-  if (matchStart < 0) {
-    return null;
-  }
-  const matchEnd = matchStart + normalizedNeedle.length;
-
   let firstHighlight: HTMLElement | null = null;
 
-  for (const range of ranges) {
-    if (range.end <= matchStart || range.start >= matchEnd) {
-      continue;
-    }
-
-    for (const rect of getMatchClientRects(range, matchStart, matchEnd, OCR_MATCH_FOLDING)) {
-      const highlight = pageViewRoot.ownerDocument.createElement('div');
-      highlight.className = 'pdf-raw-highlight';
-      if (!placeOverlayOnPage(highlight, pageViewRoot, rect)) {
+  for (const { start: matchStart, end: matchEnd } of findAllMatchRanges(haystack, normalizedNeedles)) {
+    for (const range of ranges) {
+      if (range.end <= matchStart || range.start >= matchEnd) {
         continue;
       }
-      if (!firstHighlight) {
-        firstHighlight = highlight;
+
+      for (const rect of getMatchClientRects(range, matchStart, matchEnd, OCR_MATCH_FOLDING)) {
+        const highlight = pageViewRoot.ownerDocument.createElement('div');
+        highlight.className = 'pdf-raw-highlight';
+        if (!placeOverlayOnPage(highlight, pageViewRoot, rect)) {
+          continue;
+        }
+        if (!firstHighlight) {
+          firstHighlight = highlight;
+        }
       }
     }
   }
@@ -129,6 +127,7 @@ const PdfViewerPane: React.FC = () => {
   const currentBible = useAppSelector((state) => state.bible.currentBible);
   const openScriptureReference = useOpenDocumentScriptureReference();
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const pagesRef = useRef<HTMLDivElement | null>(null);
   const viewerRef = useRef<PDFViewer | null>(null);
   const eventBusRef = useRef<EventBus | null>(null);
   const linkServiceRef = useRef<PDFLinkService | null>(null);
@@ -158,7 +157,12 @@ const PdfViewerPane: React.FC = () => {
 
   const activeSourceUrl = pdfViewer.sourceUrl;
   const activePage = Math.max(1, pdfViewer.page);
-  const matchRaw = normalizeMatchText(pdfViewer.matchRaw);
+  const activePageRef = useRef(activePage);
+  activePageRef.current = activePage;
+  const matchRaws = useMemo(
+    () => pdfViewer.matchRaws.map(normalizeMatchText).filter(Boolean),
+    [pdfViewer.matchRaws]
+  );
   const focusNonce = pdfViewer.focusNonce || 0;
 
   const title = useMemo(() => {
@@ -185,7 +189,8 @@ const PdfViewerPane: React.FC = () => {
     }
 
     const container = containerRef.current;
-    if (!container) {
+    const pages = pagesRef.current;
+    if (!container || !pages) {
       return;
     }
 
@@ -193,6 +198,7 @@ const PdfViewerPane: React.FC = () => {
     const linkService = new PDFLinkService({ eventBus });
     const pdfViewerInstance = new PDFViewer({
       container,
+      viewer: pages,
       eventBus,
       linkService,
       textLayerMode: 1,
@@ -229,11 +235,12 @@ const PdfViewerPane: React.FC = () => {
     };
     eventBus.on('scalechanging', onScaleChanging);
 
-    // page-width needs page views, which exist only once pages init.
+    // page-width and page navigation need page views, which exist only once pages init.
     const onPagesInit = () => {
       if (fitWidthRef.current) {
         pdfViewerInstance.currentScaleValue = 'page-width';
       }
+      pdfViewerInstance.currentPageNumber = activePageRef.current;
     };
     eventBus.on('pagesinit', onPagesInit);
 
@@ -337,7 +344,7 @@ const PdfViewerPane: React.FC = () => {
       eventBusRef.current = null;
       linkServiceRef.current = null;
       setViewerReady(false);
-      container.replaceChildren();
+      pages.replaceChildren();
     };
   }, [pdfViewer.isOpen, pdfViewer.kind, dispatch]);
 
@@ -388,7 +395,6 @@ const PdfViewerPane: React.FC = () => {
         if (!fitWidthRef.current) {
           viewer.currentScale = scale;
         }
-        viewer.currentPageNumber = activePage;
         setIsLoading(false);
       } catch (loadError) {
         if (cancelled) {
@@ -437,7 +443,7 @@ const PdfViewerPane: React.FC = () => {
   }, [scale, fitWidth, viewerReady, activeSourceUrl]);
 
   useEffect(() => {
-    if (!matchRaw || isLoading || !viewerReady) {
+    if (matchRaws.length === 0 || isLoading || !viewerReady) {
       return;
     }
 
@@ -471,7 +477,7 @@ const PdfViewerPane: React.FC = () => {
         return;
       }
 
-      const highlight = highlightMatchOnPageView(pageRoot, matchRaw);
+      const highlight = highlightMatchesOnPageView(pageRoot, matchRaws);
       highlightAttemptedRef.current = true;
       if (!isInitialAttempt) {
         return;
@@ -487,7 +493,7 @@ const PdfViewerPane: React.FC = () => {
     return () => {
       cancelled = true;
     };
-  }, [matchRaw, activePage, focusNonce, highlightEpoch, isLoading, viewerReady, activeSourceUrl]);
+  }, [matchRaws, activePage, focusNonce, highlightEpoch, isLoading, viewerReady, activeSourceUrl]);
 
   useEffect(() => {
     // Zoom / document changes invalidate absolute overlay positions.
@@ -643,7 +649,7 @@ const PdfViewerPane: React.FC = () => {
         aria-label="PDF viewer"
       >
         <div ref={containerRef} className="pdf-viewer-container">
-          <div className="pdfViewer" />
+          <div ref={pagesRef} className="pdfViewer" />
         </div>
 
         {isLoading && (

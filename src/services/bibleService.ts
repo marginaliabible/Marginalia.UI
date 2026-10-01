@@ -203,7 +203,7 @@ const BOOK_CANONICAL_BY_ALIAS = buildBookCanonicalAliasMap();
 export interface VerseResourceDocumentLink {
   page: number;
   url: string;
-  raw?: string;
+  raws?: string[];
   viewer?: 'pdf' | 'markup';
 }
 

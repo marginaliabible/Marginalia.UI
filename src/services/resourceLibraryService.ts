@@ -72,7 +72,8 @@ interface FetchSettingsResult {
 export interface VerseResourceDocumentLink {
   page: number;
   url: string;
-  raw?: string;
+  /** Distinct reference texts citing the verse on this page (e.g. "1 Pet. 2:24" and "1Pe 2:24"). */
+  raws?: string[];
   viewer: DocumentViewerKind;
 }
 
@@ -253,17 +254,13 @@ export class ResourceLibraryService {
           tagSet.add(tag);
         }
 
-        const rawByPage = new Map<number, string>();
+        const rawsByPage = new Map<number, string[]>();
         for (const pageNumber of nextPages) {
-          if (existing) {
-            const existingLink = existing.pageLinks.find((link) => link.page === pageNumber);
-            if (existingLink?.raw && existingLink.raw.trim().length > 0) {
-              rawByPage.set(pageNumber, existingLink.raw);
-            }
-          }
-
-          if (pageNumber === match.page && match.raw && match.raw.trim().length > 0) {
-            rawByPage.set(pageNumber, match.raw);
+          const existingRaws = existing?.pageLinks.find((link) => link.page === pageNumber)?.raws ?? [];
+          const matchRaw = pageNumber === match.page ? match.raw?.trim() : undefined;
+          const raws = matchRaw && !existingRaws.includes(matchRaw) ? [...existingRaws, matchRaw] : existingRaws;
+          if (raws.length > 0) {
+            rawsByPage.set(pageNumber, raws);
           }
         }
 
@@ -278,7 +275,7 @@ export class ResourceLibraryService {
           pageLinks: nextPages.map((page) => ({
             page,
             url: buildDocumentStorePageUrl(library.documentStoreAddress, library.resourcesUrl, document, page),
-            raw: rawByPage.get(page),
+            raws: rawsByPage.get(page),
             viewer: library.documentViewer === 'markup' ? 'markup' : 'pdf',
           })),
           libraryKey: resolveLibraryKey(library.configuredSourceUrl, normalizedSourceUrls),

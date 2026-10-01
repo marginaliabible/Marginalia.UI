@@ -88,6 +88,100 @@ export function findNeedleInHaystack(
   return { start: matchStart, end: matchEnd, ranges: hitRanges };
 }
 
+const escapeRegExp = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/**
+ * Locates an already-normalized `needle` in `haystack`. Falls back to matching the
+ * needle's words with any short run of punctuation/spacing between them, since the
+ * extracted reference text and the rendered page often differ there
+ * (e.g. "rom 9:4" vs "rom. 9:4;").
+ */
+export function findMatchRange(haystack: string, needle: string): { start: number; end: number } | null {
+  if (!needle || !haystack) {
+    return null;
+  }
+
+  const exact = haystack.indexOf(needle);
+  if (exact >= 0) {
+    return { start: exact, end: exact + needle.length };
+  }
+
+  const words = needle.match(/[\p{L}\p{N}]+/gu);
+  if (!words) {
+    return null;
+  }
+  const pattern = new RegExp(
+    `(?<![\\p{L}\\p{N}])${words.map(escapeRegExp).join('[^\\p{L}\\p{N}]{1,3}')}(?![\\p{L}\\p{N}])`,
+    'u'
+  );
+  const match = pattern.exec(haystack);
+  return match ? { start: match.index, end: match.index + match[0].length } : null;
+}
+
+export type MatchRange = { start: number; end: number };
+
+function collectPatternRanges(haystack: string, pattern: RegExp): MatchRange[] {
+  const ranges: MatchRange[] = [];
+  for (const match of haystack.matchAll(pattern)) {
+    if (match[0].length > 0) {
+      ranges.push({ start: match.index, end: match.index + match[0].length });
+    }
+  }
+  return ranges;
+}
+
+function findNeedleRanges(haystack: string, needle: string): MatchRange[] {
+  const words = needle.match(/[\p{L}\p{N}]+/gu);
+  const bounded = [
+    ...collectPatternRanges(
+      haystack,
+      new RegExp(`(?<![\\p{L}\\p{N}])${escapeRegExp(needle)}(?![\\p{L}\\p{N}])`, 'gu')
+    ),
+    ...(words
+      ? collectPatternRanges(
+        haystack,
+        new RegExp(
+          `(?<![\\p{L}\\p{N}])${words.map(escapeRegExp).join('[^\\p{L}\\p{N}]{1,3}')}(?![\\p{L}\\p{N}])`,
+          'gu'
+        )
+      )
+      : []),
+  ];
+  if (bounded.length > 0) {
+    return bounded;
+  }
+
+  // Like findMatchRange, accept an exact hit embedded in other text, but only when no
+  // standalone hit exists — otherwise "rom 9:4" would also light up inside "rom 9:41".
+  return collectPatternRanges(haystack, new RegExp(escapeRegExp(needle), 'gu'));
+}
+
+/**
+ * Every occurrence of every already-normalized needle in `haystack`, using the same
+ * exact / punctuation-tolerant matching as findMatchRange. Overlapping hits (including
+ * hits from different needles) are merged; the result is sorted by position.
+ */
+export function findAllMatchRanges(haystack: string, needles: readonly string[]): MatchRange[] {
+  if (!haystack) {
+    return [];
+  }
+
+  const hits = Array.from(new Set(needles.filter((needle) => needle.length > 0)))
+    .flatMap((needle) => findNeedleRanges(haystack, needle))
+    .sort((a, b) => a.start - b.start || b.end - a.end);
+
+  const merged: MatchRange[] = [];
+  for (const hit of hits) {
+    const last = merged[merged.length - 1];
+    if (last && hit.start < last.end) {
+      last.end = Math.max(last.end, hit.end);
+      continue;
+    }
+    merged.push({ ...hit });
+  }
+  return merged;
+}
+
 type FoldedCharSource = { node: Text; start: number; end: number };
 
 function foldElementText(

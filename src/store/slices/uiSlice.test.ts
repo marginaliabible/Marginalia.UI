@@ -1,6 +1,7 @@
 import reducer, {
   addSourceUrl,
   dropTranslationRecords,
+  openDocumentViewer,
   removeSourceUrl,
   replaceUserId,
   restoreState,
@@ -87,5 +88,32 @@ describe('uiSlice resource verse match mode', () => {
 
     const afterAny = reducer(initial, setResourceVerseMatchMode('any'));
     expect(afterAny.resourceVerseMatchMode).toBe('any');
+  });
+});
+
+describe('uiSlice document viewer', () => {
+  it('carries every distinct reference text to highlight and bumps the focus nonce', () => {
+    const opened = reducer(undefined, openDocumentViewer({
+      sourceUrl: 'https://example.com/doc.pdf',
+      page: 2,
+      matchRaws: [' 1 Pet. 2:24 ', '1Pe 2:24', '', '1 Pet. 2:24'],
+    }));
+
+    expect(opened.pdfViewer).toMatchObject({ isOpen: true, page: 2, matchRaws: ['1 Pet. 2:24', '1Pe 2:24'] });
+
+    const reopened = reducer(opened, openDocumentViewer({ sourceUrl: 'https://example.com/doc.pdf', page: 2 }));
+    expect(reopened.pdfViewer.matchRaws).toEqual([]);
+    expect(reopened.pdfViewer.focusNonce).toBe(opened.pdfViewer.focusNonce + 1);
+  });
+
+  it('migrates a restored single matchRaw into matchRaws', () => {
+    const initial = reducer(undefined, { type: 'unknown' });
+    const legacyViewer: Record<string, unknown> = { ...initial.pdfViewer, matchRaw: 'Rom 9:4' };
+    delete legacyViewer['matchRaws'];
+    const restored = reducer(initial, restoreState({
+      pdfViewer: legacyViewer as unknown as typeof initial.pdfViewer,
+    }));
+
+    expect(restored.pdfViewer.matchRaws).toEqual(['Rom 9:4']);
   });
 });

@@ -175,7 +175,7 @@ const SearchResults: React.FC<SearchResultsProps> = ({ tab, goToReference, onBef
       sourceUrl: kind === 'markup' ? buildMarkupDocumentShellUrl(match.url) : match.url,
       page: 1,
       title: match.title,
-      matchRaw: null,
+      matchRaws: [],
       kind,
       syncItem: match.cloudProvider ? { provider: match.cloudProvider, itemId: match.documentId } : null,
     }));

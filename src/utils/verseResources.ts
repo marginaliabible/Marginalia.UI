@@ -6,11 +6,12 @@ const documentKey = (document: VerseResourceDocument): string => (
   `${document.libraryId}::${document.documentId}::${document.title}`
 );
 
-const mergePageLinks = (
-  left: VerseResourceDocument['pageLinks'],
-  right: VerseResourceDocument['pageLinks']
-): VerseResourceDocument['pageLinks'] => {
-  const byPage = new Map<number, VerseResourceDocument['pageLinks'][number]>();
+/** One link per page number; reference texts from every merged link for that page are kept. */
+export const mergePageLinks = <Link extends { page: number; raws?: string[] }>(
+  left: Link[],
+  right: Link[]
+): Link[] => {
+  const byPage = new Map<number, Link>();
 
   for (const link of [...left, ...right]) {
     const existing = byPage.get(link.page);
@@ -19,10 +20,11 @@ const mergePageLinks = (
       continue;
     }
 
-    if (!existing.raw && link.raw) {
+    const missingRaws = (link.raws ?? []).filter((raw) => !(existing.raws ?? []).includes(raw));
+    if (missingRaws.length > 0) {
       byPage.set(link.page, {
         ...existing,
-        raw: link.raw,
+        raws: [...(existing.raws ?? []), ...missingRaws],
       });
     }
   }

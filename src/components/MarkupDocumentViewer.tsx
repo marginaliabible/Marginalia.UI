@@ -7,7 +7,7 @@ import { useOpenDocumentScriptureReference } from '../hooks/useDocumentScripture
 import { useViewerZoomInputs } from '../hooks/useViewerZoomInputs';
 import { loadPageScriptureReferences } from '../utils/loadPageScriptureReferences';
 import { applyScriptureLinkOverlays, clearScriptureLinks } from '../utils/scriptureLinkOverlays';
-import { buildTextLayerHaystack, getMatchClientRects, placeOverlayOnPage } from '../utils/documentTextMatch';
+import { buildTextLayerHaystack, findAllMatchRanges, getMatchClientRects, placeOverlayOnPage } from '../utils/documentTextMatch';
 import { clampScale, FIT_WIDTH_GUTTER_PX, stepScale } from '../utils/viewerZoom';
 import FileSyncExclusionButton from './FileSyncExclusionButton';
 import ViewerZoomControls from './ViewerZoomControls';
@@ -675,9 +675,10 @@ type HighlightAttemptResult =
   | { status: 'no-match' }
   | { status: 'not-ready' };
 
-function attemptHighlightMatchInPage(pageElement: HTMLElement, rawMatchText: string): HighlightAttemptResult {
-  const normalizedNeedle = normalizeMatchText(rawMatchText);
-  if (!normalizedNeedle) {
+/** Highlights every occurrence of every raw on the page; `element` is the first overlay in page order. */
+function attemptHighlightMatchesInPage(pageElement: HTMLElement, rawMatchTexts: readonly string[]): HighlightAttemptResult {
+  const normalizedNeedles = rawMatchTexts.map(normalizeMatchText).filter(Boolean);
+  if (normalizedNeedles.length === 0) {
     return { status: 'no-match' };
   }
 
@@ -700,31 +701,32 @@ function attemptHighlightMatchInPage(pageElement: HTMLElement, rawMatchText: str
     return { status: 'not-ready' };
   }
 
-  const matchStart = haystack.indexOf(normalizedNeedle);
-  if (matchStart < 0) {
-    // Text is present and visible enough to search; needle simply isn't on this page.
+  const matches = findAllMatchRanges(haystack, normalizedNeedles);
+  if (matches.length === 0) {
+    // Text is present and visible enough to search; needles simply aren't on this page.
     if (pageHasHighlightableText(pageElement)) {
       return { status: 'no-match' };
     }
     return { status: 'not-ready' };
   }
-  const matchEnd = matchStart + normalizedNeedle.length;
 
   let firstHighlight: HTMLElement | null = null;
-  for (const range of ranges) {
-    if (range.end <= matchStart || range.start >= matchEnd) {
-      continue;
-    }
-
-    for (const rect of getMatchClientRects(range, matchStart, matchEnd)) {
-      const highlight = pageElement.ownerDocument.createElement('div');
-      highlight.className = 'markup-raw-highlight';
-      if (rect.width < 0.5 || rect.height < 0.5 || !placeOverlayOnPage(highlight, pageElement, rect)) {
-        pageElement.querySelectorAll('.markup-raw-highlight').forEach((node) => node.remove());
-        return { status: 'not-ready' };
+  for (const { start: matchStart, end: matchEnd } of matches) {
+    for (const range of ranges) {
+      if (range.end <= matchStart || range.start >= matchEnd) {
+        continue;
       }
-      if (!firstHighlight) {
-        firstHighlight = highlight;
+
+      for (const rect of getMatchClientRects(range, matchStart, matchEnd)) {
+        const highlight = pageElement.ownerDocument.createElement('div');
+        highlight.className = 'markup-raw-highlight';
+        if (rect.width < 0.5 || rect.height < 0.5 || !placeOverlayOnPage(highlight, pageElement, rect)) {
+          pageElement.querySelectorAll('.markup-raw-highlight').forEach((node) => node.remove());
+          return { status: 'not-ready' };
+        }
+        if (!firstHighlight) {
+          firstHighlight = highlight;
+        }
       }
     }
   }
@@ -814,7 +816,7 @@ const MarkupDocumentViewer: React.FC = () => {
 
   const activeSourceUrl = pdfViewer.sourceUrl;
   const activePage = Math.max(1, pdfViewer.page);
-  const matchRaw = pdfViewer.matchRaw;
+  const matchRaws = pdfViewer.matchRaws;
   const focusNonce = pdfViewer.focusNonce || 0;
 
   const title = useMemo(() => {
@@ -1109,7 +1111,7 @@ const MarkupDocumentViewer: React.FC = () => {
   }, [fitWidth, isLoading, srcDoc]);
 
   useEffect(() => {
-    if (!matchRaw || isLoading || highlightAttemptedRef.current) {
+    if (matchRaws.length === 0 || isLoading || highlightAttemptedRef.current) {
       return;
     }
 
@@ -1134,7 +1136,7 @@ const MarkupDocumentViewer: React.FC = () => {
         return;
       }
 
-      const result = attemptHighlightMatchInPage(pageElement, matchRaw);
+      const result = attemptHighlightMatchesInPage(pageElement, matchRaws);
       if (result.status === 'not-ready') {
         if (attempts < 50) {
           window.setTimeout(tryHighlight, 120);
@@ -1152,7 +1154,7 @@ const MarkupDocumentViewer: React.FC = () => {
     return () => {
       cancelled = true;
     };
-  }, [matchRaw, activePage, focusNonce, highlightEpoch, isLoading, srcDoc]);
+  }, [matchRaws, activePage, focusNonce, highlightEpoch, isLoading, srcDoc]);
 
   useEffect(() => {
     // Overlays are page-relative, so only a document change invalidates them.

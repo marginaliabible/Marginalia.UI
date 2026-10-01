@@ -51,7 +51,7 @@ describe('ResourcesPanel visibility gating', () => {
           resourceVerseMatchMode: 'all',
           translatorItalics: true,
           translatorParagraphMarks: true,
-          pdfViewer: { isOpen: false, kind: 'pdf', sourceUrl: null, title: null, page: 1, matchRaw: null, focusNonce: 0 },
+          pdfViewer: { isOpen: false, kind: 'pdf', sourceUrl: null, title: null, page: 1, matchRaws: [], focusNonce: 0 },
         },
         bible: { currentBible: null, isPanelDetached: false },
       })
@@ -111,6 +111,69 @@ const documentPayload = (
   documents,
 });
 
+describe('ResourcesPanel page links', () => {
+  const dispatch = jest.fn();
+
+  beforeEach(() => {
+    dispatch.mockReset();
+    (useAppDispatch as unknown as jest.Mock).mockReturnValue(dispatch);
+    (useAppSelector as unknown as jest.Mock).mockImplementation((selector: (state: unknown) => unknown) => (
+      selector({
+        ui: {
+          sourceUrls: [],
+          resourceHiddenTags: [],
+          resourceVerseMatchMode: 'all',
+          translatorItalics: true,
+          translatorParagraphMarks: true,
+          pdfViewer: { isOpen: false, kind: 'pdf', sourceUrl: null, title: null, page: 1, matchRaws: [], focusNonce: 0 },
+        },
+        bible: { currentBible: null, isPanelDetached: false },
+      })
+    ));
+    (bibleService.getResourcesForVerse as jest.Mock).mockReset();
+    (bibleService.getResourcesForVerse as jest.Mock).mockResolvedValue(documentPayload(1, [{
+      libraryId: 'lib-a',
+      libraryLabel: 'Library A',
+      documentId: 'doc',
+      title: 'Commentary',
+      tags: [],
+      pages: [2, 5],
+      pageLinks: [
+        { page: 2, url: 'https://example.com/doc.pdf', raws: ['1 Pet. 2:24', '1Pe 2:24'] },
+        { page: 5, url: 'https://example.com/doc.pdf', raws: ['1 Peter 2:24'] },
+      ],
+    }, {
+      libraryId: 'lib-b',
+      libraryLabel: 'Library B',
+      documentId: 'doc',
+      title: 'Commentary',
+      tags: [],
+      pages: [2],
+      pageLinks: [{ page: 2, url: 'https://example.com/doc.pdf', raws: ['1 Pt 2:24', '1Pe 2:24'] }],
+    }]));
+  });
+
+  it('shows each page once and opens it with every reference text for that page', async () => {
+    const { findAllByRole } = render(<ResourcesPanel tab={resourcesTab} isActive={true} />);
+
+    const pageButtons = await findAllByRole('button', { name: /^\d+$/ });
+    expect(pageButtons.map((button) => button.textContent)).toEqual(['2', '5']);
+
+    fireEvent.click(pageButtons[0]!);
+    expect(dispatch).toHaveBeenCalledWith({
+      type: 'ui/openDocumentViewer',
+      payload: {
+        sourceUrl: 'https://example.com/doc.pdf',
+        page: 2,
+        title: 'Commentary',
+        matchRaws: ['1 Pet. 2:24', '1Pe 2:24', '1 Pt 2:24'],
+        kind: 'pdf',
+        syncItem: null,
+      },
+    });
+  });
+});
+
 describe('ResourcesPanel multi-verse selection', () => {
   const dispatch = jest.fn();
   const multiVerseTab: PanelTab = {
@@ -129,7 +192,7 @@ describe('ResourcesPanel multi-verse selection', () => {
           resourceVerseMatchMode: 'all',
           translatorItalics: true,
           translatorParagraphMarks: true,
-          pdfViewer: { isOpen: false, kind: 'pdf', sourceUrl: null, title: null, page: 1, matchRaw: null, focusNonce: 0 },
+          pdfViewer: { isOpen: false, kind: 'pdf', sourceUrl: null, title: null, page: 1, matchRaws: [], focusNonce: 0 },
         },
         bible: {
           isPanelDetached: false,
@@ -229,7 +292,7 @@ describe('ResourcesPanel multi-verse selection', () => {
           resourceVerseMatchMode: 'all',
           translatorItalics: true,
           translatorParagraphMarks: true,
-          pdfViewer: { isOpen: false, kind: 'pdf', sourceUrl: null, title: null, page: 1, matchRaw: null, focusNonce: 0 },
+          pdfViewer: { isOpen: false, kind: 'pdf', sourceUrl: null, title: null, page: 1, matchRaws: [], focusNonce: 0 },
         },
         bible: {
           isPanelDetached: false,
