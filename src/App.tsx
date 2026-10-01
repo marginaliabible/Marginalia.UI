@@ -20,7 +20,7 @@ import {
   removeLoadedTranslations,
 } from './store/slices/bibleSlice';
 import { resolveSelectedVerseContext } from './utils/selectedVerseContext';
-import { formatVerseHtml, formatVersePlain, markupFlagsFromBible } from './utils/verseMarkup';
+import { formatVerseHtml, markupFlagsFromBible, stripVerseMarkers } from './utils/verseMarkup';
 import {
   setSelectedTranslationId,
   setSelectedTranslationIds,
@@ -233,17 +233,14 @@ function App() {
     }
 
     const markupFlags = markupFlagsFromBible(sourceBible);
-    const verseMarkupSettings = {
-      italics: translatorItalics,
-      paragraphMarks: translatorParagraphMarks,
-    };
+    const verseMarkupSettings = { italics: translatorItalics };
     const normalizedVerses = Array.from(new Set(chosenVerses)).sort((left, right) => left - right);
     const verseTexts = normalizedVerses
       .map((verseNumber) => {
         const raw = chapter.verses.find((verse) => verse.verse === verseNumber)?.text ?? '';
         return {
           verseNumber,
-          plain: formatVersePlain(raw, markupFlags, verseMarkupSettings),
+          plain: stripVerseMarkers(raw, markupFlags),
           html: formatVerseHtml(raw, markupFlags, verseMarkupSettings),
         };
       })
@@ -358,7 +355,6 @@ function App() {
     selectedVerses,
     selectedVerseTranslationId,
     translatorItalics,
-    translatorParagraphMarks,
   ]);
 
   // Ctrl/Cmd+K to focus search input; Ctrl+C to copy selected verses from the focused main pane.

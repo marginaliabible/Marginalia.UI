@@ -1,7 +1,6 @@
 import { render, screen } from '@testing-library/react';
 import {
   formatVerseHtml,
-  formatVersePlain,
   markupFlagsFromBible,
   renderVerseMarkers,
   stripVerseMarkers,
@@ -70,29 +69,20 @@ describe('renderVerseMarkers', () => {
   });
 });
 
-describe('formatVersePlain / formatVerseHtml', () => {
-  it('formats clipboard plain text with settings', () => {
-    expect(formatVersePlain('# And darkness [was] upon', optedIn, settingsOn)).toBe(
-      '¶ And darkness was upon'
-    );
-    expect(formatVersePlain('# And darkness [was] upon', optedIn, settingsOff)).toBe(
-      'And darkness was upon'
-    );
-  });
-
-  it('formats clipboard HTML with italics when enabled', () => {
+describe('formatVerseHtml', () => {
+  it('formats clipboard HTML with italics when enabled and never includes a pilcrow', () => {
     expect(formatVerseHtml('# And darkness [was] upon', optedIn, settingsOn)).toBe(
-      '¶ And darkness <i>was</i> upon'
+      'And darkness <i>was</i> upon'
     );
     expect(formatVerseHtml('# And darkness [was] upon', optedIn, settingsOff)).toBe(
       'And darkness was upon'
     );
+    expect(formatVerseHtml('# And darkness [was] upon', { paragraphMarks: true }, settingsOn)).toBe(
+      'And darkness [was] upon'
+    );
   });
 
   it('leaves literal brackets when the translation does not opt in', () => {
-    expect(formatVersePlain('# And darkness [was] upon', {}, settingsOn)).toBe(
-      '# And darkness [was] upon'
-    );
     expect(formatVerseHtml('# And darkness [was] upon', {}, settingsOn)).toBe(
       '# And darkness [was] upon'
     );

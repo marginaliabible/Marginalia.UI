@@ -13,7 +13,7 @@ export interface VerseMarkupSettings {
 const BRACKET_TOKEN = /(\[[^\]]+\])/;
 const BRACKET_CONTENTS = /^\[([^\]]+)\]$/;
 
-/** Remove opted-in translator markers for plain-text consumers (search). */
+/** Remove opted-in translator markers for plain-text consumers (search, clipboard). */
 export function stripVerseMarkers(text: string, flags: VerseMarkupFlags = {}): string {
   let result = text;
   if (flags.paragraphMarks) {
@@ -35,37 +35,12 @@ function escapeHtml(value: string): string {
 }
 
 /**
- * Plain-text verse for clipboard: unwrap brackets; include ¶ only when opted in and enabled.
- */
-export function formatVersePlain(
-  text: string,
-  flags: VerseMarkupFlags = {},
-  settings: VerseMarkupSettings
-): string {
-  let remaining = text;
-  let prefix = '';
-
-  if (flags.paragraphMarks && remaining.startsWith('#')) {
-    remaining = remaining.slice(1).replace(/^\s*/, '');
-    if (settings.paragraphMarks) {
-      prefix = '¶ ';
-    }
-  }
-
-  if (flags.italiciseBrackets) {
-    remaining = remaining.replace(/\[([^\]]+)\]/g, '$1');
-  }
-
-  return `${prefix}${remaining}`;
-}
-
-/**
- * HTML verse for clipboard: italicize bracket words and include ¶ when opted in and enabled.
+ * HTML verse for clipboard: italicize bracket words when enabled. Paragraph marks are never copied.
  */
 export function formatVerseHtml(
   text: string,
   flags: VerseMarkupFlags = {},
-  settings: VerseMarkupSettings
+  settings: Pick<VerseMarkupSettings, 'italics'>
 ): string {
   const interpretBrackets = Boolean(flags.italiciseBrackets);
   const interpretParagraphs = Boolean(flags.paragraphMarks);
@@ -79,13 +54,10 @@ export function formatVerseHtml(
 
   if (interpretParagraphs && remaining.startsWith('#')) {
     remaining = remaining.slice(1).replace(/^\s*/, '');
-    if (settings.paragraphMarks) {
-      html += '¶ ';
-    }
   }
 
   if (!interpretBrackets) {
-    return `${html}${escapeHtml(remaining)}`;
+    return escapeHtml(remaining);
   }
 
   const parts = remaining.split(BRACKET_TOKEN);
