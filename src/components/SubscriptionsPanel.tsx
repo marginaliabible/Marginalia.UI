@@ -65,6 +65,7 @@ function formatCount(count: number): string {
 const SubscriptionsPanel: React.FC<SubscriptionsPanelProps> = ({ binding, staging, hidden = false, ref }) => {
   const [expandedByParent, setExpandedByParent] = useState<Record<string, string>>({});
   const [flashKey, setFlashKey] = useState<string | null>(null);
+  const [copiedUrl, setCopiedUrl] = useState<string | null>(null);
   const [tagColors, setTagColors] = useState<Map<string, string>>(() => getStoredResourceTagColors());
   const [tagModalTarget, setTagModalTarget] = useState<{
     resourceKey: string;
@@ -161,6 +162,18 @@ const SubscriptionsPanel: React.FC<SubscriptionsPanelProps> = ({ binding, stagin
     });
   };
 
+  const copySubscriptionUrl = async (url: string) => {
+    try {
+      await navigator.clipboard.writeText(url);
+    } catch {
+      return;
+    }
+    setCopiedUrl(url);
+    window.setTimeout(() => {
+      setCopiedUrl((current) => (current === url ? null : current));
+    }, 1500);
+  };
+
   const renderToggle = (options: {
     label: string;
     isOff: boolean;
@@ -229,6 +242,20 @@ const SubscriptionsPanel: React.FC<SubscriptionsPanelProps> = ({ binding, stagin
                     <span className={`cloud-folder-selected-name fw-semibold${libraryOff ? ' is-unsupported' : ''}`} title={library.isBuiltIn ? undefined : library.key}>
                       {library.name}
                     </span>
+                    {!library.isBuiltIn && (
+                      <button
+                        type="button"
+                        className="btn btn-link btn-sm p-0 text-body-secondary"
+                        title={copiedUrl === library.key ? 'Copied!' : `Copy URL: ${library.key}`}
+                        aria-label={`Copy URL for ${library.name}`}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          void copySubscriptionUrl(library.key);
+                        }}
+                      >
+                        <i className={copiedUrl === library.key ? 'fa-solid fa-check text-success' : 'fa-regular fa-copy'} aria-hidden="true"></i>
+                      </button>
+                    )}
                   </div>
                   <span className="cloud-folder-selected-size text-end text-nowrap text-body-secondary">
                     {total > 0 ? formatCount(total) : ''}
