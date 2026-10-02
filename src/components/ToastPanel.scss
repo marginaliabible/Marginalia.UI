@@ -1,0 +1,217 @@
+$toast-alert-color: #fd7e14;
+$toast-bg: #000;
+$toast-text: #f1f3f5;
+$toast-muted: #9aa0a6;
+$toast-action: #8ab4f8;
+$toast-tab-width: 2.5rem;
+$toast-bar-height: 2.25rem;
+$toast-pill-radius: calc(#{$toast-bar-height} / 2);
+// Bottom padding on the text rows; lifts the text by half this amount relative to the icons.
+$toast-text-raise: 0.25rem;
+$toast-open-radius: 1rem;
+$toast-transition: 250ms ease;
+
+.toast-panel {
+  --toast-tab-width: #{$toast-tab-width};
+  position: fixed;
+  left: 0;
+  bottom: 0;
+  z-index: 1090;
+  display: flex;
+  align-items: stretch;
+  width: 66.667vw;
+  background: $toast-bg;
+  color: $toast-text;
+  font-size: 0.875rem;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-left: 0;
+  border-bottom: 0;
+  // Left and bottom edges stay square so the panel reads as running off the page.
+  border-radius: 0 $toast-pill-radius 0 0;
+  box-shadow: 0 0 18px rgba(0, 0, 0, 0.35);
+  --toast-shift: 0px;
+  // --toast-lift is set inline while the history list slides up from, or down past, the bottom edge.
+  transform: translate(var(--toast-shift), var(--toast-lift, 0px));
+  transition: transform $toast-transition;
+
+  &.is-collapsed {
+    --toast-shift: calc(-100% + var(--toast-tab-width));
+  }
+
+  &.is-offscreen {
+    --toast-shift: -100%;
+  }
+
+  &.is-list-open {
+    border-radius: 0 $toast-open-radius 0 0;
+  }
+}
+
+.toast-panel__body {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+}
+
+.toast-panel__header {
+  display: flex;
+  align-items: center;
+  height: $toast-bar-height;
+  margin: 0;
+  padding-left: 1rem;
+  padding-bottom: $toast-text-raise;
+  font-size: 0.875rem;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+
+  .toast-panel.is-list-closing & {
+    visibility: hidden;
+  }
+}
+
+.toast-panel__list {
+  // Rows share one time column sized to the widest time, keeping the message column tight.
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  align-content: start;
+  list-style: none;
+  margin: 0;
+  padding: 0 0.5rem 0.35rem 1rem;
+  max-height: 60vh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.toast-panel__row {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: subgrid;
+  column-gap: 1rem;
+  padding: 0.15rem 0;
+
+  & + & {
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+  }
+}
+
+.toast-panel__time {
+  color: $toast-muted;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.toast-panel__row-message {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.toast-panel__current {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  height: $toast-bar-height;
+  padding-left: 1rem;
+  padding-bottom: $toast-text-raise;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.toast-panel__current-message {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.toast-panel__repeat {
+  flex: 0 0 auto;
+  white-space: pre;
+}
+
+.toast-panel__alert-icon {
+  flex: 0 0 auto;
+  margin-right: 0.45rem;
+  color: $toast-alert-color;
+}
+
+.toast-panel__action {
+  flex: 0 0 auto;
+  margin-left: 0.6rem;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: $toast-action;
+  text-decoration: underline;
+  cursor: pointer;
+
+  &:hover,
+  &:focus-visible {
+    color: #fff;
+  }
+}
+
+.toast-panel__controls {
+  flex: 0 0 auto;
+  align-self: flex-end;
+  display: flex;
+  height: $toast-bar-height;
+
+  .toast-panel.is-list-open & {
+    align-self: flex-start;
+  }
+}
+
+.toast-panel__history {
+  width: 2rem;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: $toast-muted;
+  font-size: 0.8rem;
+  cursor: pointer;
+
+  &:hover,
+  &:focus-visible {
+    color: #fff;
+  }
+}
+
+.toast-panel__collapse {
+  flex: 0 0 var(--toast-tab-width);
+  width: var(--toast-tab-width);
+  padding: 0;
+  border: 0;
+  border-radius: 0 $toast-pill-radius 0 0;
+  background: transparent;
+  color: $toast-text;
+  cursor: pointer;
+
+  &:hover,
+  &:focus-visible {
+    color: #fff;
+  }
+}
+
+@media (max-width: 991.98px) {
+  .toast-panel {
+    width: calc(100vw - 20px);
+  }
+
+  .toast-panel__list {
+    max-height: 66.667vh;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .toast-panel {
+    transition: none;
+  }
+}
+
+@media print {
+  .toast-panel {
+    display: none;
+  }
+}

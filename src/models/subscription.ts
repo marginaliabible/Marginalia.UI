@@ -9,6 +9,14 @@ export interface SubscriptionChanges {
   resourceTagOverrides: ResourceTagOverrides;
 }
 
+/** What an applied set of Subscriptions edits changed, for the Account Sync toast. */
+export interface SubscriptionApplySummary {
+  librariesDisconnected: number;
+  itemsEnabled: number;
+  itemsDisabled: number;
+  translationsDropped: number;
+}
+
 export interface AddSourceUrlResult {
   ok: boolean;
   message: string;
@@ -28,5 +36,5 @@ export interface SubscriptionsBinding {
   onRequestCatalog: () => void;
   onAddSourceUrl: (url: string) => Promise<AddSourceUrlResult>;
   onRequestGitHubAuth: () => void;
-  onSubscriptionsApply: (changes: SubscriptionChanges) => Promise<void>;
+  onSubscriptionsApply: (changes: SubscriptionChanges) => Promise<SubscriptionApplySummary>;
 }

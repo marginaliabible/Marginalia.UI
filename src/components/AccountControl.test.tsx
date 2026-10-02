@@ -18,6 +18,7 @@ import {
 import { fetchCloudSyncStatus, queueCloudFolderSelection } from '../services/cloudControlService';
 import { getFileSyncExclusionSnapshot, requestFileSyncExclusionToggle } from '../services/fileSyncExclusionService';
 import { addSourceUrl } from '../store/slices/uiSlice';
+import { __resetToastsForTests, getToasts } from '../services/toastService';
 
 jest.mock('../store/hooks', () => ({
   useAppDispatch: jest.fn(),
@@ -216,6 +217,7 @@ describe('AccountControl', () => {
   beforeEach(() => {
     jest.useRealTimers();
     jest.clearAllMocks();
+    __resetToastsForTests();
     window.localStorage.clear();
     Element.prototype.scrollIntoView = jest.fn();
 
@@ -1199,6 +1201,92 @@ describe('AccountControl', () => {
       expect(await screen.findByText(/^Last synced/)).toBeInTheDocument();
       expect(screen.queryByText('Syncing files...')).not.toBeInTheDocument();
       expect(screen.queryByText(/^Sync complete/)).not.toBeInTheDocument();
+    });
+
+    it('keeps polling after an Account Sync Apply until the queued sync finishes, then toasts once and stops', async () => {
+      setUpGoogleFileSync();
+      installFakeCloud();
+      mockListFolderChildrenForSession.mockResolvedValue([
+        { id: 'g-folder-1', name: 'Bible Notes Folder', kind: 'folder', sizeBytes: 1024, hasChildren: false },
+      ]);
+      let serverStatus: unknown = {
+        ok: true,
+        userId: 'user-1',
+        overall: 'idle',
+        pollAfterMs: 60_000,
+        providers: { google: { state: 'idle', lastCompletedAt: new Date(Date.now() - 60_000).toISOString() } },
+      };
+      mockFetchCloudSyncStatus.mockImplementation(async () => serverStatus);
+
+      await renderAccountControl();
+      openAccountModal();
+      fireEvent.click(await screen.findByLabelText('Expand Google Drive'));
+      fireEvent.click(await screen.findByLabelText('Google Drive/Bible Notes Folder'));
+      await assignFileSyncTag('Bible Notes Folder');
+
+      serverStatus = { ...syncingStatus, overall: 'queued', providers: { google: { state: 'queued' } } };
+      fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
+      await waitFor(() => {
+        expect(mockQueueCloudFolderSelection).toHaveBeenCalledTimes(1);
+      });
+      await waitFor(() => {
+        expect(getToasts().map((toast) => toast.message)).toContain(
+          "Account Sync changes saved. Google Drive will start syncing in a few minutes; we'll let you know when it's done."
+        );
+      });
+
+      closeAccountModal();
+      pollNow();
+      await waitFor(() => {
+        expect(mockFetchCloudSyncStatus.mock.results.length).toBeGreaterThan(0);
+      });
+
+      serverStatus = idleStatus(0);
+      pollNow();
+      await waitFor(() => {
+        expect(getToasts().at(-1)).toMatchObject({
+          tone: 'success',
+          message: 'Your Google Drive files finished syncing. Refresh to see the changes.',
+          action: expect.objectContaining({ label: 'Refresh' }),
+        });
+      });
+
+      const callsAfterCompletion = mockFetchCloudSyncStatus.mock.calls.length;
+      pollNow();
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(mockFetchCloudSyncStatus).toHaveBeenCalledTimes(callsAfterCompletion);
+    });
+
+    it('does not poll sync status for a document viewer exclusion toggle while the dialog is closed', async () => {
+      setUpGoogleFileSync();
+      installFakeCloud();
+      window.localStorage.setItem('marginalia:provider-sync-preferences', JSON.stringify({
+        google: {
+          syncSettings: true,
+          syncFiles: true,
+          selectedTargets: [{ id: 'g-folder-1', kind: 'folder', name: 'Notes', path: 'Google Drive/Notes', tags: ['Teaching'] }],
+        },
+        microsoft: { syncSettings: false, syncFiles: false, selectedTargets: [] },
+      }));
+
+      await renderAccountControl();
+      await waitFor(() => {
+        expect(getFileSyncExclusionSnapshot().google.canEdit).toBe(true);
+      });
+      mockQueueCloudFolderSelection.mockClear();
+
+      await act(async () => {
+        await requestFileSyncExclusionToggle('google', 'g-file-notes');
+      });
+      expect(mockQueueCloudFolderSelection).toHaveBeenCalled();
+
+      pollNow();
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(mockFetchCloudSyncStatus).not.toHaveBeenCalled();
     });
   });
 

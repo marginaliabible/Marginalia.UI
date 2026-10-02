@@ -42,6 +42,33 @@ export const normalizeLanguages = (language: BibleTranslationMeta['language']): 
   return normalizeLanguageSelection(candidates);
 };
 
+export interface LanguageFilterResult<T> {
+  translations: T[];
+  /** Nothing matched the selected languages, so every translation is returned. */
+  usedFallback: boolean;
+}
+
+export const filterTranslationsByLanguages = <T extends Pick<BibleTranslationMeta, 'language'>>(
+  translations: T[],
+  selectedLanguages: string[]
+): LanguageFilterResult<T> => {
+  if (selectedLanguages.length === 0) {
+    return { translations, usedFallback: false };
+  }
+  const normalizedCodes = new Set(normalizeLanguages(selectedLanguages));
+  const matches = translations.filter((t) => {
+    const langs = Array.isArray(t.language) ? t.language : (t.language ? [t.language] : []);
+    if (langs.length === 0) {
+      // Keep source-provided translations discoverable even when language metadata is missing.
+      return true;
+    }
+    return langs.some((l) => normalizedCodes.has(l));
+  });
+  return matches.length === 0
+    ? { translations, usedFallback: true }
+    : { translations: matches, usedFallback: false };
+};
+
 export const detectPreferredLanguages = (): string[] => {
   const defaults = ['hbo', 'grc'];
 

@@ -20,6 +20,8 @@ import SubscriptionConnectModal from './SubscriptionConnectModal';
 import { getStoredResourceTagColors } from '../utils/resourceTagColors';
 import type { SubscriptionsBinding } from '../models/subscription';
 import { findStarredTranslationBlock, useSubscriptionStaging } from '../hooks/useSubscriptionStaging';
+import { showToast } from '../services/toastService';
+import { formatAccountSyncApplyToast, type FolderApplyResult } from '../utils/syncToastMessages';
 
 const ROOT_LABEL: Record<FederatedProvider, string> = {
   google: 'Google Drive',
@@ -54,7 +56,7 @@ interface CloudFolderPickerProps {
   providerSyncFilesEnabled: Record<FederatedProvider, boolean>;
   linkedProviders: Record<FederatedProvider, boolean>;
   focusRequest: { provider: FederatedProvider; requestId: number } | null;
-  onSelectionsChange: (next: Record<FederatedProvider, FolderSelectionTarget[]>) => void;
+  onSelectionsChange: (next: Record<FederatedProvider, FolderSelectionTarget[]>) => Promise<FolderApplyResult>;
   onConnectRequested: (provider: FederatedProvider) => void;
   onDirtyChange?: (isDirty: boolean) => void;
   subscriptions?: SubscriptionsBinding;
@@ -975,12 +977,22 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
     }
 
     setErrorMessage(null);
-    if (shouldApplyFiles) {
-      onSelectionsChange(toSelectionPayload(selectedRows, nodes));
-    }
-    if (subscriptions && areSubscriptionsDirty) {
-      void subscriptions.onSubscriptionsApply(subscriptionStaging.toChanges());
-    }
+    const folderApply = shouldApplyFiles
+      ? onSelectionsChange(toSelectionPayload(selectedRows, nodes))
+      : null;
+    const subscriptionsApply = subscriptions && areSubscriptionsDirty
+      ? subscriptions.onSubscriptionsApply(subscriptionStaging.toChanges())
+      : null;
+    void Promise.all([folderApply, subscriptionsApply])
+      .then(([folders, subscriptionSummary]) => {
+        showToast(formatAccountSyncApplyToast(folders ?? null, subscriptionSummary ?? null));
+      })
+      .catch((error: unknown) => {
+        showToast(formatAccountSyncApplyToast({
+          queuedProviders: [],
+          failures: [error instanceof Error ? error.message : String(error)],
+        }, null));
+      });
   }, [
     areFilesDirty,
     areSubscriptionsDirty,

@@ -6,6 +6,7 @@ import {
   requestFileSyncExclusionToggle,
   subscribeFileSyncExclusionSnapshot,
 } from '../services/fileSyncExclusionService';
+import { showToast } from '../services/toastService';
 
 interface FileSyncExclusionButtonProps {
   syncItem: DocumentSyncItem | null;
@@ -26,8 +27,8 @@ const FileSyncExclusionButton: React.FC<FileSyncExclusionButtonProps> = ({ syncI
   const isExcluded = isItemExcludedFromSync(providerState.targets, syncItem.itemId);
 
   const handleClick = () => {
+    const providerLabel = syncItem.provider === 'google' ? 'Google Drive' : 'OneDrive';
     if (!isExcluded) {
-      const providerLabel = syncItem.provider === 'google' ? 'Google Drive' : 'OneDrive';
       const confirmed = window.confirm(
         `Are you sure? This will remove this document from your library the next time your ${providerLabel} is synced. `
         + 'You can always add it back from the Account Sync dialogue.'
@@ -36,7 +37,32 @@ const FileSyncExclusionButton: React.FC<FileSyncExclusionButtonProps> = ({ syncI
         return;
       }
     }
-    requestFileSyncExclusionToggle(syncItem.provider, syncItem.itemId);
+
+    const showFailure = (detail: string) => {
+      showToast({
+        tone: 'error',
+        message: `Couldn't ${isExcluded ? 'resume syncing' : 'stop syncing'} '${documentLabel}': ${detail}`,
+      });
+    };
+    const pending = requestFileSyncExclusionToggle(syncItem.provider, syncItem.itemId);
+    if (!pending) {
+      showFailure('Account Sync is not available right now.');
+      return;
+    }
+
+    showToast(isExcluded
+      ? { message: `'${documentLabel}' will be added back at the next ${providerLabel} sync.` }
+      : {
+        message: `'${documentLabel}' will be removed from your library at the next ${providerLabel} sync. `
+          + 'You can add it back here or in Account Sync.',
+      });
+    void pending
+      .then((result) => {
+        if (result.failures.length > 0) {
+          showFailure(result.failures.join(' | '));
+        }
+      })
+      .catch((error: unknown) => showFailure(error instanceof Error ? error.message : String(error)));
   };
 
   return (

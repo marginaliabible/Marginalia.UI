@@ -56,13 +56,13 @@ describe('file sync exclusion bridge', () => {
     expect(getFileSyncExclusionSnapshot()).toBe(snapshot);
   });
 
-  it('routes toggle requests to the registered handler only while registered', () => {
-    const handler = jest.fn();
+  it('routes toggle requests to the registered handler only while registered', async () => {
+    const handler = jest.fn(async () => ({ failures: [] }));
     const unregister = registerFileSyncExclusionToggleHandler(handler);
 
-    expect(requestFileSyncExclusionToggle('microsoft', 'doc-1')).toBe(true);
+    await expect(requestFileSyncExclusionToggle('microsoft', 'doc-1')).resolves.toEqual({ failures: [] });
     unregister();
-    expect(requestFileSyncExclusionToggle('microsoft', 'doc-2')).toBe(false);
+    expect(requestFileSyncExclusionToggle('microsoft', 'doc-2')).toBeNull();
 
     expect(handler).toHaveBeenCalledTimes(1);
     expect(handler).toHaveBeenCalledWith('microsoft', 'doc-1');

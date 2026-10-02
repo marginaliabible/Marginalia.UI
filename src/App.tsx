@@ -8,6 +8,7 @@ import LoadingStatus from './components/LoadingStatus';
 import SettingsModal from './components/SettingsModal';
 import GitHubAuthPromptModal from './components/GitHubAuthPromptModal';
 import AccountControl from './components/AccountControl';
+import ToastPanel from './components/ToastPanel';
 import { useCallback, useEffect, useMemo, useRef, useState, ChangeEvent } from 'react';
 import { useAppDispatch, useAppSelector } from './store/hooks';
 import {
@@ -52,14 +53,22 @@ import {
   type SourceProbeResult,
 } from './services/bibleService';
 import { loadSubscriptionCatalog, type SubscriptionLibrary } from './services/subscriptionCatalogService';
-import type { AddSourceUrlResult, SubscriptionChanges, SubscriptionsBinding } from './models/subscription';
+import type {
+  AddSourceUrlResult,
+  SubscriptionApplySummary,
+  SubscriptionChanges,
+  SubscriptionsBinding,
+} from './models/subscription';
 import { hyperlinkService } from './services/hyperlinkService';
+import { showToast } from './services/toastService';
+import { formatLanguageChangeToast } from './utils/syncToastMessages';
 import { hasValidGitHubAuthSession } from './services/githubPrivateSourceService';
 import type { QuickJumpTarget } from './models/bible';
 import {
   type WorkspacePanelKey,
   normalizeLanguageSelection,
   normalizeLanguages,
+  filterTranslationsByLanguages,
   detectPreferredLanguages,
   getLanguageDisplayName,
   applyTheme,
@@ -615,21 +624,10 @@ function App() {
       });
         }, [safeAvailableTranslations, getLoadedLanguageDisplayName]);
 
-  const filteredTranslations = useMemo(() => {
-    if (safeSelectedLanguages.length === 0) {
-      return safeAvailableTranslations;
-    }
-    const normalizedCodes = new Set(normalizeLanguages(safeSelectedLanguages));
-    const matches = safeAvailableTranslations.filter((t) => {
-      const langs = Array.isArray(t.language) ? t.language : (t.language ? [t.language] : []);
-      if (langs.length === 0) {
-        // Keep source-provided translations discoverable even when language metadata is missing.
-        return true;
-      }
-      return langs.some((l) => normalizedCodes.has(l));
-    });
-    return matches.length === 0 ? safeAvailableTranslations : matches;
-  }, [safeAvailableTranslations, safeSelectedLanguages]);
+  const filteredTranslations = useMemo(
+    () => filterTranslationsByLanguages(safeAvailableTranslations, safeSelectedLanguages).translations,
+    [safeAvailableTranslations, safeSelectedLanguages]
+  );
 
   // Ensure selectedTranslationId is valid; fallback to first starred or KJV
   useEffect(() => {
@@ -741,7 +739,15 @@ function App() {
   };
 
   const handleLanguagesChange = (selected: string[]) => {
-    dispatch(setSelectedLanguages(normalizeLanguageSelection(selected)));
+    const nextLanguages = normalizeLanguageSelection(selected);
+    const next = filterTranslationsByLanguages(safeAvailableTranslations, nextLanguages);
+    dispatch(setSelectedLanguages(nextLanguages));
+    showToast(formatLanguageChangeToast({
+      languagesSelected: nextLanguages.length,
+      previousCount: filteredTranslations.length,
+      nextCount: next.translations.length,
+      usedFallback: next.usedFallback,
+    }));
   };
 
   const isLikelyGitHubSourceUrl = (value: string): boolean => {
@@ -863,12 +869,15 @@ function App() {
     await dispatch(refreshTranslations(true));
   };
 
-  const handleSubscriptionsApply = async (changes: SubscriptionChanges) => {
+  const handleSubscriptionsApply = async (changes: SubscriptionChanges): Promise<SubscriptionApplySummary> => {
     const disconnected = new Set(changes.disconnectLibraryKeys);
-    const nextDisabledSourceItems = changes.disabledSourceItems.filter((key) => {
+    const isInKeptLibrary = (key: string) => {
       const parsed = parseSourceItemKey(key);
       return !parsed || !disconnected.has(parsed.libraryKey);
-    });
+    };
+    const nextDisabledSourceItems = changes.disabledSourceItems.filter(isInKeptLibrary);
+    const previouslyDisabled = new Set(disabledSourceItems);
+    const nowDisabled = new Set(nextDisabledSourceItems);
     const remainingSourceUrls = sourceUrls.filter((url) => !disconnected.has(url));
     const nextDisabledIds = computeDisabledTranslationIds(
       safeAvailableTranslations,
@@ -890,6 +899,12 @@ function App() {
     }
 
     requestSubscriptionCatalog();
+    return {
+      librariesDisconnected: disconnected.size,
+      itemsEnabled: disabledSourceItems.filter((key) => !nowDisabled.has(key) && isInKeptLibrary(key)).length,
+      itemsDisabled: nextDisabledSourceItems.filter((key) => !previouslyDisabled.has(key)).length,
+      translationsDropped: recordIdsToDrop.length,
+    };
   };
 
   const subscriptionsBinding: SubscriptionsBinding = {
@@ -1131,6 +1146,8 @@ function App() {
         pdfViewerIsOpen={pdfViewer.isOpen}
         sidePanelContentProps={detachedSidePanelContentProps}
       />
+
+      <ToastPanel />
     </>
   );
 }

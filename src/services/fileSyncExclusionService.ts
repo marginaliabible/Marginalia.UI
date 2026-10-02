@@ -13,7 +13,11 @@ export interface FileSyncProviderExclusionState {
 
 export type FileSyncExclusionSnapshot = Record<FederatedProvider, FileSyncProviderExclusionState>;
 
-type ToggleHandler = (provider: FederatedProvider, itemId: string) => void;
+export interface FileSyncExclusionToggleResult {
+  failures: string[];
+}
+
+type ToggleHandler = (provider: FederatedProvider, itemId: string) => Promise<FileSyncExclusionToggleResult>;
 
 const EMPTY_SNAPSHOT: FileSyncExclusionSnapshot = {
   google: { canEdit: false, targets: [] },
@@ -51,13 +55,16 @@ export function registerFileSyncExclusionToggleHandler(handler: ToggleHandler): 
   };
 }
 
-export function requestFileSyncExclusionToggle(provider: FederatedProvider, itemId: string): boolean {
+/** Returns null when no handler is registered (Account Sync is not mounted). */
+export function requestFileSyncExclusionToggle(
+  provider: FederatedProvider,
+  itemId: string
+): Promise<FileSyncExclusionToggleResult> | null {
   if (!toggleHandler) {
-    return false;
+    return null;
   }
 
-  toggleHandler(provider, itemId);
-  return true;
+  return toggleHandler(provider, itemId);
 }
 
 export function isItemExcludedFromSync(targets: FileSyncExclusionTarget[], itemId: string): boolean {

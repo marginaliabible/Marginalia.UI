@@ -39,6 +39,8 @@ import {
 } from '../services/cloudConfigMerge';
 import { queueCloudFolderSelection, reportSyncActivity, type CloudSyncStatus } from '../services/cloudControlService';
 import { useCloudSyncStatus } from '../hooks/useCloudSyncStatus';
+import { showToast } from '../services/toastService';
+import { formatProviderList, formatSyncCompleteToast, type FolderApplyResult } from '../utils/syncToastMessages';
 import {
   publishFileSyncExclusionSnapshot,
   registerFileSyncExclusionToggleHandler,
@@ -339,7 +341,77 @@ interface ReconcileResult {
   writeCount: number;
   failures: string[];
   libraryUrls: string[];
-  queuedCount: number;
+  queuedProviders: FederatedProvider[];
+}
+
+const SYNC_WATCH_TIMEOUT_MS = 45 * 60 * 1000;
+
+/** Follows providers queued by an Account Sync Apply until CloudControlService reports them synced. */
+interface SyncWatch {
+  pending: FederatedProvider[];
+  finished: FederatedProvider[];
+  /** Pending providers seen queued or syncing since the watch started. */
+  activeSeen: FederatedProvider[];
+  failedCount: number;
+  since: number;
+  afterFetchId: number;
+}
+
+function startOrExtendSyncWatch(
+  current: SyncWatch | null,
+  providers: FederatedProvider[],
+  now: number,
+  afterFetchId: number
+): SyncWatch {
+  const requeued = new Set(providers);
+  return {
+    pending: Array.from(new Set([...(current?.pending ?? []), ...providers])),
+    finished: (current?.finished ?? []).filter((provider) => !requeued.has(provider)),
+    activeSeen: (current?.activeSeen ?? []).filter((provider) => !requeued.has(provider)),
+    failedCount: current?.failedCount ?? 0,
+    since: now,
+    afterFetchId,
+  };
+}
+
+/**
+ * A provider is done once it is idle after being seen queued/syncing, or idle with a completion
+ * newer than the watch (covers syncs that start and finish between polls). Providers needing
+ * attention, or missing from the status, are dropped.
+ */
+function advanceSyncWatch(watch: SyncWatch, status: CloudSyncStatus): SyncWatch {
+  const pending: FederatedProvider[] = [];
+  const finished = [...watch.finished];
+  const activeSeen = new Set(watch.activeSeen);
+  let failedCount = watch.failedCount;
+
+  for (const provider of watch.pending) {
+    const providerStatus = status.providers[provider];
+    if (!providerStatus || providerStatus.state === 'attention') {
+      continue;
+    }
+    if (providerStatus.state === 'queued' || providerStatus.state === 'syncing') {
+      activeSeen.add(provider);
+      pending.push(provider);
+      continue;
+    }
+
+    const completedAt = Date.parse(providerStatus.lastCompletedAt ?? '');
+    if (activeSeen.has(provider) || (Number.isFinite(completedAt) && completedAt > watch.since)) {
+      finished.push(provider);
+      failedCount += providerStatus.failedCount ?? 0;
+    } else {
+      pending.push(provider);
+    }
+  }
+
+  return {
+    ...watch,
+    pending,
+    finished,
+    activeSeen: Array.from(activeSeen).filter((provider) => pending.includes(provider)),
+    failedCount,
+  };
 }
 
 interface CloudSyncFooterSummary {
@@ -433,6 +505,9 @@ const AccountControl: React.FC<AccountControlProps> = ({ subscriptions }) => {
   const hasUserActivitySinceReadRef = useRef(false);
   const syncInFlightRef = useRef(false);
   const syncQueuedRef = useRef(false);
+  const syncErrorToastedRef = useRef(false);
+  const isModalOpenRef = useRef(isModalOpen);
+  const reconnectToastedRef = useRef(new Set<FederatedProvider>());
   const lastCloudReadAtRef = useRef(Date.now());
   const lastSyncActivityReportAtRef = useRef(0);
   const fieldStampsRef = useRef<SyncedFieldStamps>(createFieldStamps(0));
@@ -502,6 +577,27 @@ const AccountControl: React.FC<AccountControlProps> = ({ subscriptions }) => {
     (provider) => providerSyncPreferences[provider].syncFiles && Boolean(providerSessionByType[provider])
   ), [providerSessionByType, providerSyncPreferences]);
 
+  useEffect(() => {
+    isModalOpenRef.current = isModalOpen;
+  }, [isModalOpen]);
+
+  useEffect(() => {
+    for (const provider of missingProviderPrompts) {
+      if (reconnectToastedRef.current.has(provider)) {
+        continue;
+      }
+      reconnectToastedRef.current.add(provider);
+      showToast({
+        key: `reconnect-${provider}`,
+        tone: 'warning',
+        message: `Reconnect ${formatProviderList([provider])} on this device to continue background cloud sync.`,
+        action: { label: 'Open Account Sync', onClick: () => setIsModalOpen(true) },
+      });
+    }
+  }, [missingProviderPrompts]);
+
+  // Background polling only runs while a watch started by an Account Sync Apply is outstanding.
+  const [syncWatch, setSyncWatch] = useState<SyncWatch | null>(null);
   const {
     status: cloudSyncStatus,
     fetchId: cloudSyncFetchId,
@@ -509,8 +605,48 @@ const AccountControl: React.FC<AccountControlProps> = ({ subscriptions }) => {
   } = useCloudSyncStatus({
     userId,
     providers: fileSyncProviders,
-    enabled: isModalOpen,
+    enabled: isModalOpen || syncWatch !== null,
   });
+  const cloudSyncFetchIdRef = useRef(cloudSyncFetchId);
+  useEffect(() => {
+    cloudSyncFetchIdRef.current = cloudSyncFetchId;
+  }, [cloudSyncFetchId]);
+
+  const startSyncWatch = useCallback((providers: FederatedProvider[]) => {
+    setSyncWatch((current) => startOrExtendSyncWatch(current, providers, Date.now(), cloudSyncFetchIdRef.current));
+  }, []);
+
+  useEffect(() => {
+    if (!syncWatch || !cloudSyncStatus || cloudSyncFetchId <= syncWatch.afterFetchId) {
+      return;
+    }
+
+    const next = advanceSyncWatch(syncWatch, cloudSyncStatus);
+    if (next.pending.length > 0) {
+      setSyncWatch({ ...next, afterFetchId: cloudSyncFetchId });
+      return;
+    }
+
+    setSyncWatch(null);
+    if (next.finished.length > 0) {
+      showToast({
+        ...formatSyncCompleteToast(next.finished, next.failedCount),
+        action: { label: 'Refresh', onClick: () => window.location.reload() },
+      });
+    }
+  }, [cloudSyncFetchId, cloudSyncStatus, syncWatch]);
+
+  const syncWatchSince = syncWatch?.since ?? null;
+  useEffect(() => {
+    if (syncWatchSince === null) {
+      return;
+    }
+    const timer = window.setTimeout(
+      () => setSyncWatch(null),
+      Math.max(0, syncWatchSince + SYNC_WATCH_TIMEOUT_MS - Date.now())
+    );
+    return () => window.clearTimeout(timer);
+  }, [syncWatchSince]);
   const [fileSyncCompletion, setFileSyncCompletion] = useState<{ failedCount: number } | null>(null);
   const handledCloudSyncFetchIdRef = useRef(0);
   const previousCloudSyncOverallRef = useRef<CloudSyncStatus['overall']>(null);
@@ -805,7 +941,7 @@ const AccountControl: React.FC<AccountControlProps> = ({ subscriptions }) => {
 
     // CloudControlService reads each provider's folder selection from that provider's own copy.
     const libraryUrls: string[] = [];
-    let queuedCount = 0;
+    const queuedProviders: FederatedProvider[] = [];
     if (options.queueFolderChanges && ownerUserId) {
       await Promise.all(written.map(async (provider) => {
         if (!providerSyncPreferences[provider].syncFiles) {
@@ -825,7 +961,7 @@ const AccountControl: React.FC<AccountControlProps> = ({ subscriptions }) => {
             removed: removedFolderIds(before, after),
             accessToken: currentSessions[provider]?.accessToken,
           });
-          queuedCount += 1;
+          queuedProviders.push(provider);
           const libraryUrl = String(result?.libraryUrl ?? '').trim();
           if (libraryUrl) {
             libraryUrls.push(libraryUrl);
@@ -843,7 +979,7 @@ const AccountControl: React.FC<AccountControlProps> = ({ subscriptions }) => {
       writeCount: written.length,
       failures,
       libraryUrls,
-      queuedCount,
+      queuedProviders,
     };
   }, [adoptEstablishedUserId, applyRemoteConfig, persistCloudState, providerSyncPreferences]);
 
@@ -883,12 +1019,19 @@ const AccountControl: React.FC<AccountControlProps> = ({ subscriptions }) => {
       if (result.failures.length > 0) {
         setSyncState('error');
         setStatusMessage(`Sync issues: ${result.failures.join(' | ')}`);
+        // Only the first failure of a streak is toasted, and the dialog footer covers it while open.
+        if (!syncErrorToastedRef.current && !isModalOpenRef.current) {
+          syncErrorToastedRef.current = true;
+          showToast({ tone: 'error', message: `Settings sync failed: ${result.failures.join(' | ')}` });
+        }
         return;
       }
 
+      syncErrorToastedRef.current = false;
       setSyncState('idle');
       if (result.localChanged && reason !== 'startup') {
         setStatusMessage('Pulled newer configuration from cloud.');
+        showToast({ message: 'Your settings have been updated to match your more recent changes on another device.' });
       } else if (reason === 'publish') {
         setStatusMessage(result.writeCount > 0 ? 'Configuration synced.' : null);
       }
@@ -1292,9 +1435,13 @@ const AccountControl: React.FC<AccountControlProps> = ({ subscriptions }) => {
     }
 
     setStatusMessage(`${PROVIDER_LABEL[provider]} account detached. Configuration now syncs only to remaining linked providers.`);
+    showToast({ message: `${formatProviderList([provider])} disconnected. Synced documents are kept for 10 days.` });
   }, [configUpdatedAt, lastSyncedAt, linkedAccounts, persistCloudState]);
 
-  const handleApplyFolderSelections = useCallback((nextSelections: Record<FederatedProvider, FolderSelectionTarget[]>) => {
+  const handleApplyFolderSelections = useCallback(async (
+    nextSelections: Record<FederatedProvider, FolderSelectionTarget[]>,
+    options: { watchSync?: boolean } = {}
+  ): Promise<FolderApplyResult> => {
     const previousSelections = providerSyncPreferences;
     const nextGoogleTargets = nextSelections.google.map((target) => ({
       id: target.id,
@@ -1360,12 +1507,13 @@ const AccountControl: React.FC<AccountControlProps> = ({ subscriptions }) => {
     const userId = String((bibleService.readState() as MarginaliaState).userId ?? '').trim();
     if (!userId) {
       setHasPendingSync(true);
-      return;
+      return { queuedProviders: [], failures: [] };
     }
 
     // Reconcile writes marginalia-config.json (selection SoT) and then notifies CCS for each provider
     // whose own selection changed. A returned libraryUrl is registered in sourceUrls and synced again.
-    void (async () => {
+    let queuedProviders: FederatedProvider[] = [];
+    try {
       const currentSessions = await getFreshFederatedSessions();
       setSessions(currentSessions);
 
@@ -1374,16 +1522,20 @@ const AccountControl: React.FC<AccountControlProps> = ({ subscriptions }) => {
         fieldUpdatedAt: { ...nextStamps },
       };
       const result = await reconcileWithCloud(localDoc, currentSessions, { queueFolderChanges: true });
-      if (result.queuedCount > 0) {
+      queuedProviders = result.queuedProviders;
+      if (queuedProviders.length > 0) {
+        if (options.watchSync) {
+          startSyncWatch(queuedProviders);
+        }
         refreshCloudSyncStatus();
       }
       if (result.failures.length > 0) {
         setStatusMessage(result.failures.join(' | '));
-        return;
+        return { queuedProviders, failures: result.failures };
       }
 
       if (result.libraryUrls.length === 0) {
-        return;
+        return { queuedProviders, failures: [] };
       }
 
       for (const libraryUrl of result.libraryUrls) {
@@ -1407,9 +1559,12 @@ const AccountControl: React.FC<AccountControlProps> = ({ subscriptions }) => {
       if (followUp.failures.length > 0) {
         setStatusMessage(followUp.failures.join(' | '));
       }
-    })().catch((error: unknown) => {
-      setStatusMessage(error instanceof Error ? error.message : String(error));
-    });
+      return { queuedProviders, failures: followUp.failures };
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      setStatusMessage(message);
+      return { queuedProviders, failures: [message] };
+    }
   }, [
     configSnapshot,
     dispatch,
@@ -1418,7 +1573,15 @@ const AccountControl: React.FC<AccountControlProps> = ({ subscriptions }) => {
     providerSyncPreferences,
     reconcileWithCloud,
     refreshCloudSyncStatus,
+    startSyncWatch,
   ]);
+
+  const handleApplyFromAccountSync = useCallback(
+    (nextSelections: Record<FederatedProvider, FolderSelectionTarget[]>) => (
+      handleApplyFolderSelections(nextSelections, { watchSync: true })
+    ),
+    [handleApplyFolderSelections]
+  );
 
   useEffect(() => {
     publishFileSyncExclusionSnapshot({
@@ -1433,13 +1596,13 @@ const AccountControl: React.FC<AccountControlProps> = ({ subscriptions }) => {
     });
   }, [providerSessionByType, providerSyncPreferences]);
 
-  useEffect(() => registerFileSyncExclusionToggleHandler((provider, itemId) => {
+  useEffect(() => registerFileSyncExclusionToggleHandler((provider, itemId) => (
     handleApplyFolderSelections({
       google: providerSyncPreferences.google.selectedTargets,
       microsoft: providerSyncPreferences.microsoft.selectedTargets,
       [provider]: toggleItemExclusion(providerSyncPreferences[provider].selectedTargets, itemId),
-    });
-  }), [handleApplyFolderSelections, providerSyncPreferences]);
+    })
+  )), [handleApplyFolderSelections, providerSyncPreferences]);
 
   const getConnectMode = useCallback((provider: FederatedProvider): ProviderConnectMode => {
     if (!isProviderConnected(provider)) {
@@ -1591,7 +1754,7 @@ const AccountControl: React.FC<AccountControlProps> = ({ subscriptions }) => {
                     }}
                     linkedProviders={linkedProviders}
                     focusRequest={fileSyncFocusRequest}
-                    onSelectionsChange={handleApplyFolderSelections}
+                    onSelectionsChange={handleApplyFromAccountSync}
                     onConnectRequested={handleConnectRequestedFromPicker}
                     onDirtyChange={setHasUnsavedFileSyncChanges}
                     subscriptions={subscriptions}

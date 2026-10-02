@@ -12,6 +12,7 @@
 @use './components/PdfViewerPane';
 @use './components/MarkupDocumentViewer';
 @use './components/AppHeader';
+@use './components/ToastPanel';
 
 .app-shell.app-shell-wide {
   max-width: 100%;

@@ -2,6 +2,7 @@ import { createRef } from 'react';
 import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import CloudFolderPicker, { type CloudFolderPickerHandle } from './CloudFolderPicker';
 import type { SubscriptionsBinding } from '../models/subscription';
+import { __resetToastsForTests, getToasts } from '../services/toastService';
 
 jest.mock('../services/cloudConfigProviderService', () => ({
   listFolderChildrenForSession: jest.fn(async () => []),
@@ -55,7 +56,12 @@ function makeBinding(overrides: Partial<SubscriptionsBinding> = {}): Subscriptio
     onRequestCatalog: jest.fn(),
     onAddSourceUrl: jest.fn(async () => ({ ok: true, message: 'ok', url: PUBLISHER_URL })),
     onRequestGitHubAuth: jest.fn(),
-    onSubscriptionsApply: jest.fn(async () => undefined),
+    onSubscriptionsApply: jest.fn(async () => ({
+      librariesDisconnected: 0,
+      itemsEnabled: 0,
+      itemsDisabled: 1,
+      translationsDropped: 0,
+    })),
     ...overrides,
   };
 }
@@ -90,11 +96,13 @@ describe('CloudFolderPicker subscriptions', () => {
   let alertSpy: jest.SpyInstance;
 
   beforeEach(() => {
+    __resetToastsForTests();
     alertSpy = jest.spyOn(window, 'alert').mockImplementation(() => undefined);
   });
 
   afterEach(() => {
     alertSpy.mockRestore();
+    __resetToastsForTests();
   });
 
   it('requests the catalog and lists only library names under the left Subscriptions node', async () => {
@@ -178,6 +186,7 @@ describe('CloudFolderPicker subscriptions', () => {
       resourceTagOverrides: {},
     });
     expect(onSelectionsChange).not.toHaveBeenCalled();
+    expect(getToasts().map((toast) => toast.message)).toEqual(['Account Sync changes saved: 1 item disabled.']);
   });
 
   it('connects a new library immediately from the Connect modal', async () => {
