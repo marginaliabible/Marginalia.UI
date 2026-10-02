@@ -23,6 +23,30 @@ export interface SyncActivityRequest {
   userId: string;
 }
 
+export type CloudSyncState = 'idle' | 'queued' | 'syncing' | 'attention';
+
+export interface CloudProviderSyncStatus {
+  state: CloudSyncState;
+  startsAt?: string;
+  lastCompletedAt?: string;
+  failedCount?: number;
+}
+
+export interface CloudSyncStatus {
+  ok: boolean;
+  userId: string;
+  // Most active non-attention provider state; null when every provider needs attention.
+  overall: Exclude<CloudSyncState, 'attention'> | null;
+  pollAfterMs: number;
+  providers: Partial<Record<FederatedProvider, CloudProviderSyncStatus>>;
+}
+
+export interface CloudSyncStatusRequest {
+  userId: string;
+  providers: FederatedProvider[];
+  signal?: AbortSignal;
+}
+
 function getCloudControlServiceUrl(): string {
   return (import.meta.env['VITE_AUTH_SERVICE_URL'] || '').trim().replace(/\/$/, '');
 }
@@ -55,6 +79,27 @@ export async function queueCloudFolderSelection(
   } catch {
     return { ok: true };
   }
+}
+
+export async function fetchCloudSyncStatus(request: CloudSyncStatusRequest): Promise<CloudSyncStatus | null> {
+  const baseUrl = getCloudControlServiceUrl();
+  if (!baseUrl) {
+    return null;
+  }
+
+  const response = await fetch(`${baseUrl}/sync/status`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ userId: request.userId, providers: request.providers }),
+    signal: request.signal,
+  });
+
+  if (!response.ok) {
+    const message = await response.text();
+    throw new Error(`CloudControlService sync status failed (${response.status}): ${message}`);
+  }
+
+  return (await response.json()) as CloudSyncStatus;
 }
 
 /** Fire-and-forget presence ping so CCS can use the active (5m) File Sync debounce. */

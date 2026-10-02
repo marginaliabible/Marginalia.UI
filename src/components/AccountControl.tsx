@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useAppDispatch, useAppSelector } from '../store/hooks';
 import { addSourceUrl, removeSourceUrl, replaceUserId, restoreState, setUserId } from '../store/slices/uiSlice';
 import { loadTranslation, setCurrentBibleFromId } from '../store/slices/bibleSlice';
@@ -37,7 +37,8 @@ import {
   type SyncedConfigField,
   type SyncedFieldStamps,
 } from '../services/cloudConfigMerge';
-import { queueCloudFolderSelection, reportSyncActivity } from '../services/cloudControlService';
+import { queueCloudFolderSelection, reportSyncActivity, type CloudSyncStatus } from '../services/cloudControlService';
+import { useCloudSyncStatus } from '../hooks/useCloudSyncStatus';
 import {
   publishFileSyncExclusionSnapshot,
   registerFileSyncExclusionToggleHandler,
@@ -338,6 +339,44 @@ interface ReconcileResult {
   writeCount: number;
   failures: string[];
   libraryUrls: string[];
+  queuedCount: number;
+}
+
+interface CloudSyncFooterSummary {
+  queuedStartsInMinutes: number | null;
+  lastCompletedAt: number | null;
+  failedCount: number;
+}
+
+function summarizeCloudSyncStatus(status: CloudSyncStatus | null, now: number): CloudSyncFooterSummary {
+  const providerStatuses = PROVIDERS
+    .map((provider) => status?.providers?.[provider])
+    .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry));
+
+  const queuedStarts = providerStatuses
+    .filter((entry) => entry.state === 'queued' && entry.startsAt)
+    .map((entry) => Date.parse(entry.startsAt as string))
+    .filter((value) => Number.isFinite(value));
+  const queuedStartsInMinutes = status?.overall === 'queued' && queuedStarts.length > 0
+    ? Math.max(1, Math.ceil((Math.min(...queuedStarts) - now) / 60_000))
+    : null;
+
+  const completedTimes = providerStatuses
+    .map((entry) => (entry.lastCompletedAt ? Date.parse(entry.lastCompletedAt) : NaN))
+    .filter((value) => Number.isFinite(value));
+  const lastCompletedAt = completedTimes.length > 0 ? Math.max(...completedTimes) : null;
+
+  const failedCount = status?.overall === 'idle'
+    ? providerStatuses
+      .filter((entry) => entry.state === 'idle')
+      .reduce((total, entry) => total + Math.max(0, entry.failedCount ?? 0), 0)
+    : 0;
+
+  return { queuedStartsInMinutes, lastCompletedAt, failedCount };
+}
+
+function formatFailedFileCount(count: number): string {
+  return count === 1 ? "1 file couldn't be processed." : `${count} files couldn't be processed.`;
 }
 
 interface AccountControlProps {
@@ -458,6 +497,48 @@ const AccountControl: React.FC<AccountControlProps> = ({ subscriptions }) => {
       microsoft: sessions.microsoft ?? null,
     };
   }, [sessions]);
+
+  const fileSyncProviders = useMemo(() => PROVIDERS.filter(
+    (provider) => providerSyncPreferences[provider].syncFiles && Boolean(providerSessionByType[provider])
+  ), [providerSessionByType, providerSyncPreferences]);
+
+  const {
+    status: cloudSyncStatus,
+    fetchId: cloudSyncFetchId,
+    refresh: refreshCloudSyncStatus,
+  } = useCloudSyncStatus({
+    userId,
+    providers: fileSyncProviders,
+    enabled: isModalOpen,
+  });
+  const [fileSyncCompletion, setFileSyncCompletion] = useState<{ failedCount: number } | null>(null);
+  const handledCloudSyncFetchIdRef = useRef(0);
+  const previousCloudSyncOverallRef = useRef<CloudSyncStatus['overall']>(null);
+
+  // Layout effect so the idle "Last synced" text never paints for a frame before the completion message.
+  useLayoutEffect(() => {
+    // Only polls received while the dialog is open count; the status kept from a previous
+    // session would otherwise turn a transition that happened while closed into "complete".
+    if (!isModalOpen) {
+      handledCloudSyncFetchIdRef.current = cloudSyncFetchId;
+      previousCloudSyncOverallRef.current = null;
+      setFileSyncCompletion(null);
+      return;
+    }
+
+    if (cloudSyncFetchId === handledCloudSyncFetchIdRef.current) {
+      return;
+    }
+    handledCloudSyncFetchIdRef.current = cloudSyncFetchId;
+
+    const overall = cloudSyncStatus?.overall ?? null;
+    if (previousCloudSyncOverallRef.current === 'syncing' && overall === 'idle') {
+      setFileSyncCompletion({ failedCount: summarizeCloudSyncStatus(cloudSyncStatus, Date.now()).failedCount });
+    } else if (overall === 'queued' || overall === 'syncing') {
+      setFileSyncCompletion(null);
+    }
+    previousCloudSyncOverallRef.current = overall;
+  }, [cloudSyncFetchId, cloudSyncStatus, isModalOpen]);
 
   const iconProfile = useMemo(() => {
     if (activeSession) {
@@ -724,6 +805,7 @@ const AccountControl: React.FC<AccountControlProps> = ({ subscriptions }) => {
 
     // CloudControlService reads each provider's folder selection from that provider's own copy.
     const libraryUrls: string[] = [];
+    let queuedCount = 0;
     if (options.queueFolderChanges && ownerUserId) {
       await Promise.all(written.map(async (provider) => {
         if (!providerSyncPreferences[provider].syncFiles) {
@@ -743,6 +825,7 @@ const AccountControl: React.FC<AccountControlProps> = ({ subscriptions }) => {
             removed: removedFolderIds(before, after),
             accessToken: currentSessions[provider]?.accessToken,
           });
+          queuedCount += 1;
           const libraryUrl = String(result?.libraryUrl ?? '').trim();
           if (libraryUrl) {
             libraryUrls.push(libraryUrl);
@@ -760,6 +843,7 @@ const AccountControl: React.FC<AccountControlProps> = ({ subscriptions }) => {
       writeCount: written.length,
       failures,
       libraryUrls,
+      queuedCount,
     };
   }, [adoptEstablishedUserId, applyRemoteConfig, persistCloudState, providerSyncPreferences]);
 
@@ -1290,6 +1374,9 @@ const AccountControl: React.FC<AccountControlProps> = ({ subscriptions }) => {
         fieldUpdatedAt: { ...nextStamps },
       };
       const result = await reconcileWithCloud(localDoc, currentSessions, { queueFolderChanges: true });
+      if (result.queuedCount > 0) {
+        refreshCloudSyncStatus();
+      }
       if (result.failures.length > 0) {
         setStatusMessage(result.failures.join(' | '));
         return;
@@ -1323,7 +1410,15 @@ const AccountControl: React.FC<AccountControlProps> = ({ subscriptions }) => {
     })().catch((error: unknown) => {
       setStatusMessage(error instanceof Error ? error.message : String(error));
     });
-  }, [configSnapshot, dispatch, linkedAccounts, persistCloudState, providerSyncPreferences, reconcileWithCloud]);
+  }, [
+    configSnapshot,
+    dispatch,
+    linkedAccounts,
+    persistCloudState,
+    providerSyncPreferences,
+    reconcileWithCloud,
+    refreshCloudSyncStatus,
+  ]);
 
   useEffect(() => {
     publishFileSyncExclusionSnapshot({
@@ -1419,6 +1514,11 @@ const AccountControl: React.FC<AccountControlProps> = ({ subscriptions }) => {
       })
     : null;
 
+  const isFileSyncRunning = cloudSyncStatus?.overall === 'syncing';
+  const isFileSyncQueued = cloudSyncStatus?.overall === 'queued';
+  const cloudSyncSummary = summarizeCloudSyncStatus(cloudSyncStatus, Date.now());
+  const displayedLastSyncedAt = cloudSyncSummary.lastCompletedAt ?? lastSyncedAt;
+
   return (
     <div className="account-control">
       <button
@@ -1501,15 +1601,40 @@ const AccountControl: React.FC<AccountControlProps> = ({ subscriptions }) => {
 
                 <div className="modal-footer account-modal-footer">
                   <p className="account-modal-footer-status small text-body-secondary mb-0 me-auto">
-                    {(lastSyncedAt || syncState === 'syncing') && (
+                    {isFileSyncRunning ? (
+                      <span>Syncing files...</span>
+                    ) : isFileSyncQueued ? (
                       <span>
-                        {lastSyncedAt
-                          ? `Last synced ${new Date(lastSyncedAt).toLocaleString()}.`
+                        <i className="fa-regular fa-clock account-sync-queued-icon" aria-hidden="true"></i>{' '}
+                        {cloudSyncSummary.queuedStartsInMinutes !== null
+                          ? `Sync is queued up to start within the next ~${cloudSyncSummary.queuedStartsInMinutes} min.`
+                          : 'Sync is queued.'}
+                      </span>
+                    ) : fileSyncCompletion ? (
+                      <span>
+                        {fileSyncCompletion.failedCount === 0
+                          ? 'Sync complete!'
+                          : `Sync complete, ${formatFailedFileCount(fileSyncCompletion.failedCount)}`}{' '}
+                        <button
+                          type="button"
+                          className="btn btn-link p-0 border-0 align-baseline account-sync-refresh-link"
+                          onClick={() => window.location.reload()}
+                        >
+                          Click to refresh
+                        </button>
+                      </span>
+                    ) : (displayedLastSyncedAt || syncState === 'syncing') && (
+                      <span>
+                        {displayedLastSyncedAt
+                          ? `Last synced ${new Date(displayedLastSyncedAt).toLocaleString()}.`
                           : 'Syncing configuration...'}
                       </span>
                     )}
-                    {syncState === 'syncing' && (
+                    {(syncState === 'syncing' || isFileSyncRunning) && (
                       <>{' '}<i className="fa-solid fa-circle-notch fa-spin account-sync-spinner" aria-hidden="true"></i></>
+                    )}
+                    {!fileSyncCompletion && cloudSyncSummary.failedCount > 0 && (
+                      <>{' '}<span>{formatFailedFileCount(cloudSyncSummary.failedCount)}</span></>
                     )}
                     {statusMessage && (
                       <>{' '}<span className="account-status-message">{statusMessage}</span></>

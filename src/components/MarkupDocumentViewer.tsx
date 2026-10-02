@@ -200,7 +200,7 @@ async function materializeStorageAssetBlobs(
 
 function rewriteStorageAssetReferences(content: string, storageOrigin: string, assetBlobs: Map<string, string>): string {
   return content
-    .replace(/url\((["']?)(\/assets\/[^"')]+)\1\)/gi, (full, quote: string, assetPath: string) => {
+    .replace(/url\((["']?)(\/assets\/[^"')]+)\1\)/gi, (_full, quote: string, assetPath: string) => {
       const absolute = `${storageOrigin}${assetPath}`;
       const blob = assetBlobs.get(absolute) || assetBlobs.get(assetPath);
       if (!blob) {
@@ -208,7 +208,7 @@ function rewriteStorageAssetReferences(content: string, storageOrigin: string, a
       }
       return `url(${quote}${blob}${quote})`;
     })
-    .replace(/(src|href)=(["'])(\/assets\/[^"']+)\2/gi, (full, attr: string, quote: string, assetPath: string) => {
+    .replace(/(src|href)=(["'])(\/assets\/[^"']+)\2/gi, (_full, attr: string, quote: string, assetPath: string) => {
       const absolute = `${storageOrigin}${assetPath}`;
       const blob = assetBlobs.get(absolute) || assetBlobs.get(assetPath);
       if (!blob) {

@@ -15,7 +15,7 @@ import {
   readCloudConfigForSession,
   writeCloudConfigForSession,
 } from '../services/cloudConfigProviderService';
-import { queueCloudFolderSelection } from '../services/cloudControlService';
+import { fetchCloudSyncStatus, queueCloudFolderSelection } from '../services/cloudControlService';
 import { getFileSyncExclusionSnapshot, requestFileSyncExclusionToggle } from '../services/fileSyncExclusionService';
 import { addSourceUrl } from '../store/slices/uiSlice';
 
@@ -62,6 +62,7 @@ jest.mock('../services/federatedAuthService', () => ({
 }));
 
 jest.mock('../services/cloudControlService', () => ({
+  fetchCloudSyncStatus: jest.fn(async () => null),
   queueCloudFolderSelection: jest.fn(),
   reportSyncActivity: jest.fn(),
 }));
@@ -93,8 +94,9 @@ const mockComputeSupportedFolderSizeForSession = computeSupportedFolderSizeForSe
 const mockReadCloudConfigForSession = readCloudConfigForSession as jest.Mock;
 const mockWriteCloudConfigForSession = writeCloudConfigForSession as jest.Mock;
 const mockQueueCloudFolderSelection = queueCloudFolderSelection as jest.Mock;
+const mockFetchCloudSyncStatus = fetchCloudSyncStatus as jest.Mock;
 const mockRekeyStoredRefreshTokens = rekeyStoredRefreshTokens as jest.Mock;
-const mockAddSourceUrl = addSourceUrl as jest.Mock;
+const mockAddSourceUrl = addSourceUrl as unknown as jest.Mock;
 
 const baseUiState = {
   selectedTranslationId: 'KJV',
@@ -232,6 +234,7 @@ describe('AccountControl', () => {
     mockReadCloudConfigForSession.mockResolvedValue(null);
     mockWriteCloudConfigForSession.mockResolvedValue(undefined);
     mockQueueCloudFolderSelection.mockResolvedValue(null);
+    mockFetchCloudSyncStatus.mockReset().mockResolvedValue(null);
     mockRekeyStoredRefreshTokens.mockResolvedValue(true);
     mockGetFreshSessions.mockResolvedValue({});
     mockGetStoredSessions.mockReturnValue({});
@@ -1078,6 +1081,125 @@ describe('AccountControl', () => {
     expect(screen.queryByRole('dialog', { name: /Connected to Google/ })).not.toBeInTheDocument();
 
     confirmSpy.mockRestore();
+  });
+
+  describe('file sync completion message', () => {
+    const syncingStatus = {
+      ok: true,
+      userId: 'user-1',
+      overall: 'syncing',
+      pollAfterMs: 30_000,
+      providers: { google: { state: 'syncing' } },
+    };
+    const idleStatus = (failedCount: number) => ({
+      ok: true,
+      userId: 'user-1',
+      overall: 'idle',
+      pollAfterMs: 60_000,
+      providers: { google: { state: 'idle', lastCompletedAt: new Date().toISOString(), failedCount } },
+    });
+
+    function setUpGoogleFileSync() {
+      mockUseAppSelector.mockImplementation((selector: (state: any) => any) => selector({
+        ui: { ...baseUiState, userId: 'user-1' },
+      }));
+      mockReadState.mockReturnValue({
+        lastTranslationId: 'KJV',
+        lastTranslationIds: ['KJV'],
+        userId: 'user-1',
+        cloudLinkedAccounts: [linkedBothProviders()[0]],
+        cloudConfigUpdatedAt: Date.now() - 10_000,
+        cloudConfigLastSyncedAt: Date.now() - 10_000,
+      });
+      window.localStorage.setItem('marginalia:provider-sync-preferences', JSON.stringify({
+        google: { syncSettings: true, syncFiles: true, selectedTargets: [] },
+        microsoft: { syncSettings: false, syncFiles: false, selectedTargets: [] },
+      }));
+      mockGetStoredSessions.mockReturnValue({ google: googleSession });
+      mockGetFreshSessions.mockResolvedValue({ google: googleSession });
+    }
+
+    function pollNow() {
+      act(() => {
+        document.dispatchEvent(new Event('visibilitychange'));
+      });
+    }
+
+    function closeAccountModal() {
+      fireEvent.click(document.querySelector('.account-modal .btn-close') as HTMLElement);
+    }
+
+    it('shows the completion message with a refresh link when syncing finishes while open, and clears it on close', async () => {
+      setUpGoogleFileSync();
+      mockFetchCloudSyncStatus
+        .mockResolvedValueOnce(syncingStatus)
+        .mockResolvedValueOnce(idleStatus(2))
+        .mockResolvedValue(idleStatus(0));
+
+      await renderAccountControl();
+      openAccountModal();
+      expect(await screen.findByText('Syncing files...')).toBeInTheDocument();
+
+      pollNow();
+      expect(await screen.findByText("Sync complete, 2 files couldn't be processed.")).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Click to refresh' })).toBeInTheDocument();
+      expect(mockFetchCloudSyncStatus).toHaveBeenCalledWith(expect.objectContaining({
+        userId: 'user-1',
+        providers: ['google'],
+      }));
+
+      closeAccountModal();
+      openAccountModal();
+      await waitFor(() => {
+        expect(mockFetchCloudSyncStatus).toHaveBeenCalledTimes(3);
+      });
+      expect(await screen.findByText(/^Last synced/)).toBeInTheDocument();
+      expect(screen.queryByText(/^Sync complete/)).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Click to refresh' })).not.toBeInTheDocument();
+    });
+
+    it('uses the singular form and "Sync complete!" wording based on failed files', async () => {
+      setUpGoogleFileSync();
+      mockFetchCloudSyncStatus
+        .mockResolvedValueOnce(syncingStatus)
+        .mockResolvedValueOnce(idleStatus(1))
+        .mockResolvedValueOnce(syncingStatus)
+        .mockResolvedValue(idleStatus(0));
+
+      await renderAccountControl();
+      openAccountModal();
+      expect(await screen.findByText('Syncing files...')).toBeInTheDocument();
+
+      pollNow();
+      expect(await screen.findByText("Sync complete, 1 file couldn't be processed.")).toBeInTheDocument();
+
+      pollNow();
+      expect(await screen.findByText('Syncing files...')).toBeInTheDocument();
+      expect(screen.queryByText(/^Sync complete/)).not.toBeInTheDocument();
+
+      pollNow();
+      expect(await screen.findByText('Sync complete!')).toBeInTheDocument();
+    });
+
+    it('does not report completion on reopen when the kept status was syncing and the first fresh poll is idle', async () => {
+      setUpGoogleFileSync();
+      mockFetchCloudSyncStatus
+        .mockResolvedValueOnce(syncingStatus)
+        .mockResolvedValue(idleStatus(0));
+
+      await renderAccountControl();
+      openAccountModal();
+      expect(await screen.findByText('Syncing files...')).toBeInTheDocument();
+
+      closeAccountModal();
+      openAccountModal();
+      await waitFor(() => {
+        expect(mockFetchCloudSyncStatus).toHaveBeenCalledTimes(2);
+      });
+      expect(await screen.findByText(/^Last synced/)).toBeInTheDocument();
+      expect(screen.queryByText('Syncing files...')).not.toBeInTheDocument();
+      expect(screen.queryByText(/^Sync complete/)).not.toBeInTheDocument();
+    });
   });
 
   it('saves folder selections from the custom picker after clicking Apply', async () => {

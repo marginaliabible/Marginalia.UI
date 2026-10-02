@@ -2,7 +2,7 @@ import { render, waitFor } from '@testing-library/react';
 import LinksPanel from './LinksPanel';
 import { useAppSelector } from '../store/hooks';
 import { hyperlinkService } from '../services/hyperlinkService';
-import type { PanelTab } from '../models/tab';
+import type { PanelTab, VerseContext } from '../models/tab';
 import { EMPTY_SOURCE_PREFERENCES } from '../utils/sourceSubscriptions';
 
 jest.mock('../store/hooks', () => ({
@@ -89,7 +89,7 @@ describe('LinksPanel visibility gating', () => {
   });
 
   it('resolves hyperlinks against the first selected verse', async () => {
-    const range = { book: 'Genesis', chapter: 1, verse: 1, verses: [1, 2, 3] } as const;
+    const range: VerseContext = { book: 'Genesis', chapter: 1, verse: 1, verses: [1, 2, 3] };
     const { findByText } = render(<LinksPanel tab={{ ...linksTab, verseContext: range }} isActive={true} />);
 
     await waitFor(() => {

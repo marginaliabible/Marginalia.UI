@@ -947,7 +947,7 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
           return current;
         }
 
-        const next = { ...current, [RIGHT_PANEL_TOP_LEVEL_GROUP]: untagged.rootSelectionKey };
+        const next: Record<string, string | null> = { ...current, [RIGHT_PANEL_TOP_LEVEL_GROUP]: untagged.rootSelectionKey };
         for (let index = 1; index < untagged.ancestorKeys.length; index += 1) {
           next[untagged.ancestorKeys[index - 1]] = untagged.ancestorKeys[index];
         }
