@@ -14,6 +14,7 @@ const document = (
   tags,
   pages,
   pageLinks: pages.map((page) => ({ page, url: `https://example.com/${id}#${page}` })),
+  link: { doc: id, lib: '0a1b2c3d' },
 });
 
 const payload = (verse: number, documents: VerseResourceDocument[]): VerseResourcesPayload => ({

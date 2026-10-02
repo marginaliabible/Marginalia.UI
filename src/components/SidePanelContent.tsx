@@ -53,6 +53,12 @@ const SidePanelContent: React.FC<SidePanelContentProps> = ({
   const contentRef = useRef<HTMLDivElement | null>(null);
   const isPanelVisible = !isMobileLayout || isMobilePanelOpen;
 
+  const collapseMobilePanel = () => {
+    if (isMobileLayout && isMobilePanelOpen) {
+      setIsMobilePanelOpen(false);
+    }
+  };
+
   useEffect(() => {
     if (!isPanelVisible || activeTabId || tabs.length !== 1 || tabs[0].type !== 'search') {
       return;
@@ -114,9 +120,7 @@ const SidePanelContent: React.FC<SidePanelContentProps> = ({
                 tab={tab}
                 goToReference={goToReference}
                 onBeforeNavigate={() => {
-                  if (isMobileLayout && isMobilePanelOpen) {
-                    setIsMobilePanelOpen(false);
-                  }
+                  collapseMobilePanel();
                   if (isPanelDetached) {
                     focusMainWindow();
                   }
@@ -133,9 +137,14 @@ const SidePanelContent: React.FC<SidePanelContentProps> = ({
                 onRemoveTranslation={onRemoveTranslation}
                 onToggleStar={onToggleStar}
                 onReorder={onReorder}
+                onBeforeNavigate={collapseMobilePanel}
               />
             ) : tab.type === 'resources' ? (
-              <ResourcesPanel tab={tab} isActive={tab.id === activeTabId} />
+              <ResourcesPanel
+                tab={tab}
+                isActive={tab.id === activeTabId}
+                onBeforeNavigate={collapseMobilePanel}
+              />
             ) : tab.type === 'links' ? (
               <LinksPanel tab={tab} isActive={tab.id === activeTabId} />
             ) : null}

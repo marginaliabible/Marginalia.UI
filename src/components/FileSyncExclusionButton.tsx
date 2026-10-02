@@ -30,7 +30,7 @@ const FileSyncExclusionButton: React.FC<FileSyncExclusionButtonProps> = ({ syncI
       const providerLabel = syncItem.provider === 'google' ? 'Google Drive' : 'OneDrive';
       const confirmed = window.confirm(
         `Are you sure? This will remove this document from your library the next time your ${providerLabel} is synced. `
-        + 'You can always add it back from the File Sync dialogue.'
+        + 'You can always add it back from the Account Sync dialogue.'
       );
       if (!confirmed) {
         return;

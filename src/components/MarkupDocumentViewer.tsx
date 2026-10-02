@@ -787,11 +787,16 @@ function listMarkupPageElements(doc: Document): Array<{ pageNumber: number; elem
   }));
 }
 
-const MarkupDocumentViewer: React.FC = () => {
+interface MarkupDocumentViewerProps {
+  /** Runs when a scripture link in the document is followed (e.g. to expand the mobile panel). */
+  onScriptureReferenceOpen?: () => void;
+}
+
+const MarkupDocumentViewer: React.FC<MarkupDocumentViewerProps> = ({ onScriptureReferenceOpen }) => {
   const dispatch = useAppDispatch();
   const { pdfViewer } = useAppSelector((state) => state.ui);
   const currentBible = useAppSelector((state) => state.bible.currentBible);
-  const openScriptureReference = useOpenDocumentScriptureReference();
+  const openScriptureReference = useOpenDocumentScriptureReference(onScriptureReferenceOpen);
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const stageRef = useRef<HTMLDivElement | null>(null);
   const pageBlobUrlsRef = useRef<string[]>([]);

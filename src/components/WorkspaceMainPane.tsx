@@ -235,11 +235,17 @@ const WorkspaceMainPane: React.FC<WorkspaceMainPaneProps> = ({
     void scrollToVerse({ book: selectedBook, chapter: nextChapter, verse: 1 });
   };
 
+  const expandMobilePanel = useCallback(() => {
+    if (isMobileLayout && !isPanelDetached) {
+      setIsMobilePanelOpen(true);
+    }
+  }, [isMobileLayout, isPanelDetached, setIsMobilePanelOpen]);
+
   const openVersePanel = (verse: number, options?: { expandMobile?: boolean }) => {
     // Ensures verse tabs exist (and expands on mobile when requested).
     // Displayed verse context is driven by selection via useVerseTabContextSync.
-    if (options?.expandMobile && isMobileLayout && !isPanelDetached) {
-      setIsMobilePanelOpen(true);
+    if (options?.expandMobile) {
+      expandMobilePanel();
     }
 
     if (selectedBook) {
@@ -294,7 +300,6 @@ const WorkspaceMainPane: React.FC<WorkspaceMainPaneProps> = ({
     mode: VerseSelectionMode
   ) => {
     focusMainPane();
-
     const hasSelection = selectedVerses.length > 0 && Boolean(selectedVerseTranslationId);
     const translationLocked = hasSelection && selectedVerseTranslationId !== translationId;
 
@@ -495,7 +500,9 @@ const WorkspaceMainPane: React.FC<WorkspaceMainPaneProps> = ({
       <div className="card border-0 shadow-sm">
         <div className="card-body workspace-scroll pb-4">
           {shouldRenderDocumentViewer ? (
-            pdfViewer.kind === 'markup' ? <MarkupDocumentViewer /> : <PdfViewerPane />
+            pdfViewer.kind === 'markup'
+              ? <MarkupDocumentViewer onScriptureReferenceOpen={expandMobilePanel} />
+              : <PdfViewerPane onScriptureReferenceOpen={expandMobilePanel} />
           ) : selectedBook ? (
             <VerseDisplay
               chaptersByTranslation={chaptersByTranslation}

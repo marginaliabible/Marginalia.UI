@@ -18,7 +18,9 @@ import { useSourcePreferences } from './useSourcePreferences';
 /**
  * Open a document scripture citation in the Translations panel (full verse set).
  */
-export function useOpenDocumentScriptureReference(): (reference: DocumentScriptureReference) => Promise<void> {
+export function useOpenDocumentScriptureReference(
+  onOpen?: () => void
+): (reference: DocumentScriptureReference) => Promise<void> {
   const dispatch = useAppDispatch();
   const selectedTranslationId = useAppSelector((state) => state.ui.selectedTranslationId);
   const sourceUrls = useAppSelector((state) => state.ui.sourceUrls);
@@ -31,6 +33,7 @@ export function useOpenDocumentScriptureReference(): (reference: DocumentScriptu
       return;
     }
 
+    onOpen?.();
     dispatch(setSelectedBook(context.book));
     dispatch(setSelectedChapter(context.chapter));
     dispatch(setVerseSelection({
@@ -55,7 +58,7 @@ export function useOpenDocumentScriptureReference(): (reference: DocumentScriptu
       hasResources,
       preferPanel: 'translations',
     }));
-  }, [dispatch, selectedTranslationId, sourcePreferences, sourceUrls]);
+  }, [dispatch, onOpen, selectedTranslationId, sourcePreferences, sourceUrls]);
 }
 
 /**

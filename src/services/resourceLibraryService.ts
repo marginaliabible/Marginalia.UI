@@ -24,6 +24,7 @@ import {
   isResourceDisabled,
   resolveLibraryKey,
   resourceDocumentKey,
+  resourcesUrlKey,
   type SourcePreferences,
 } from '../utils/sourceSubscriptions';
 import { fetchStorageAware } from './storageAuthenticatedFetch';
@@ -91,6 +92,27 @@ export interface VerseResourceDocument {
   libraryKey?: string;
   /** Stable key for per-document subscription preferences (see resourceDocumentKey). */
   resourceKey?: string;
+  /** Content hash (SHA-256 of the source file) when the manifest publishes one. */
+  hash?: string;
+  /** Identifies this document in shareable page links; the same for every user who has it. */
+  link: ResourceDocumentLinkKey;
+}
+
+/** `doc` is the content hash when known; otherwise the publisher's documentId within the library keyed by `lib`. */
+export interface ResourceDocumentLinkKey {
+  doc: string;
+  lib?: string;
+}
+
+export interface ResolvedResourceDocumentLink {
+  libraryId: string;
+  documentId: string;
+  title: string;
+  hash?: string;
+  cloudProvider: FederatedProvider | null;
+  viewer: DocumentViewerKind;
+  /** Document store URL for the requested page. */
+  url: string;
 }
 
 export interface ResourceLibraryDocumentList {
@@ -214,6 +236,37 @@ export class ResourceLibraryService {
     }));
   }
 
+  /** Finds a shared page link's document among the caller's own libraries; null when they don't have it. */
+  async findDocumentByLink(
+    link: ResourceDocumentLinkKey & { page: number },
+    sourceUrls: string[] = []
+  ): Promise<ResolvedResourceDocumentLink | null> {
+    const libraries = await this.loadResourceLibraries(sourceUrls);
+
+    for (const library of libraries) {
+      if (link.lib && resourcesUrlKey(library.resourcesUrl) !== link.lib) {
+        continue;
+      }
+
+      const document = library.documentsById.get(link.doc);
+      if (!document || (!link.lib && document.hash !== link.doc)) {
+        continue;
+      }
+
+      return {
+        libraryId: library.id,
+        documentId: document.documentId,
+        title: document.title,
+        ...(document.hash ? { hash: document.hash } : {}),
+        cloudProvider: readCloudSyncProviderFromResourcesUrl(library.resourcesUrl),
+        viewer: library.documentViewer === 'markup' ? 'markup' : 'pdf',
+        url: buildDocumentStorePageUrl(library.documentStoreAddress, library.resourcesUrl, document, link.page),
+      };
+    }
+
+    return null;
+  }
+
   private async getUnfilteredResourcesForVerse(
     book: string,
     chapter: number,
@@ -280,6 +333,8 @@ export class ResourceLibraryService {
           })),
           libraryKey: resolveLibraryKey(library.configuredSourceUrl, normalizedSourceUrls),
           resourceKey: resourceDocumentKey(library.resourcesUrl, document.documentId),
+          ...(document.hash ? { hash: document.hash } : {}),
+          link: buildResourceDocumentLinkKey(library.resourcesUrl, document),
         };
 
         aggregated.set(key, nextDoc);
@@ -575,6 +630,15 @@ export function applySourcePreferencesToVersePayload(
     tags: Array.from(tags).sort((a, b) => a.localeCompare(b)),
     documents,
   };
+}
+
+export function buildResourceDocumentLinkKey(
+  resourcesUrl: string,
+  document: Pick<ResourceDocumentEntry, 'documentId' | 'hash'>
+): ResourceDocumentLinkKey {
+  return document.hash
+    ? { doc: document.hash }
+    : { doc: document.documentId, lib: resourcesUrlKey(resourcesUrl) };
 }
 
 async function fetchJsonPayload(sourceUrl: string): Promise<unknown> {

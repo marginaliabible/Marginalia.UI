@@ -42,7 +42,12 @@ export function translationItemKey(libraryKey: string, translationId: string): s
  * the verse lookup and title search services derive library ids differently.
  */
 export function resourceDocumentKey(resourcesUrl: string, documentId: string): string {
-  return `${hashText(resourcesUrl)}:${documentId}`;
+  return `${resourcesUrlKey(resourcesUrl)}:${documentId}`;
+}
+
+/** Short, user-independent key for a resource library; shareable document links carry it as `lib`. */
+export function resourcesUrlKey(resourcesUrl: string): string {
+  return hashText(resourcesUrl);
 }
 
 export function resourceItemKey(libraryKey: string, resourceKey: string): string {

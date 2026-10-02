@@ -17,6 +17,12 @@
   padding-right: 2.4rem;
 }
 
+// On desktop the main pane gets its height by stretching to the sticky side panel; with no side
+// panel (no tabs open) it is content-sized too, so match the panel's height instead.
+.workspace-layout.is-desktop:not(.has-side-panel) .workspace-pane.workspace-main .pdf-viewer-shell {
+  height: calc(100vh - 1rem);
+}
+
 .workspace-layout.is-mobile .workspace-pane.workspace-main .pdf-viewer-stage {
   overscroll-behavior: contain;
 }

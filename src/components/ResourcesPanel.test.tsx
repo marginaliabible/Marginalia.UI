@@ -5,6 +5,7 @@ import { bibleService } from '../services/bibleService';
 import type { PanelTab } from '../models/tab';
 import type { VerseResourcesPayload } from '../services/bibleService';
 import { EMPTY_SOURCE_PREFERENCES } from '../utils/sourceSubscriptions';
+import { REOPEN_DOCUMENT_LINK_EVENT } from '../App';
 
 jest.mock('../hooks/useDocumentScriptureNavigation', () => ({
   useRevealVerseSelectionInBible: () => jest.fn(),
@@ -19,10 +20,6 @@ jest.mock('../services/bibleService', () => ({
   bibleService: {
     getResourcesForVerse: jest.fn(),
   },
-}));
-
-jest.mock('../utils/pdfProxy', () => ({
-  buildPdfProxyUrl: jest.fn((url: string) => url),
 }));
 
 jest.mock('../utils/resourceTagColors', () => ({
@@ -142,6 +139,7 @@ describe('ResourcesPanel page links', () => {
         { page: 2, url: 'https://example.com/doc.pdf', raws: ['1 Pet. 2:24', '1Pe 2:24'] },
         { page: 5, url: 'https://example.com/doc.pdf', raws: ['1 Peter 2:24'] },
       ],
+      link: { doc: 'doc', lib: '0a1b2c3d' },
     }, {
       libraryId: 'lib-b',
       libraryLabel: 'Library B',
@@ -150,27 +148,80 @@ describe('ResourcesPanel page links', () => {
       tags: [],
       pages: [2],
       pageLinks: [{ page: 2, url: 'https://example.com/doc.pdf', raws: ['1 Pt 2:24', '1Pe 2:24'] }],
+      link: { doc: 'doc', lib: '0a1b2c3d' },
     }]));
+    window.history.replaceState(null, '', '/');
   });
 
-  it('shows each page once and opens it with every reference text for that page', async () => {
+  it('renders each page once as a shareable link keyed by library and documentId', async () => {
     const { findAllByRole } = render(<ResourcesPanel tab={resourcesTab} isActive={true} />);
 
-    const pageButtons = await findAllByRole('button', { name: /^\d+$/ });
-    expect(pageButtons.map((button) => button.textContent)).toEqual(['2', '5']);
+    const pageLinks = await findAllByRole('link', { name: /^\d+$/ });
+    expect(pageLinks.map((link) => link.textContent)).toEqual(['2', '5']);
+    expect(pageLinks.map((link) => link.getAttribute('href'))).toEqual([
+      '#/Genesis/1/1?lib=0a1b2c3d&doc=doc&page=2',
+      '#/Genesis/1/1?lib=0a1b2c3d&doc=doc&page=5',
+    ]);
+  });
 
-    fireEvent.click(pageButtons[0]!);
-    expect(dispatch).toHaveBeenCalledWith({
-      type: 'ui/openDocumentViewer',
-      payload: {
-        sourceUrl: 'https://example.com/doc.pdf',
-        page: 2,
-        title: 'Commentary',
-        matchRaws: ['1 Pet. 2:24', '1Pe 2:24', '1 Pt 2:24'],
-        kind: 'pdf',
-        syncItem: null,
-      },
-    });
+  it('links by content hash when the document has one', async () => {
+    (bibleService.getResourcesForVerse as jest.Mock).mockResolvedValue(documentPayload(1, [{
+      libraryId: 'cloud',
+      libraryLabel: 'Google Drive',
+      documentId: 'drive-file-id',
+      title: 'Synced Notes',
+      tags: [],
+      pages: [7],
+      pageLinks: [{ page: 7, url: 'https://storage.example.com/documents/ab/cd/abcd/pages/' }],
+      hash: 'abcd',
+      link: { doc: 'abcd' },
+    }]));
+
+    const { findByRole } = render(<ResourcesPanel tab={resourcesTab} isActive={true} />);
+
+    const pageLink = await findByRole('link', { name: '7' });
+    expect(pageLink.getAttribute('href')).toBe('#/Genesis/1/1?doc=abcd&page=7');
+  });
+
+  it('leaves a plain click to the browser and does not dispatch anything', async () => {
+    const { findAllByRole } = render(<ResourcesPanel tab={resourcesTab} isActive={true} />);
+    const pageLinks = await findAllByRole('link', { name: /^\d+$/ });
+
+    const notPrevented = fireEvent.click(pageLinks[0]!);
+
+    expect(notPrevented).toBe(true);
+    expect(dispatch).not.toHaveBeenCalled();
+  });
+
+  it('runs onBeforeNavigate for a plain click but not when opening in a new tab', async () => {
+    const onBeforeNavigate = jest.fn();
+    const { findAllByRole } = render(
+      <ResourcesPanel tab={resourcesTab} isActive={true} onBeforeNavigate={onBeforeNavigate} />
+    );
+    const pageLinks = await findAllByRole('link', { name: /^\d+$/ });
+
+    fireEvent.click(pageLinks[0]!, { ctrlKey: true });
+    expect(onBeforeNavigate).not.toHaveBeenCalled();
+
+    fireEvent.click(pageLinks[0]!);
+    expect(onBeforeNavigate).toHaveBeenCalledTimes(1);
+  });
+
+  it('re-opens the document when its link is already the current hash', async () => {
+    const reopen = jest.fn();
+    window.addEventListener(REOPEN_DOCUMENT_LINK_EVENT, reopen);
+    try {
+      const { findAllByRole } = render(<ResourcesPanel tab={resourcesTab} isActive={true} />);
+      const pageLinks = await findAllByRole('link', { name: /^\d+$/ });
+      window.history.replaceState(null, '', `/${pageLinks[0]!.getAttribute('href')}`);
+
+      const notPrevented = fireEvent.click(pageLinks[0]!);
+
+      expect(notPrevented).toBe(false);
+      expect(reopen).toHaveBeenCalledTimes(1);
+    } finally {
+      window.removeEventListener(REOPEN_DOCUMENT_LINK_EVENT, reopen);
+    }
   });
 });
 
@@ -226,6 +277,7 @@ describe('ResourcesPanel multi-verse selection', () => {
           tags: ['commentary'],
           pages: [3],
           pageLinks: [{ page: 3, url: 'https://example.com/shared#3' }],
+          link: { doc: 'shared', lib: '0a1b2c3d' },
         }, {
           libraryId: 'lib',
           libraryLabel: 'Library',
@@ -234,6 +286,7 @@ describe('ResourcesPanel multi-verse selection', () => {
           tags: ['map'],
           pages: [8],
           pageLinks: [{ page: 8, url: 'https://example.com/first#8' }],
+          link: { doc: 'first-only', lib: '0a1b2c3d' },
         }]);
       }
 
@@ -245,6 +298,7 @@ describe('ResourcesPanel multi-verse selection', () => {
         tags: ['commentary'],
         pages: [4],
         pageLinks: [{ page: 4, url: 'https://example.com/shared#4' }],
+        link: { doc: 'shared', lib: '0a1b2c3d' },
       }]);
     });
   });
@@ -270,6 +324,16 @@ describe('ResourcesPanel multi-verse selection', () => {
 
     expect(await findByText('Shared Commentary')).toBeTruthy();
     expect(queryByText('First Only')).toBeNull();
+  });
+
+  it('links every page to the first selected verse', async () => {
+    const { findAllByRole } = render(<ResourcesPanel tab={multiVerseTab} isActive={true} />);
+
+    const pageLinks = await findAllByRole('link', { name: /^\d+$/ });
+    expect(pageLinks.map((link) => link.getAttribute('href'))).toEqual([
+      '#/Genesis/1/1?lib=0a1b2c3d&doc=shared&page=3',
+      '#/Genesis/1/1?lib=0a1b2c3d&doc=shared&page=4',
+    ]);
   });
 
   it('dispatches ANY when the match toggle is changed', async () => {

@@ -121,11 +121,16 @@ function highlightMatchesOnPageView(pageViewRoot: HTMLElement, rawMatchTexts: re
   return firstHighlight;
 }
 
-const PdfViewerPane: React.FC = () => {
+interface PdfViewerPaneProps {
+  /** Runs when a scripture link in the document is followed (e.g. to expand the mobile panel). */
+  onScriptureReferenceOpen?: () => void;
+}
+
+const PdfViewerPane: React.FC<PdfViewerPaneProps> = ({ onScriptureReferenceOpen }) => {
   const dispatch = useAppDispatch();
   const { pdfViewer } = useAppSelector((state) => state.ui);
   const currentBible = useAppSelector((state) => state.bible.currentBible);
-  const openScriptureReference = useOpenDocumentScriptureReference();
+  const openScriptureReference = useOpenDocumentScriptureReference(onScriptureReferenceOpen);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const pagesRef = useRef<HTMLDivElement | null>(null);
   const viewerRef = useRef<PDFViewer | null>(null);

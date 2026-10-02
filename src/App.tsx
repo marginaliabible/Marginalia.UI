@@ -44,6 +44,7 @@ import {
   setDisabledSourceItems,
   setResourceTagOverrides,
   dropTranslationRecords,
+  setDocumentLinkNotice,
 } from './store/slices/uiSlice';
 import {
   bibleService,
@@ -73,6 +74,7 @@ import { useWorkspaceSplit } from './hooks/useWorkspaceSplit';
 import { usePopupPanel } from './hooks/usePopupPanel';
 import { useMobilePanelEffects } from './hooks/useMobilePanelEffects';
 import { useHashRouteSync } from './hooks/useHashRouteSync';
+import { useDocumentLinkRoute } from './hooks/useDocumentLinkRoute';
 import { useVerseTabContextSync } from './hooks/useVerseTabContextSync';
 import { beginGitHubAuthorization, initializeGitHubAuthFlow } from './services/githubAuthFlowService';
 import {
@@ -163,6 +165,7 @@ function App() {
     resourceTagOverrides,
     resourceHiddenTags,
     pdfViewer,
+    documentLinkNotice,
     theme,
     translatorItalics,
     translatorParagraphMarks,
@@ -574,6 +577,8 @@ function App() {
     selectedTranslationId,
     selectedVerses,
   });
+
+  useDocumentLinkRoute({ ready });
 
   useVerseTabContextSync();
 
@@ -1013,6 +1018,18 @@ function App() {
           setIsMobilePanelOpen={setIsMobilePanelOpen}
           onSearchComplete={() => setIsMiniSearchVisible(false)}
         />
+
+        {documentLinkNotice && (
+          <div className="alert alert-warning alert-dismissible small py-2 mb-2" role="alert">
+            {documentLinkNotice}
+            <button
+              type="button"
+              className="btn-close py-2"
+              aria-label="Dismiss"
+              onClick={() => dispatch(setDocumentLinkNotice(null))}
+            ></button>
+          </div>
+        )}
 
         <div
           ref={workspaceRef}

@@ -1,16 +1,9 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import type { PanelTab, VerseContext } from '../models/tab';
 import { useAppDispatch, useAppSelector } from '../store/hooks';
-import {
-  openDocumentViewer,
-  setResourceHiddenTags,
-  setResourceVerseMatchMode,
-  type DocumentSyncItem,
-} from '../store/slices/uiSlice';
-import type { DocumentViewerKind } from '../utils/resourceLibraryConfig';
-import { buildMarkupDocumentShellUrl } from '../utils/resourceLibraryConfig';
+import { setResourceHiddenTags, setResourceVerseMatchMode } from '../store/slices/uiSlice';
 import { bibleService, type VerseResourcesPayload } from '../services/bibleService';
-import { buildPdfProxyUrl } from '../utils/pdfProxy';
+import { buildDocumentLinkRoute, REOPEN_DOCUMENT_LINK_EVENT } from '../App';
 import { getOrAssignResourceTagColors, TAG_COLOR_PALETTE } from '../utils/resourceTagColors';
 import { versesFromContext } from '../utils/selectedVerseContext';
 import { mergePageLinks, mergeVerseResourcePayloads, type ResourceVerseMatchMode } from '../utils/verseResources';
@@ -22,9 +15,11 @@ import { VerseReferenceLabel, VerseTextList } from './VersePreview';
 interface ResourcesPanelProps {
   tab: PanelTab;
   isActive: boolean;
+  /** Runs when a page link or verse reveal is followed in this window (e.g. to collapse the mobile panel). */
+  onBeforeNavigate?: () => void;
 }
 
-const ResourcesPanel: React.FC<ResourcesPanelProps> = ({ tab, isActive }) => {
+const ResourcesPanel: React.FC<ResourcesPanelProps> = ({ tab, isActive, onBeforeNavigate }) => {
   const verseContext = tab.verseContext as VerseContext | undefined;
   const selectedVerseNumbers = useMemo(
     () => (verseContext ? versesFromContext(verseContext) : []),
@@ -39,7 +34,7 @@ const ResourcesPanel: React.FC<ResourcesPanelProps> = ({ tab, isActive }) => {
     translatorItalics,
     translatorParagraphMarks,
   } = useAppSelector((state) => state.ui);
-  const { currentBible, isPanelDetached } = useAppSelector((state) => state.bible);
+  const { currentBible } = useAppSelector((state) => state.bible);
   const revealInBible = useRevealVerseSelectionInBible();
   const sourcePreferences = useSourcePreferences();
   const verseMarkupSettings = useMemo(() => ({
@@ -201,31 +196,20 @@ const ResourcesPanel: React.FC<ResourcesPanelProps> = ({ tab, isActive }) => {
     dispatch(setResourceHiddenTags(Array.from(next)));
   };
 
-  const handleOpenDocumentPage = (
-    event: React.MouseEvent<HTMLButtonElement>,
-    url: string,
-    page: number,
-    title: string,
-    raws: string[] = [],
-    viewer: DocumentViewerKind = 'pdf',
-    syncItem: DocumentSyncItem | null = null
-  ) => {
-    event.preventDefault();
+  const linkReference = verseContext && selectedVerseNumbers.length > 0
+    ? { book: verseContext.book, chapter: verseContext.chapter, verse: selectedVerseNumbers[0] }
+    : null;
 
-    const proxyUrl = buildPdfProxyUrl(url);
-    void proxyUrl;
-    const viewerUrl = viewer === 'markup' ? buildMarkupDocumentShellUrl(url) : url;
-    dispatch(openDocumentViewer({
-      sourceUrl: viewerUrl,
-      page,
-      title,
-      matchRaws: raws,
-      kind: viewer,
-      syncItem,
-    }));
+  const handlePageLinkClick = (event: React.MouseEvent<HTMLAnchorElement>, href: string) => {
+    if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
+      return;
+    }
 
-    if (isPanelDetached && typeof window !== 'undefined' && window.opener && !window.opener.closed) {
-      window.opener.focus();
+    onBeforeNavigate?.();
+
+    if (typeof window !== 'undefined' && window.location.hash === href) {
+      event.preventDefault();
+      window.dispatchEvent(new Event(REOPEN_DOCUMENT_LINK_EVENT));
     }
   };
 
@@ -281,7 +265,10 @@ const ResourcesPanel: React.FC<ResourcesPanelProps> = ({ tab, isActive }) => {
               markupFlags={markupFlagsFromBible(currentBible)}
               verseMarkupSettings={verseMarkupSettings}
               onOverflowClick={verseContext
-                ? () => revealInBible(verseContext)
+                ? () => {
+                  onBeforeNavigate?.();
+                  revealInBible(verseContext);
+                }
                 : undefined}
             />
           </div>
@@ -366,26 +353,21 @@ const ResourcesPanel: React.FC<ResourcesPanelProps> = ({ tab, isActive }) => {
                       </div>
 
                       <div className="small mt-1">
-                        {document.pageLinks.map((link, index) => (
-                          <span key={`${document.documentId}:${link.page}`}>
-                            {index > 0 ? ', ' : ''}
-                            <button
-                              type="button"
-                              className="resource-page-link btn btn-link btn-sm p-0 align-baseline"
-                              onClick={(event) => handleOpenDocumentPage(
-                                event,
-                                link.url,
-                                link.page,
-                                document.title,
-                                link.raws,
-                                link.viewer,
-                                document.cloudProvider ? { provider: document.cloudProvider, itemId: document.documentId } : null
-                              )}
-                            >
-                              {link.page}
-                            </button>
-                          </span>
-                        ))}
+                        {document.pageLinks.map((link, index) => {
+                          const href = buildDocumentLinkRoute(linkReference, { ...document.link, page: link.page });
+                          return (
+                            <span key={`${document.documentId}:${link.page}`}>
+                              {index > 0 ? ', ' : ''}
+                              <a
+                                className="resource-page-link btn btn-link btn-sm p-0 align-baseline"
+                                href={href}
+                                onClick={(event) => handlePageLinkClick(event, href)}
+                              >
+                                {link.page}
+                              </a>
+                            </span>
+                          );
+                        })}
                       </div>
                     </div>
                     );

@@ -13,7 +13,18 @@ export interface HashRouteTarget {
   verse?: number;
 }
 
+/** A page of a resource document: `doc` is the content hash, or the publisher's documentId when `lib` is set. */
+export interface DocumentLinkTarget {
+  doc: string;
+  lib?: string;
+  page: number;
+}
+
+/** Dispatched on window to re-open the current hash's document link (clicking a link whose href is already the hash fires no hashchange). */
+export const REOPEN_DOCUMENT_LINK_EVENT = 'marginalia:reopen-document-link';
+
 const SEARCH_HASH_QUERY_PARAM = 'q';
+const DOCUMENT_LINK_QUERY_PARAMS = ['doc', 'lib', 'page'] as const;
 
 export const DESKTOP_BREAKPOINT = '(min-width: 992px)';
 
@@ -141,6 +152,59 @@ export const parseSearchFromHash = (hashValue: string): string | null => {
   const search = new URLSearchParams(hashValue.slice(queryIndex + 1)).get(SEARCH_HASH_QUERY_PARAM);
   const trimmed = search?.trim();
   return trimmed && trimmed.length > 0 ? trimmed : null;
+};
+
+// e.g. "#/Romans/8/28?doc=<sha256>&page=12" or "#/Romans/8/28?lib=1a2b3c4d&doc=<documentId>&page=12".
+export const buildDocumentLinkRoute = (
+  reference: HashRouteTarget | null | undefined,
+  link: DocumentLinkTarget
+): string => {
+  const basePath = reference ? buildHashRoute(reference, true) : '#/';
+  const params = new URLSearchParams();
+  if (link.lib) {
+    params.set('lib', link.lib);
+  }
+  params.set('doc', link.doc);
+  params.set('page', String(Math.max(1, Math.trunc(link.page))));
+  return `${basePath}?${params.toString()}`;
+};
+
+export const parseDocumentLinkFromHash = (hashValue: string): DocumentLinkTarget | null => {
+  const queryIndex = hashValue ? hashValue.indexOf('?') : -1;
+  if (queryIndex === -1) {
+    return null;
+  }
+
+  const params = new URLSearchParams(hashValue.slice(queryIndex + 1));
+  const doc = params.get('doc')?.trim();
+  if (!doc) {
+    return null;
+  }
+
+  const page = Number.parseInt(params.get('page') ?? '', 10);
+  const lib = params.get('lib')?.trim();
+  return {
+    doc,
+    ...(lib ? { lib } : {}),
+    page: Number.isInteger(page) && page > 0 ? page : 1,
+  };
+};
+
+/** The hash without document-link params; other params (such as the search query) are kept. */
+export const stripDocumentLinkFromHash = (hashValue: string): string => {
+  const queryIndex = hashValue ? hashValue.indexOf('?') : -1;
+  if (queryIndex === -1) {
+    return hashValue;
+  }
+
+  const params = new URLSearchParams(hashValue.slice(queryIndex + 1));
+  for (const name of DOCUMENT_LINK_QUERY_PARAMS) {
+    params.delete(name);
+  }
+
+  const base = hashValue.slice(0, queryIndex);
+  const rest = params.toString();
+  return rest ? `${base}?${rest}` : base;
 };
 
 export const getLanguageDisplayName = (code: string, extraLanguages: ExtraLanguageMeta[] = []): string => {

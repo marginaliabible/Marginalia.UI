@@ -19,6 +19,8 @@ interface TranslationsPanelProps {
   onRemoveTranslation: (id: string) => void;
   onToggleStar: (id: string) => void;
   onReorder: (fromIndex: number, toIndex: number) => void;
+  /** Runs before revealing a verse in the Bible pane (e.g. to collapse the mobile panel). */
+  onBeforeNavigate?: () => void;
 }
 
 const TranslationsPanel: React.FC<TranslationsPanelProps> = ({
@@ -31,6 +33,7 @@ const TranslationsPanel: React.FC<TranslationsPanelProps> = ({
   onRemoveTranslation,
   onToggleStar,
   onReorder,
+  onBeforeNavigate,
 }) => {
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
   const [translationFilter, setTranslationFilter] = useState('');
@@ -240,7 +243,10 @@ const TranslationsPanel: React.FC<TranslationsPanelProps> = ({
                               markupFlags={markupFlagsByTranslation.get(record.id) ?? {}}
                               verseMarkupSettings={verseMarkupSettings}
                               onOverflowClick={verseContext
-                                ? () => revealInBible(verseContext)
+                                ? () => {
+                                  onBeforeNavigate?.();
+                                  revealInBible(verseContext);
+                                }
                                 : undefined}
                             />
                           ) : (

@@ -13,6 +13,10 @@ interface UseHashRouteSyncOptions {
   selectedVerses: number[];
 }
 
+const selectionKey = (book: string | null, chapter: number, verses: number[]): string => (
+  `${book ?? ''}::${chapter}::${verses.join(',')}`
+);
+
 export const useHashRouteSync = ({
   currentBible,
   ready,
@@ -27,6 +31,8 @@ export const useHashRouteSync = ({
   const selectedBookRef = useRef<string | null>(selectedBook);
   const selectedChapterRef = useRef<number>(selectedChapter);
   const selectedTranslationIdRef = useRef<string>(selectedTranslationId);
+  const selectedVersesRef = useRef<number[]>(selectedVerses);
+  const staleSelectionRef = useRef<string | null>(null);
   const applyGenerationRef = useRef(0);
 
   useEffect(() => {
@@ -40,6 +46,10 @@ export const useHashRouteSync = ({
   useEffect(() => {
     selectedTranslationIdRef.current = selectedTranslationId;
   }, [selectedTranslationId]);
+
+  useEffect(() => {
+    selectedVersesRef.current = selectedVerses;
+  }, [selectedVerses]);
 
   const applyHashRouteFromLocation = useCallback(async () => {
     if (typeof window === 'undefined' || !currentBible) {
@@ -62,6 +72,14 @@ export const useHashRouteSync = ({
     const currentSelectedBook = selectedBookRef.current;
     const currentSelectedChapter = selectedChapterRef.current;
     const didChangeReference = currentSelectedBook !== book.name || currentSelectedChapter !== nextChapter;
+    const keepsSelection = Boolean(route.verse) && !didChangeReference
+      && selectedVersesRef.current.includes(route.verse as number);
+
+    // The URL-sync effect can run in this same commit with the pre-route selection; it must not
+    // overwrite the incoming hash (and its extra params, e.g. document links) with that state.
+    staleSelectionRef.current = didChangeReference || (Boolean(route.verse) && !keepsSelection)
+      ? selectionKey(currentSelectedBook, currentSelectedChapter, selectedVersesRef.current)
+      : null;
 
     if (currentSelectedBook !== book.name) {
       dispatch(setSelectedBook(book.name));
@@ -71,6 +89,11 @@ export const useHashRouteSync = ({
     }
 
     if (generation !== applyGenerationRef.current) {
+      return;
+    }
+
+    // A Resources panel page link names the first selected verse; keep the rest of the selection in place.
+    if (keepsSelection) {
       return;
     }
 
@@ -115,6 +138,13 @@ export const useHashRouteSync = ({
   useEffect(() => {
     if (!ready || !selectedBook || typeof window === 'undefined') {
       return;
+    }
+
+    if (staleSelectionRef.current !== null) {
+      if (staleSelectionRef.current === selectionKey(selectedBook, selectedChapter, selectedVerses)) {
+        return;
+      }
+      staleSelectionRef.current = null;
     }
 
     const selectedVerse = selectedVerses.find((verse) => Number.isInteger(verse) && verse > 0);

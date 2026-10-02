@@ -48,6 +48,8 @@ interface UiState {
     focusNonce: number;
     syncItem: DocumentSyncItem | null;
   };
+  /** Shown when a shared document link can't be opened from the user's libraries. */
+  documentLinkNotice: string | null;
   theme: ThemePreference;
   translatorItalics: boolean;
   translatorParagraphMarks: boolean;
@@ -84,6 +86,7 @@ const initialState: UiState = {
     focusNonce: 0,
     syncItem: null,
   },
+  documentLinkNotice: null,
   theme: 'light',
   translatorItalics: true,
   translatorParagraphMarks: true,
@@ -217,6 +220,9 @@ const uiSlice = createSlice({
     },
     closeDocumentViewer: (state) => {
       state.pdfViewer.isOpen = false;
+    },
+    setDocumentLinkNotice: (state, action: PayloadAction<string | null>) => {
+      state.documentLinkNotice = action.payload;
     },
     setPdfViewerPage: (state, action: PayloadAction<number>) => {
       if (!state.pdfViewer.isOpen) {
@@ -507,6 +513,7 @@ export const {
   openDocumentViewer,
   closePdfViewer,
   closeDocumentViewer,
+  setDocumentLinkNotice,
   setPdfViewerPage,
   toggleResourceHiddenTag,
   addSourceUrl,

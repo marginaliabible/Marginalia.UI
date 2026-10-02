@@ -24,7 +24,12 @@ import {
   parseGitHubPrivateBibleData,
   resolveGitHubPrivateSourceVersion,
 } from './githubPrivateSourceService';
-import { ResourceLibraryService, type ResourceLibraryDocumentList } from './resourceLibraryService';
+import {
+  ResourceLibraryService,
+  type ResolvedResourceDocumentLink,
+  type ResourceDocumentLinkKey,
+  type ResourceLibraryDocumentList,
+} from './resourceLibraryService';
 import type { SourcePreferences } from '../utils/sourceSubscriptions';
 import { fetchStorageAware } from './storageAuthenticatedFetch';
 import {
@@ -218,6 +223,8 @@ export interface VerseResourceDocument {
   pageLinks: VerseResourceDocumentLink[];
   libraryKey?: string;
   resourceKey?: string;
+  hash?: string;
+  link: ResourceDocumentLinkKey;
 }
 
 export interface VerseResourcesPayload {
@@ -478,6 +485,13 @@ class BibleService {
 
   async listResourceLibraryDocuments(sourceUrls: string[] = []): Promise<ResourceLibraryDocumentList[]> {
     return this.resourceLibraryService.listResourceLibraryDocuments(sourceUrls);
+  }
+
+  async findDocumentByLink(
+    link: ResourceDocumentLinkKey & { page: number },
+    sourceUrls: string[] = []
+  ): Promise<ResolvedResourceDocumentLink | null> {
+    return this.resourceLibraryService.findDocumentByLink(link, sourceUrls);
   }
 
   async probeSourceUrl(sourceUrl: string): Promise<SourceProbeResult> {
