@@ -184,6 +184,35 @@ describe('ToastPanel', () => {
     expect(onClick).toHaveBeenCalledTimes(1);
   });
 
+  it('renders link segments and several actions without opening the history list', () => {
+    const onLink = jest.fn();
+    const onMove = jest.fn();
+    const onMute = jest.fn();
+    const { container } = render(<ToastPanel />);
+    act(() => {
+      showToast({
+        message: 'Opened in the panel window.',
+        segments: ['Opened in the ', { text: 'panel window', onClick: onLink }, '.'],
+        actions: [
+          { label: 'Move it here', onClick: onMove },
+          { label: 'Got it!', onClick: onMute },
+        ],
+      });
+    });
+
+    const current = panel(container).querySelector('.toast-panel__current') as HTMLElement;
+    expect(current).toHaveTextContent('Opened in the panel window.');
+    expect(current).toHaveAttribute('title', 'Opened in the panel window.');
+
+    fireEvent.click(screen.getByRole('button', { name: 'panel window' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Move it here' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Got it!' }));
+    expect(onLink).toHaveBeenCalledTimes(1);
+    expect(onMove).toHaveBeenCalledTimes(1);
+    expect(onMute).toHaveBeenCalledTimes(1);
+    expect(panel(container)).not.toHaveClass('is-list-open');
+  });
+
   it('pauses expiry while expanded and unmounts after the last toast expires', () => {
     const { container } = render(<ToastPanel />);
     act(() => {

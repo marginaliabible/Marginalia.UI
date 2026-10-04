@@ -3,6 +3,8 @@ import type { QuickJumpTarget } from '../models/bible';
 import type { PanelTab } from '../models/tab';
 import { useAppDispatch, useAppSelector } from '../store/hooks';
 import { openDocumentViewer } from '../store/slices/uiSlice';
+import { routeInteraction } from '../services/windowRouting';
+import type { OpenDocumentPayload } from '../models/windowMessages';
 import { buildMarkupDocumentShellUrl } from '../utils/resourceLibraryConfig';
 import { searchResourceDocumentTitles, type ResourceDocumentTitleSearchResultSet } from '../services/resourceLibrarySearchService';
 import { normalizeEnglishTerm } from '../services/searchNormalizer';
@@ -171,14 +173,18 @@ const SearchResults: React.FC<SearchResultsProps> = ({ tab, goToReference, onBef
   const handleOpenDocument = (match: NonNullable<typeof displayedDocumentMatches>[number]) => {
     onBeforeNavigate?.();
     const kind = match.viewer === 'markup' ? 'markup' : 'pdf';
-    dispatch(openDocumentViewer({
+    const payload: OpenDocumentPayload = {
       sourceUrl: kind === 'markup' ? buildMarkupDocumentShellUrl(match.url) : match.url,
       page: 1,
       title: match.title,
       matchRaws: [],
       kind,
       syncItem: match.cloudProvider ? { provider: match.cloudProvider, itemId: match.documentId } : null,
-    }));
+    };
+    routeInteraction(
+      { kind: 'document', type: 'open-document', payload },
+      () => dispatch(openDocumentViewer(payload))
+    );
   };
 
   // Auto-load more results when user scrolls near the bottom

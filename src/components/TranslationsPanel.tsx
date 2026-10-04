@@ -148,7 +148,11 @@ const TranslationsPanel: React.FC<TranslationsPanelProps> = ({
         <div className="d-flex align-items-center justify-content-between">
           <VerseReferenceLabel
             verseContext={verseContext}
-            className="text-body-secondary small fw-semibold"
+            className="small fw-semibold"
+            onClick={() => {
+              onBeforeNavigate?.();
+              revealInBible(verseContext);
+            }}
           />
         </div>
 

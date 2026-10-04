@@ -10,8 +10,9 @@ import {
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import 'pdfjs-dist/web/pdf_viewer.css';
 import { useAppDispatch, useAppSelector } from '../store/hooks';
-import { closePdfViewer, setPdfViewerPage } from '../store/slices/uiSlice';
+import { setPdfViewerPage } from '../store/slices/uiSlice';
 import { useOpenDocumentScriptureReference } from '../hooks/useDocumentScriptureNavigation';
+import { useBackToVerses } from '../hooks/useDocumentPopout';
 import { useViewerZoomInputs } from '../hooks/useViewerZoomInputs';
 import { loadPageScriptureReferences } from '../utils/loadPageScriptureReferences';
 import { applyScriptureLinkOverlays, clearScriptureLinks } from '../utils/scriptureLinkOverlays';
@@ -24,6 +25,7 @@ import {
 } from '../utils/documentTextMatch';
 import { clampScale, stepScale } from '../utils/viewerZoom';
 import FileSyncExclusionButton from './FileSyncExclusionButton';
+import DocumentPopoutButton from './DocumentPopoutButton';
 import ViewerZoomControls from './ViewerZoomControls';
 
 GlobalWorkerOptions.workerSrc = workerUrl;
@@ -128,6 +130,7 @@ interface PdfViewerPaneProps {
 
 const PdfViewerPane: React.FC<PdfViewerPaneProps> = ({ onScriptureReferenceOpen }) => {
   const dispatch = useAppDispatch();
+  const backToVerses = useBackToVerses();
   const { pdfViewer } = useAppSelector((state) => state.ui);
   const currentBible = useAppSelector((state) => state.bible.currentBible);
   const openScriptureReference = useOpenDocumentScriptureReference(onScriptureReferenceOpen);
@@ -599,7 +602,7 @@ const PdfViewerPane: React.FC<PdfViewerPaneProps> = ({ onScriptureReferenceOpen 
         <button
           type="button"
           className="btn btn-sm btn-outline-secondary"
-          onClick={() => dispatch(closePdfViewer())}
+          onClick={backToVerses}
         >
           <i className="fa-solid fa-arrow-left me-1" aria-hidden="true"></i>
           Back To Verses
@@ -640,6 +643,8 @@ const PdfViewerPane: React.FC<PdfViewerPaneProps> = ({ onScriptureReferenceOpen 
             onZoomStep={adjustScale}
             onFitWidth={() => setFitWidth(true)}
           />
+
+          <DocumentPopoutButton />
         </div>
       </div>
 

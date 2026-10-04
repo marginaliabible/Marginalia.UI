@@ -1,12 +1,8 @@
 import { useState, useMemo, useEffect } from 'react';
 import { useAppDispatch, useAppSelector } from '../store/hooks';
-import {
-  loadTranslations,
-  runSearchInNewTab,
-  runSearchInTab,
-  clearSearch,
-} from '../store/slices/bibleSlice';
+import { runPanelSearch, clearSearch } from '../store/slices/bibleSlice';
 import { setSearchTerm, clearVerseSelection } from '../store/slices/uiSlice';
+import { routeInteraction } from '../services/windowRouting';
 import { parseQuickJump } from '../utils/reference-parser';
 import { buildSearchHashRoute } from '../App';
 import type { QuickJumpTarget } from '../models/bible';
@@ -19,7 +15,6 @@ interface UseSearchControllerOptions {
   starredTranslationIds: string[];
   goToReference: (target: QuickJumpTarget, translationId?: string) => Promise<void>;
   isPanelDetached: boolean;
-  focusDetachedPanel: () => void;
   isDesktopLayout: boolean;
   setIsMobilePanelOpen: (open: boolean) => void;
   onEmptyEscape?: () => void;
@@ -57,7 +52,6 @@ export const useSearchController = ({
   starredTranslationIds,
   goToReference,
   isPanelDetached,
-  focusDetachedPanel,
   isDesktopLayout,
   setIsMobilePanelOpen,
   onEmptyEscape,
@@ -215,25 +209,18 @@ export const useSearchController = ({
     updateSearchHistory(normalized, null);
     pushSearchHashRoute(normalized);
 
-    await dispatch(loadTranslations(starredTranslationIds));
-
-    if (action === 'new') {
-      dispatch(runSearchInNewTab({ query: normalized, translationIds: starredTranslationIds }));
-    } else if (activeTabId && activeTab?.type === 'search') {
-      dispatch(runSearchInTab({ tabId: activeTabId, query: normalized, translationIds: starredTranslationIds }));
-    } else {
-      dispatch(runSearchInNewTab({ query: normalized, translationIds: starredTranslationIds }));
-    }
+    const payload = { query: normalized, action, translationIds: starredTranslationIds };
+    const localSearches: Promise<unknown>[] = [];
+    routeInteraction({ kind: 'panel', type: 'run-search', payload }, () => {
+      localSearches.push(dispatch(runPanelSearch(payload)));
+    });
+    await Promise.all(localSearches);
 
     setIsSearchActionDropdownOpen(false);
     setSearchActionIndex(0);
 
     if (!isDesktopLayout && !isPanelDetached) {
       setIsMobilePanelOpen(true);
-    }
-
-    if (isPanelDetached) {
-      focusDetachedPanel();
     }
 
     onSearchComplete?.();

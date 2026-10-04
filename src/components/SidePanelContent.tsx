@@ -146,7 +146,11 @@ const SidePanelContent: React.FC<SidePanelContentProps> = ({
                 onBeforeNavigate={collapseMobilePanel}
               />
             ) : tab.type === 'links' ? (
-              <LinksPanel tab={tab} isActive={tab.id === activeTabId} />
+              <LinksPanel
+                tab={tab}
+                isActive={tab.id === activeTabId}
+                onBeforeNavigate={collapseMobilePanel}
+              />
             ) : null}
             <div className="pb-4" aria-hidden="true"></div>
           </div>

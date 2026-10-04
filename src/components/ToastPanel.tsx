@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { isAlertTone, setToastExpiryPaused, useToasts, type Toast } from '../services/toastService';
+import { isAlertTone, setToastExpiryPaused, toastActions, useToasts, type Toast } from '../services/toastService';
 
 export const TOAST_AUTO_COLLAPSE_MS = 12_000;
 // Unmounts the panel even when no transitionend arrives (reduced motion, jsdom).
@@ -58,16 +58,40 @@ const ToastAlertIcon: React.FC<{ toast: Toast }> = ({ toast }) => {
   );
 };
 
-const ToastActionButton: React.FC<{ toast: Toast }> = ({ toast }) => {
-  if (!toast.action) {
+const ToastMessage: React.FC<{ toast: Toast }> = ({ toast }) => {
+  if (!toast.segments || toast.segments.length === 0) {
+    return <>{toast.message}</>;
+  }
+
+  return (
+    <>
+      {toast.segments.map((segment, index) => (
+        typeof segment === 'string' ? (
+          <React.Fragment key={index}>{segment}</React.Fragment>
+        ) : (
+          <button key={index} type="button" className="toast-panel__link" onClick={segment.onClick}>
+            {segment.text}
+          </button>
+        )
+      ))}
+    </>
+  );
+};
+
+const ToastActionButtons: React.FC<{ toast: Toast }> = ({ toast }) => {
+  const actions = toastActions(toast);
+  if (actions.length === 0) {
     return null;
   }
 
-  const { label, onClick } = toast.action;
   return (
-    <button type="button" className="toast-panel__action" onClick={onClick}>
-      {label}
-    </button>
+    <>
+      {actions.map(({ label, onClick }) => (
+        <button key={label} type="button" className="toast-panel__action" onClick={onClick}>
+          {label}
+        </button>
+      ))}
+    </>
   );
 };
 
@@ -267,7 +291,7 @@ const ToastPanel: React.FC = () => {
   };
 
   const handleCurrentClick = (event: React.MouseEvent<HTMLDivElement>) => {
-    if (event.target instanceof Element && event.target.closest('.toast-panel__action')) {
+    if (event.target instanceof Element && event.target.closest('.toast-panel__action, .toast-panel__link')) {
       return;
     }
     setListOpen(true);
@@ -338,9 +362,9 @@ const ToastPanel: React.FC = () => {
                   </time>
                   <span className="toast-panel__row-message">
                     <ToastAlertIcon toast={toast} />
-                    {toast.message}
+                    <ToastMessage toast={toast} />
                     {formatRepeat(toast)}
-                    <ToastActionButton toast={toast} />
+                    <ToastActionButtons toast={toast} />
                   </span>
                 </li>
               ))}
@@ -356,11 +380,11 @@ const ToastPanel: React.FC = () => {
             onClick={handleCurrentClick}
           >
             <ToastAlertIcon toast={newest} />
-            <span className="toast-panel__current-message">{newest.message}</span>
+            <span className="toast-panel__current-message"><ToastMessage toast={newest} /></span>
             {newest.repeatCount > 1 && (
               <span className="toast-panel__repeat">{formatRepeat(newest)}</span>
             )}
-            <ToastActionButton toast={newest} />
+            <ToastActionButtons toast={newest} />
           </div>
         )}
       </div>

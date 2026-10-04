@@ -18,8 +18,9 @@
 }
 
 // On desktop the main pane gets its height by stretching to the sticky side panel; with no side
-// panel (no tabs open) it is content-sized too, so match the panel's height instead.
-.workspace-layout.is-desktop:not(.has-side-panel) .workspace-pane.workspace-main .pdf-viewer-shell {
+// panel (no tabs open, or the panel in its own window) it is content-sized too, so match the
+// panel's height instead. Size the pane rather than the shell: the shell's `h-100` is !important.
+.workspace-layout.is-desktop:not(.has-side-panel) .workspace-pane.workspace-main.has-document-viewer {
   height: calc(100vh - 1rem);
 }
 

@@ -1,6 +1,7 @@
 import { createSlice, type PayloadAction } from '@reduxjs/toolkit';
 import type { FederatedProvider, ThemePreference } from '../../models/bible';
 import type { ResourceVerseMatchMode } from '../../utils/verseResources';
+import type { SharedSettings } from '../../models/windowMessages';
 import {
   normalizeDisabledSourceItems,
   normalizeResourceTagOverrides,
@@ -362,6 +363,21 @@ const uiSlice = createSlice({
     setReady: (state, action: PayloadAction<boolean>) => {
       state.ready = action.payload;
     },
+    /** Settings another window changed; see `SharedSettings`. */
+    applySharedSettings: (state, action: PayloadAction<SharedSettings>) => {
+      const settings = action.payload;
+      state.translationRecords = settings.translationRecords;
+      state.selectedLanguages = settings.selectedLanguages;
+      state.sourceUrls = settings.sourceUrls;
+      state.sourceUrlAddedAt = settings.sourceUrlAddedAt;
+      state.sourceUrlTombstones = settings.sourceUrlTombstones;
+      state.disabledSourceItems = normalizeDisabledSourceItems(settings.disabledSourceItems);
+      state.resourceTagOverrides = normalizeResourceTagOverrides(settings.resourceTagOverrides);
+      state.resourceHiddenTags = settings.resourceHiddenTags;
+      state.theme = settings.theme;
+      state.translatorItalics = settings.translatorItalics;
+      state.translatorParagraphMarks = settings.translatorParagraphMarks;
+    },
     restoreState: (state, action: PayloadAction<Partial<UiState>>) => {
       // A user ID, once established, must never be replaced by a restore (local or cloud-originated).
       const nextUserId = state.userId || action.payload.userId || null;
@@ -528,6 +544,7 @@ export const {
   setUserId,
   replaceUserId,
   setReady,
+  applySharedSettings,
   restoreState,
   setTranslationRecords,
   addTranslationRecord,

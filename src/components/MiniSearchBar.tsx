@@ -7,7 +7,6 @@ interface MiniSearchBarProps {
   starredTranslationIds: string[];
   goToReference: (target: QuickJumpTarget, translationId?: string) => Promise<void>;
   isPanelDetached: boolean;
-  focusDetachedPanel: () => void;
   isDesktopLayout: boolean;
   setIsMobilePanelOpen: (open: boolean) => void;
   isVisible: boolean;
@@ -24,7 +23,6 @@ const MiniSearchBar = forwardRef<MiniSearchBarHandle, MiniSearchBarProps>(({
   starredTranslationIds,
   goToReference,
   isPanelDetached,
-  focusDetachedPanel,
   isDesktopLayout,
   setIsMobilePanelOpen,
   isVisible,
@@ -54,7 +52,6 @@ const MiniSearchBar = forwardRef<MiniSearchBarHandle, MiniSearchBarProps>(({
     starredTranslationIds,
     goToReference,
     isPanelDetached,
-    focusDetachedPanel,
     isDesktopLayout,
     setIsMobilePanelOpen,
     onEmptyEscape: onRequestHide,

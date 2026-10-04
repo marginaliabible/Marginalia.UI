@@ -1,9 +1,15 @@
-import { render, waitFor } from '@testing-library/react';
+import { fireEvent, render, waitFor } from '@testing-library/react';
 import LinksPanel from './LinksPanel';
 import { useAppSelector } from '../store/hooks';
 import { hyperlinkService } from '../services/hyperlinkService';
 import type { PanelTab, VerseContext } from '../models/tab';
 import { EMPTY_SOURCE_PREFERENCES } from '../utils/sourceSubscriptions';
+
+const mockRevealInBible = jest.fn();
+
+jest.mock('../hooks/useDocumentScriptureNavigation', () => ({
+  useRevealVerseSelectionInBible: () => mockRevealInBible,
+}));
 
 jest.mock('../store/hooks', () => ({
   useAppSelector: jest.fn(),
@@ -32,6 +38,15 @@ describe('LinksPanel visibility gating', () => {
     ));
     (hyperlinkService.getHyperlinksForVerse as jest.Mock).mockReset();
     (hyperlinkService.getHyperlinksForVerse as jest.Mock).mockResolvedValue([]);
+  });
+
+  it('reveals the verse in the Bible window from the reference link', () => {
+    const onBeforeNavigate = jest.fn();
+    const { getByRole } = render(<LinksPanel tab={linksTab} isActive={false} onBeforeNavigate={onBeforeNavigate} />);
+
+    fireEvent.click(getByRole('button', { name: 'Genesis 1:1' }));
+    expect(onBeforeNavigate).toHaveBeenCalledTimes(1);
+    expect(mockRevealInBible).toHaveBeenCalledWith(linksTab.verseContext);
   });
 
   it('does not fetch links for an inactive tab', () => {

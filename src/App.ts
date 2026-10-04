@@ -217,6 +217,42 @@ export const parseDocumentLinkFromHash = (hashValue: string): DocumentLinkTarget
   };
 };
 
+const POPOUT_HASH_QUERY_PARAM = 'popout';
+export const PANEL_POPOUT_VALUE = 'panel';
+
+const splitHashQuery = (hashValue: string): { base: string; params: URLSearchParams } => {
+  const queryIndex = hashValue ? hashValue.indexOf('?') : -1;
+  return queryIndex === -1
+    ? { base: hashValue || '#/', params: new URLSearchParams() }
+    : { base: hashValue.slice(0, queryIndex), params: new URLSearchParams(hashValue.slice(queryIndex + 1)) };
+};
+
+const joinHashQuery = (base: string, params: URLSearchParams): string => {
+  const rest = params.toString();
+  return rest ? `${base}?${rest}` : base;
+};
+
+/** e.g. "panel" for "#/John/3/16?popout=panel". */
+export const parsePopoutFromHash = (hashValue: string): string | null => {
+  const value = splitHashQuery(hashValue).params.get(POPOUT_HASH_QUERY_PARAM)?.trim();
+  return value ? value : null;
+};
+
+export const withPopoutParam = (hashValue: string, popout: string = PANEL_POPOUT_VALUE): string => {
+  const { base, params } = splitHashQuery(hashValue);
+  params.set(POPOUT_HASH_QUERY_PARAM, popout);
+  return joinHashQuery(base, params);
+};
+
+export const withoutPopoutParam = (hashValue: string): string => {
+  const { base, params } = splitHashQuery(hashValue);
+  if (!params.has(POPOUT_HASH_QUERY_PARAM)) {
+    return hashValue;
+  }
+  params.delete(POPOUT_HASH_QUERY_PARAM);
+  return joinHashQuery(base, params);
+};
+
 /** The hash without document-link params; other params (such as the search query) are kept. */
 export const stripDocumentLinkFromHash = (hashValue: string): string => {
   const queryIndex = hashValue ? hashValue.indexOf('?') : -1;

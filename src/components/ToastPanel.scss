@@ -152,6 +152,22 @@ $toast-transition: 250ms ease;
   }
 }
 
+.toast-panel__link {
+  display: inline;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+
+  &:hover,
+  &:focus-visible {
+    color: $toast-action;
+  }
+}
+
 .toast-panel__controls {
   flex: 0 0 auto;
   align-self: flex-end;

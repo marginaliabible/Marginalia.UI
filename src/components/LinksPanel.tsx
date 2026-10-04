@@ -4,17 +4,22 @@ import type { ResolvedHyperlink } from '../models/hyperlink';
 import { useAppSelector } from '../store/hooks';
 import { hyperlinkService } from '../services/hyperlinkService';
 import { useSourcePreferences } from '../hooks/useSourcePreferences';
-import { firstVerseContext, formatVerseReference } from '../utils/selectedVerseContext';
+import { useRevealVerseSelectionInBible } from '../hooks/useDocumentScriptureNavigation';
+import { firstVerseContext } from '../utils/selectedVerseContext';
+import { VerseReferenceLabel } from './VersePreview';
 
 interface LinksPanelProps {
   tab: PanelTab;
   isActive: boolean;
+  /** Runs before revealing the verse in the Bible window (e.g. to collapse the mobile panel). */
+  onBeforeNavigate?: () => void;
 }
 
-const LinksPanel: React.FC<LinksPanelProps> = ({ tab, isActive }) => {
+const LinksPanel: React.FC<LinksPanelProps> = ({ tab, isActive, onBeforeNavigate }) => {
   const verseContext = tab.verseContext as VerseContext | undefined;
   const { sourceUrls } = useAppSelector((state) => state.ui);
   const sourcePreferences = useSourcePreferences();
+  const revealInBible = useRevealVerseSelectionInBible();
 
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -78,7 +83,15 @@ const LinksPanel: React.FC<LinksPanelProps> = ({ tab, isActive }) => {
 
   return (
     <div className="links-panel">
-      <div className="links-panel-reference">{formatVerseReference(verseContext)}</div>
+      <div className="links-panel-reference">
+        <VerseReferenceLabel
+          verseContext={verseContext}
+          onClick={() => {
+            onBeforeNavigate?.();
+            revealInBible(verseContext);
+          }}
+        />
+      </div>
 
       {isLoading && <div className="links-panel-status">Loading links&hellip;</div>}
       {error && <div className="links-panel-status links-panel-error">{error}</div>}

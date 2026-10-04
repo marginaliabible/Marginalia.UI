@@ -6,6 +6,7 @@ import {
   getToasts,
   setToastExpiryPaused,
   showToast,
+  toastActions,
 } from './toastService';
 
 describe('toastService', () => {
@@ -110,5 +111,26 @@ describe('toastService', () => {
 
     dismissToast(id);
     expect(getToasts().map((toast) => toast.message)).toEqual(['Keep me']);
+  });
+
+  it('keeps segments and actions, replacing them when a keyed toast merges', () => {
+    const first = { label: 'First', onClick: jest.fn() };
+    const second = { label: 'Second', onClick: jest.fn() };
+    const link = { text: 'link', onClick: jest.fn() };
+    showToast({ key: 'route', message: 'One', segments: ['One ', link], actions: [first] });
+    expect(getToasts()[0]).toMatchObject({ segments: ['One ', link], actions: [first] });
+
+    showToast({ key: 'route', message: 'Two', actions: [second] });
+    const [merged] = getToasts();
+    expect(getToasts()).toHaveLength(1);
+    expect(merged.segments).toBeUndefined();
+    expect(merged.actions).toEqual([second]);
+  });
+
+  it('lists the single action before the action list', () => {
+    const single = { label: 'Single', onClick: jest.fn() };
+    const listed = { label: 'Listed', onClick: jest.fn() };
+    expect(toastActions({ action: single, actions: [listed] })).toEqual([single, listed]);
+    expect(toastActions({})).toEqual([]);
   });
 });

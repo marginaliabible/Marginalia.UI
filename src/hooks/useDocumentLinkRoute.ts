@@ -4,16 +4,57 @@ import { openDocumentViewer, setDocumentLinkNotice } from '../store/slices/uiSli
 import { openVerseTabs } from '../store/slices/bibleSlice';
 import { bibleService } from '../services/bibleService';
 import { buildMarkupDocumentShellUrl } from '../utils/resourceLibraryConfig';
+import { routeInteraction } from '../services/windowRouting';
 import {
   REOPEN_DOCUMENT_LINK_EVENT,
   parseDocumentLinkFromHash,
   parseHashRoute,
   stripDocumentLinkFromHash,
+  withoutPopoutParam,
   type DocumentLinkTarget,
   type HashRouteTarget,
 } from '../App';
 
 export const DOCUMENT_LINK_NOT_FOUND_MESSAGE = "This document isn't in your libraries.";
+
+type DocumentLinkTrigger = 'initial' | 'hashchange' | 'reopen';
+
+const DOCUMENT_LINK_CLEARED_EVENT = 'marginalia:document-link-cleared';
+
+let locallyRequestedHash: string | null = null;
+
+/** Drops the document link from this window's URL (and any open still resolving), e.g. after the document moved away. */
+export function clearDocumentLinkFromLocation(): void {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  locallyRequestedHash = null;
+  const hash = window.location.hash;
+  const stripped = stripDocumentLinkFromHash(hash);
+  if (stripped !== hash) {
+    window.history.replaceState(
+      window.history.state,
+      '',
+      `${window.location.pathname}${window.location.search}${stripped}`
+    );
+  }
+  window.dispatchEvent(new Event(DOCUMENT_LINK_CLEARED_EVENT));
+}
+
+/** Opens a document link in this window without offering it to another document window. */
+export function openDocumentLinkHere(hash: string): void {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  locallyRequestedHash = hash;
+  if (window.location.hash === hash) {
+    window.dispatchEvent(new Event(REOPEN_DOCUMENT_LINK_EVENT));
+  } else {
+    window.location.hash = hash;
+  }
+}
 
 interface UseDocumentLinkRouteOptions {
   ready: boolean;
@@ -38,7 +79,7 @@ export const useDocumentLinkRoute = ({ ready }: UseDocumentLinkRouteOptions): vo
     hasResourcesTabRef.current = hasResourcesTab;
   }, [hasResourcesTab]);
 
-  const openFromLocation = useCallback(async (force: boolean) => {
+  const openFromLocation = useCallback(async (trigger: DocumentLinkTrigger) => {
     if (typeof window === 'undefined') {
       return;
     }
@@ -50,8 +91,38 @@ export const useDocumentLinkRoute = ({ ready }: UseDocumentLinkRouteOptions): vo
       dispatch(setDocumentLinkNotice(null));
       return;
     }
-    if (!force && handledHashRef.current === hash) {
+    if (trigger !== 'reopen' && handledHashRef.current === hash) {
       return;
+    }
+
+    // Kept until this link is handled: an effect re-run can read the same hash again before its hashchange.
+    const requestedHere = locallyRequestedHash === hash;
+    if (!requestedHere) {
+      locallyRequestedHash = null;
+    }
+    // A page load (bookmark, new tab) keeps its document; only clicks may send it to the document window.
+    if (trigger !== 'initial' && !requestedHere) {
+      const linkHash = withoutPopoutParam(hash);
+      let routed = false;
+      const outcome = routeInteraction(
+        { kind: 'document', type: 'open-document-link', payload: { hash: linkHash } },
+        () => {
+          if (routed) {
+            openDocumentLinkHere(linkHash);
+          }
+        }
+      );
+      routed = true;
+      if (outcome !== 'local') {
+        generationRef.current += 1;
+        handledHashRef.current = null;
+        window.history.replaceState(
+          window.history.state,
+          '',
+          `${window.location.pathname}${window.location.search}${stripDocumentLinkFromHash(hash)}`
+        );
+        return;
+      }
     }
 
     const generation = ++generationRef.current;
@@ -64,6 +135,7 @@ export const useDocumentLinkRoute = ({ ready }: UseDocumentLinkRouteOptions): vo
 
     if (!resolved) {
       // Left unhandled so a later sourceUrls change (e.g. a cloud library arriving after sign-in) retries.
+      locallyRequestedHash = null;
       dispatch(setDocumentLinkNotice(DOCUMENT_LINK_NOT_FOUND_MESSAGE));
       return;
     }
@@ -77,18 +149,24 @@ export const useDocumentLinkRoute = ({ ready }: UseDocumentLinkRouteOptions): vo
     }
 
     handledHashRef.current = hash;
+    locallyRequestedHash = null;
     dispatch(setDocumentLinkNotice(null));
     // A fresh load (bookmark, new tab) has no verse tabs yet, so no side panel; the viewer's height
     // also depends on that panel. Show what a page-link click from the Resources panel shows.
     if (reference && verseResources && !hasResourcesTabRef.current) {
-      dispatch(openVerseTabs({
+      const versePanel = {
         book: reference.book,
         chapter: reference.chapter,
         verse: verseResources.verses[0],
         verses: verseResources.verses,
         hasResources: verseResources.hasResources,
-        preferPanel: 'resources',
-      }));
+        preferPanel: 'resources' as const,
+      };
+      routeInteraction(
+        { kind: 'panel', type: 'open-verse-tabs', payload: versePanel },
+        () => dispatch(openVerseTabs(versePanel)),
+        { silent: true }
+      );
     }
     const matchRaws = verseResources?.matchRaws ?? [];
     dispatch(openDocumentViewer({
@@ -127,20 +205,26 @@ export const useDocumentLinkRoute = ({ ready }: UseDocumentLinkRouteOptions): vo
       return;
     }
 
-    void openFromLocation(false);
+    void openFromLocation('initial');
 
     const handleHashChange = () => {
-      void openFromLocation(false);
+      void openFromLocation('hashchange');
     };
     const handleReopen = () => {
-      void openFromLocation(true);
+      void openFromLocation('reopen');
+    };
+    const handleCleared = () => {
+      generationRef.current += 1;
+      handledHashRef.current = null;
     };
 
     window.addEventListener('hashchange', handleHashChange);
     window.addEventListener(REOPEN_DOCUMENT_LINK_EVENT, handleReopen);
+    window.addEventListener(DOCUMENT_LINK_CLEARED_EVENT, handleCleared);
     return () => {
       window.removeEventListener('hashchange', handleHashChange);
       window.removeEventListener(REOPEN_DOCUMENT_LINK_EVENT, handleReopen);
+      window.removeEventListener(DOCUMENT_LINK_CLEARED_EVENT, handleCleared);
     };
   }, [ready, openFromLocation]);
 };

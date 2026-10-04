@@ -230,7 +230,11 @@ const ResourcesPanel: React.FC<ResourcesPanelProps> = ({ tab, isActive, onBefore
           <div className="d-flex align-items-start justify-content-between gap-2">
             <VerseReferenceLabel
               verseContext={verseContext}
-              className="small fw-semibold text-body-secondary mb-1"
+              className="small fw-semibold mb-1"
+              onClick={() => {
+                onBeforeNavigate?.();
+                revealInBible(verseContext);
+              }}
             />
             {selectedVerseNumbers.length > 1 && (
               <div

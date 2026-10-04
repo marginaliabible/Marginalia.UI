@@ -1,8 +1,9 @@
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { useAppDispatch, useAppSelector } from '../store/hooks';
 import { bibleService } from '../services/bibleService';
+import { routeInteraction } from '../services/windowRouting';
 import { REOPEN_DOCUMENT_LINK_EVENT } from '../App';
-import { DOCUMENT_LINK_NOT_FOUND_MESSAGE, useDocumentLinkRoute } from './useDocumentLinkRoute';
+import { DOCUMENT_LINK_NOT_FOUND_MESSAGE, openDocumentLinkHere, useDocumentLinkRoute } from './useDocumentLinkRoute';
 
 jest.mock('../store/slices/bibleSlice', () => ({
   openVerseTabs: (payload: unknown) => ({ type: 'bible/openVerseTabs', payload }),
@@ -18,6 +19,10 @@ jest.mock('../services/bibleService', () => ({
     findDocumentByLink: jest.fn(),
     getResourcesForVerse: jest.fn(),
   },
+}));
+
+jest.mock('../services/windowRouting', () => ({
+  routeInteraction: jest.fn(),
 }));
 
 interface TestUiState {
@@ -88,6 +93,10 @@ describe('useDocumentLinkRoute', () => {
     (useAppSelector as unknown as jest.Mock).mockImplementation((selector: (state: unknown) => unknown) => (
       selector({ ui, bible: { tabs } })
     ));
+    (routeInteraction as jest.Mock).mockReset().mockImplementation((_command: unknown, applyLocally: () => void) => {
+      applyLocally();
+      return 'local';
+    });
     (bibleService.findDocumentByLink as jest.Mock).mockReset().mockResolvedValue(RESOLVED);
     (bibleService.getResourcesForVerse as jest.Mock).mockReset()
       .mockImplementation(async (_book: string, _chapter: number, verse: number) => (
@@ -148,6 +157,42 @@ describe('useDocumentLinkRoute', () => {
     });
 
     await waitFor(() => expect(dispatch).toHaveBeenCalledWith(openAction(['Rom 8:28'])));
+  });
+
+  it('sends a clicked link to the document window', async () => {
+    (routeInteraction as jest.Mock).mockReturnValue('remote');
+    renderHook(() => useDocumentLinkRoute({ ready: true }));
+
+    act(() => {
+      setHash('#/Romans/8/28?doc=abc&page=12');
+      window.dispatchEvent(new HashChangeEvent('hashchange'));
+    });
+
+    expect(routeInteraction).toHaveBeenCalledWith(
+      { kind: 'document', type: 'open-document-link', payload: { hash: '#/Romans/8/28?doc=abc&page=12' } },
+      expect.any(Function)
+    );
+    expect(bibleService.findDocumentByLink).not.toHaveBeenCalled();
+    expect(window.location.hash).toBe('#/Romans/8/28');
+  });
+
+  it('keeps a link sent to this window here, even when the hash is read again before its hashchange', async () => {
+    (routeInteraction as jest.Mock).mockReturnValue('remote');
+    (bibleService.findDocumentByLink as jest.Mock).mockImplementation(() => (
+      new Promise((resolve) => setTimeout(() => resolve(RESOLVED), 50))
+    ));
+    setHash('#/Romans/8/28');
+    const { rerender } = renderHook(() => useDocumentLinkRoute({ ready: true }));
+
+    openDocumentLinkHere('#/Romans/8/28?doc=abc&page=12');
+    ui = { ...ui, sourceUrls: [] };
+    rerender();
+
+    await waitFor(() => expect(dispatch).toHaveBeenCalledWith(openAction(['Rom 8:28'])));
+    expect(routeInteraction).not.toHaveBeenCalledWith(
+      expect.objectContaining({ kind: 'document' }),
+      expect.any(Function)
+    );
   });
 
   it('highlights every selected verse when the link verse is part of the selection', async () => {

@@ -7,12 +7,23 @@ export interface ToastAction {
   onClick: () => void;
 }
 
+export interface ToastLinkSegment {
+  text: string;
+  onClick: () => void;
+}
+
+/** Plain text, or a clickable span inside the message. */
+export type ToastSegment = string | ToastLinkSegment;
+
 export interface ToastInput {
+  /** Plain text for the title, history, and screen readers; `segments` replaces it visually when set. */
   message: string;
   tone?: ToastTone;
   /** Repeats with the same key merge into one entry; defaults to `${tone}:${message}`. */
   key?: string;
   action?: ToastAction;
+  actions?: ToastAction[];
+  segments?: ToastSegment[];
 }
 
 export interface Toast {
@@ -21,8 +32,14 @@ export interface Toast {
   message: string;
   tone: ToastTone;
   action?: ToastAction;
+  actions?: ToastAction[];
+  segments?: ToastSegment[];
   createdAt: number;
   repeatCount: number;
+}
+
+export function toastActions(toast: Pick<Toast, 'action' | 'actions'>): ToastAction[] {
+  return [...(toast.action ? [toast.action] : []), ...(toast.actions ?? [])];
 }
 
 export const TOAST_LIFETIME_MS = 3 * 60_000;
@@ -117,6 +134,8 @@ export function showToast(input: ToastInput): string {
       message: input.message,
       tone,
       action: input.action,
+      actions: input.actions,
+      segments: input.segments,
       createdAt: now,
       repeatCount: mergeTarget.repeatCount + 1,
     };
@@ -129,6 +148,8 @@ export function showToast(input: ToastInput): string {
       message: input.message,
       tone,
       action: input.action,
+      actions: input.actions,
+      segments: input.segments,
       createdAt: now,
       repeatCount: 1,
     };

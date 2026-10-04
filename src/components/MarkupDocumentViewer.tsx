@@ -1,15 +1,16 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { useAppDispatch, useAppSelector } from '../store/hooks';
-import { closeDocumentViewer } from '../store/slices/uiSlice';
+import { useAppSelector } from '../store/hooks';
 import { buildMarkupDocumentShellUrl } from '../utils/resourceLibraryConfig';
 import { fetchStorageAware } from '../services/storageAuthenticatedFetch';
 import { useOpenDocumentScriptureReference } from '../hooks/useDocumentScriptureNavigation';
+import { useBackToVerses } from '../hooks/useDocumentPopout';
 import { useViewerZoomInputs } from '../hooks/useViewerZoomInputs';
 import { loadPageScriptureReferences } from '../utils/loadPageScriptureReferences';
 import { applyScriptureLinkOverlays, clearScriptureLinks } from '../utils/scriptureLinkOverlays';
 import { buildTextLayerHaystack, findAllMatchRanges, getMatchClientRects, placeOverlayOnPage } from '../utils/documentTextMatch';
 import { clampScale, FIT_WIDTH_GUTTER_PX, stepScale } from '../utils/viewerZoom';
 import FileSyncExclusionButton from './FileSyncExclusionButton';
+import DocumentPopoutButton from './DocumentPopoutButton';
 import ViewerZoomControls from './ViewerZoomControls';
 
 /** Pages to keep materialized around the active page (matches pdf2htmlEX preload_pages ≈ 3). */
@@ -793,7 +794,7 @@ interface MarkupDocumentViewerProps {
 }
 
 const MarkupDocumentViewer: React.FC<MarkupDocumentViewerProps> = ({ onScriptureReferenceOpen }) => {
-  const dispatch = useAppDispatch();
+  const backToVerses = useBackToVerses();
   const { pdfViewer } = useAppSelector((state) => state.ui);
   const currentBible = useAppSelector((state) => state.bible.currentBible);
   const openScriptureReference = useOpenDocumentScriptureReference(onScriptureReferenceOpen);
@@ -1256,7 +1257,7 @@ const MarkupDocumentViewer: React.FC<MarkupDocumentViewerProps> = ({ onScripture
         <button
           type="button"
           className="btn btn-sm btn-outline-secondary"
-          onClick={() => dispatch(closeDocumentViewer())}
+          onClick={backToVerses}
         >
           <i className="fa-solid fa-arrow-left me-1" aria-hidden="true"></i>
           Back To Verses
@@ -1277,6 +1278,8 @@ const MarkupDocumentViewer: React.FC<MarkupDocumentViewerProps> = ({ onScripture
             onZoomStep={adjustScale}
             onFitWidth={() => setFitWidth(true)}
           />
+
+          <DocumentPopoutButton />
         </div>
       </div>
 

@@ -3,7 +3,7 @@ import SearchBar from './components/SearchBar';
 import WorkspaceMainPane from './components/WorkspaceMainPane';
 import WorkspaceDivider from './components/WorkspaceDivider';
 import WorkspaceSidePanel from './components/WorkspaceSidePanel';
-import DetachedPanelPortal from './components/DetachedPanelPortal';
+import PanelWindowShell from './components/PanelWindowShell';
 import LoadingStatus from './components/LoadingStatus';
 import SettingsModal from './components/SettingsModal';
 import GitHubAuthPromptModal from './components/GitHubAuthPromptModal';
@@ -22,6 +22,7 @@ import {
 } from './store/slices/bibleSlice';
 import { resolveSelectedVerseContext } from './utils/selectedVerseContext';
 import { formatVerseHtml, markupFlagsFromBible, stripVerseMarkers } from './utils/verseMarkup';
+import { formatVerseReference } from './utils/scriptureReference';
 import {
   setSelectedTranslationId,
   setSelectedTranslationIds,
@@ -85,6 +86,13 @@ import { useMobilePanelEffects } from './hooks/useMobilePanelEffects';
 import { useHashRouteSync } from './hooks/useHashRouteSync';
 import { useDocumentLinkRoute } from './hooks/useDocumentLinkRoute';
 import { useVerseTabContextSync } from './hooks/useVerseTabContextSync';
+import { useDocumentTitle, useWindowLabel } from './hooks/useDocumentTitle';
+import { useWindowRegistry } from './hooks/useWindowRegistry';
+import { useWindowStateSync } from './hooks/useWindowStateSync';
+import { useDocumentPopoutWindow, usePopoutBoundsTracking } from './hooks/useDocumentPopout';
+import { useWindowCommandHandler } from './hooks/useWindowCommandHandler';
+import { isDocumentWindow, isPanelWindow } from './services/windowChannel';
+import { routeInteraction } from './services/windowRouting';
 import { beginGitHubAuthorization, initializeGitHubAuthFlow } from './services/githubAuthFlowService';
 import {
   computeDisabledTranslationIds,
@@ -155,7 +163,6 @@ function App() {
     tabs,
     activeTabId,
     isPanelDetached,
-    detachedPanelName,
   } = useAppSelector((state) => state.bible);
 
   const {
@@ -193,12 +200,17 @@ function App() {
 
   const activeWorkspacePanel: WorkspacePanelKey | null = tabs.length > 0 ? 'search' : null;
 
-  const { popupContainer, focusDetachedPanel, focusMainWindow, handleToggleDetachPanel } = usePopupPanel({
+  const { focusMainWindow, handleToggleDetachPanel, isPanelWindowDocked } = usePopupPanel({
     dispatch,
-    theme,
     isPanelDetached,
-    detachedPanelName,
   });
+
+  useDocumentTitle(isPanelWindow);
+  const windowLabel = useWindowLabel(isPanelWindow);
+  useWindowRegistry({ label: windowLabel });
+  useWindowStateSync({ ready });
+  useDocumentPopoutWindow({ ready });
+  usePopoutBoundsTracking();
 
   const { mainPanePercent, sidePanePercent, handleDividerPointerDown, handleDividerKeyDown } =
     useWorkspaceSplit({ workspaceRef, isDesktopLayout, activeWorkspacePanel });
@@ -262,34 +274,7 @@ function App() {
       return;
     }
 
-    const compressedReferenceParts: string[] = [];
-    let rangeStart = normalizedVerses[0];
-    let previousVerse = normalizedVerses[0];
-
-    for (let index = 1; index < normalizedVerses.length; index += 1) {
-      const verseNumber = normalizedVerses[index];
-      if (verseNumber === previousVerse + 1) {
-        previousVerse = verseNumber;
-        continue;
-      }
-
-      const rangeLength = previousVerse - rangeStart + 1;
-      compressedReferenceParts.push(
-        rangeLength > 2 ? `${rangeStart}-${previousVerse}` : normalizedVerses.slice(normalizedVerses.indexOf(rangeStart), normalizedVerses.indexOf(previousVerse) + 1).join(', ')
-      );
-
-      rangeStart = verseNumber;
-      previousVerse = verseNumber;
-    }
-
-    const finalRangeLength = previousVerse - rangeStart + 1;
-    compressedReferenceParts.push(
-      finalRangeLength > 2 ? `${rangeStart}-${previousVerse}` : normalizedVerses.slice(normalizedVerses.indexOf(rangeStart), normalizedVerses.indexOf(previousVerse) + 1).join(', ')
-    );
-
-    const referenceSuffix = compressedReferenceParts.join(', ');
-
-    const header = `${selectedBook} ${selectedChapter}:${referenceSuffix}`;
+    const header = formatVerseReference(selectedBook, selectedChapter, normalizedVerses);
     const body = verseTexts.length === 1
       ? verseTexts[0].plain
       : verseTexts.map((entry) => `${entry.verseNumber}\u00A0 ${entry.plain}`).join('\n');
@@ -369,32 +354,36 @@ function App() {
     translatorItalics,
   ]);
 
-  // Ctrl/Cmd+K to focus search input; Ctrl+C to copy selected verses from the focused main pane.
+  const focusSearchBox = useCallback(() => {
+    const searchInput = searchInputRef.current;
+    const rect = searchInput?.getBoundingClientRect();
+    const isTopSearchVisible = Boolean(
+      rect
+      && rect.width > 0
+      && rect.height > 0
+      && rect.bottom > 0
+      && rect.top < window.innerHeight
+    );
+
+    if (isTopSearchVisible) {
+      searchInput?.focus();
+      searchInput?.select();
+    } else {
+      setMiniSearchFocusToken((token) => token + 1);
+    }
+  }, []);
+
+  // Ctrl/Cmd+K to focus search input (the Bible window's, from panel and document windows);
+  // Ctrl+C to copy selected verses from the focused main pane.
   useEffect(() => {
     const handleShortcut = (e: KeyboardEvent) => {
       if (e.key.toLowerCase() === 'k' && (e.ctrlKey || e.metaKey)) {
         e.preventDefault();
-        const eventWindow = (e.view as Window | null) ?? window;
-        if (eventWindow !== window && !window.closed) {
-          window.focus();
+        if (isPanelWindow || isDocumentWindow) {
+          routeInteraction({ kind: 'bible', type: 'focus-search' }, () => {}, { quiet: true });
+          return;
         }
-
-        const searchInput = searchInputRef.current;
-        const rect = searchInput?.getBoundingClientRect();
-        const isTopSearchVisible = Boolean(
-          rect
-          && rect.width > 0
-          && rect.height > 0
-          && rect.bottom > 0
-          && rect.top < eventWindow.innerHeight
-        );
-
-        if (isTopSearchVisible) {
-          searchInput?.focus();
-          searchInput?.select();
-        } else {
-          setMiniSearchFocusToken((token) => token + 1);
-        }
+        focusSearchBox();
         return;
       }
 
@@ -413,18 +402,10 @@ function App() {
     };
 
     window.addEventListener('keydown', handleShortcut, true);
-    const detachedWindow = popupContainer?.ownerDocument.defaultView;
-    if (detachedWindow && detachedWindow !== window) {
-      detachedWindow.addEventListener('keydown', handleShortcut, true);
-    }
-
     return () => {
       window.removeEventListener('keydown', handleShortcut, true);
-      if (detachedWindow && detachedWindow !== window) {
-        detachedWindow.removeEventListener('keydown', handleShortcut, true);
-      }
     };
-  }, [handleCopySelectedVerses, pdfViewer.isOpen, popupContainer]);
+  }, [focusSearchBox, handleCopySelectedVerses, pdfViewer.isOpen]);
 
   // Initialize app
   useEffect(() => {
@@ -580,7 +561,7 @@ function App() {
 
   useHashRouteSync({
     currentBible,
-    ready,
+    ready: ready && !isPanelWindow,
     selectedBook,
     selectedChapter,
     selectedTranslationId,
@@ -681,7 +662,7 @@ function App() {
     }
   }, [safeTranslationRecords, dispatch, safeSelectedTranslationIds]);
 
-  const isDocumentViewerInMainPane = Boolean(pdfViewer?.isOpen) && !isPanelDetached;
+  const isDocumentViewerInMainPane = Boolean(pdfViewer?.isOpen);
   const useWideLayout = isDocumentViewerInMainPane
     || starredTranslationIds.length + (activeTabId ? 1 : 0) > 3;
   const hasSidePanel = !isPanelDetached && Boolean(activeWorkspacePanel);
@@ -724,6 +705,20 @@ function App() {
     mainPaneRef.current?.focus({ preventScroll: true });
 
     await scrollToVerse(target, VERSE_REFERENCE_SCROLL_OPTIONS);
+  };
+
+  useWindowCommandHandler({ ready, goToReference, focusSearch: focusSearchBox });
+
+  /** Panel navigation (e.g. a search result) belongs to whichever window shows the Bible. */
+  const goToReferenceFromPanel = async (target: QuickJumpTarget, translationId?: string) => {
+    const localNavigations: Promise<void>[] = [];
+    routeInteraction(
+      { kind: 'bible', type: 'go-to-reference', payload: { target, translationId } },
+      () => {
+        localNavigations.push(goToReference(target, translationId));
+      }
+    );
+    await Promise.all(localNavigations);
   };
 
   const handleThemeToggle = (e: ChangeEvent<HTMLInputElement>) => {
@@ -941,9 +936,6 @@ function App() {
       tabId,
       verseContext: resolveSelectedVerseContext(selectedBook, selectedChapter, selectedVerses),
     }));
-    if (isPanelDetached) {
-      focusDetachedPanel();
-    }
   };
 
   const handleCloseTab = (tabId: string) => {
@@ -953,13 +945,13 @@ function App() {
     }));
   };
 
-  const detachedSidePanelContentProps: React.ComponentProps<typeof DetachedPanelPortal>['sidePanelContentProps'] = {
+  const panelWindowContentProps: React.ComponentProps<typeof PanelWindowShell>['sidePanelContentProps'] = {
     isMobileLayout: false,
     isDesktopLayout: true,
-    isPanelDetached,
+    isPanelDetached: true,
     isMobilePanelOpen: false,
     setIsMobilePanelOpen: () => {},
-    goToReference,
+    goToReference: goToReferenceFromPanel,
     translationRecords: safeTranslationRecords,
     translationMetadataById,
     addableTranslations,
@@ -1015,24 +1007,36 @@ function App() {
     document.body.removeChild(fallback);
   }, [shareTarget]);
 
+  if (isPanelWindow) {
+    return (
+      <>
+        <PanelWindowShell sidePanelContentProps={panelWindowContentProps} isDocked={isPanelWindowDocked} />
+        <ToastPanel />
+      </>
+    );
+  }
+
   return (
     <>
       <div className={`container app-shell ${useWideLayout ? 'app-shell-wide' : ''}`}>
-        <AppHeader
-          onOpenSettings={openSettingsModal}
-          accountControl={<AccountControl subscriptions={subscriptionsBinding} />}
-        />
+        {!isDocumentWindow && (
+          <>
+            <AppHeader
+              onOpenSettings={openSettingsModal}
+              accountControl={<AccountControl subscriptions={subscriptionsBinding} />}
+            />
 
-        <SearchBar
-          searchInputRef={searchInputRef}
-          starredTranslationIds={starredTranslationIds}
-          goToReference={goToReference}
-          isPanelDetached={isPanelDetached}
-          focusDetachedPanel={focusDetachedPanel}
-          isDesktopLayout={isDesktopLayout}
-          setIsMobilePanelOpen={setIsMobilePanelOpen}
-          onSearchComplete={() => setIsMiniSearchVisible(false)}
-        />
+            <SearchBar
+              searchInputRef={searchInputRef}
+              starredTranslationIds={starredTranslationIds}
+              goToReference={goToReference}
+              isPanelDetached={isPanelDetached}
+              isDesktopLayout={isDesktopLayout}
+              setIsMobilePanelOpen={setIsMobilePanelOpen}
+              onSearchComplete={() => setIsMiniSearchVisible(false)}
+            />
+          </>
+        )}
 
         {documentLinkNotice && (
           <div className="alert alert-warning alert-dismissible small py-2 mb-2" role="alert">
@@ -1064,7 +1068,6 @@ function App() {
             onShareCurrentVerse={handleShareCurrentVerse}
             shareButtonLabel={shareButtonLabel}
             goToReference={goToReference}
-            focusDetachedPanel={focusDetachedPanel}
             miniSearchFocusToken={miniSearchFocusToken}
             isMiniSearchVisible={isMiniSearchVisible}
             setIsMiniSearchVisible={setIsMiniSearchVisible}
@@ -1087,7 +1090,7 @@ function App() {
               isMobilePanelOpen={isMobilePanelOpen}
               setIsMobilePanelOpen={setIsMobilePanelOpen}
               sidePanePercent={sidePanePercent}
-              goToReference={goToReference}
+              goToReference={goToReferenceFromPanel}
               translationRecords={safeTranslationRecords}
               translationMetadataById={translationMetadataById}
               addableTranslations={addableTranslations}
@@ -1138,14 +1141,6 @@ function App() {
           onContinue={handleContinueGitHubAuth}
         />
       </div>
-
-      <DetachedPanelPortal
-        isPanelDetached={isPanelDetached}
-        hasActiveWorkspacePanel={Boolean(activeWorkspacePanel)}
-        popupContainer={popupContainer}
-        pdfViewerIsOpen={pdfViewer.isOpen}
-        sidePanelContentProps={detachedSidePanelContentProps}
-      />
 
       <ToastPanel />
     </>

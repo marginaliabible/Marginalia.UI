@@ -331,31 +331,33 @@
   padding: 0;
 }
 
-.detached-workspace-layout {
+.panel-window-shell {
   display: flex;
-  flex: 1 1 auto;
-  min-height: 0;
-  height: 100%;
-}
-
-.detached-workspace-layout.is-row {
-  flex-direction: row;
-}
-
-.detached-workspace-layout.is-column {
   flex-direction: column;
+  height: 100vh;
+  padding: 1rem;
 }
 
-.detached-panel-pane,
-.detached-pdf-pane {
-  min-height: 0;
-  min-width: 0;
+.panel-window-shell > .panel-scroll-with-tabs {
   flex: 1 1 auto;
+  overflow: hidden;
 }
 
-.detached-pdf-pane .card,
-.detached-pdf-pane .card-body {
+.panel-window-shell .panel-scroll-with-tabs > .panel-tabs {
+  flex: 0 0 auto;
+}
+
+.panel-window-shell .panel-tabs-content {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
   min-height: 0;
+}
+
+.panel-window-shell .panel-content-scroll.is-active {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
 }
 
 div.github-auth-prompt-backdrop {

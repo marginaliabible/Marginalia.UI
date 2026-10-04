@@ -1,274 +1,156 @@
-import { useState, useRef, useEffect } from 'react';
-import type { AppDispatch } from '../store/store';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { useStore } from 'react-redux';
+import type { AppDispatch, RootState } from '../store/store';
 import { setPanelDetached } from '../store/slices/bibleSlice';
+import { withPopoutParam } from '../App';
+import { buildPopoutUrl, formatPopupFeatures, readPopupMetrics, resolvePopupPlacement } from '../utils/popoutWindow';
+import { readPopoutBounds } from '../utils/popoutBounds';
+import { getScreenLayout, moveToOtherScreen, offerScreenPlacement } from '../services/screenPlacement';
+import {
+  PANEL_WINDOW_NAME,
+  useChannelWindows,
+  watchForLastRegularWindow,
+  windowChannel,
+} from '../services/windowChannel';
+import { focusChannelWindow, mostRecentWindowOfType, registerWindowRef } from '../services/windowRouting';
+import type { WindowInfo } from '../models/windowMessages';
+import { buildPanelHandoff, PANEL_WINDOW_STATE_KEY, panelHomeWindow } from './useWindowStateSync';
+
+export { PANEL_WINDOW_NAME };
+const SIDE_PANEL_ELEMENT_ID = 'workspace-side-panel';
+/** How long a just-opened popout has to announce itself before the docked panel comes back. */
+const POPOUT_ANNOUNCE_TIMEOUT_MS = 5_000;
+/** Checked after `window.close()`: a window the user opened themselves can't be closed by script. */
+const CLOSE_CHECK_MS = 250;
 
 interface UsePopupPanelProps {
   dispatch: AppDispatch;
-  theme: string;
   isPanelDetached: boolean;
-  detachedPanelName: string | null;
 }
 
 interface UsePopupPanelReturn {
-  popupContainer: HTMLElement | null;
-  focusDetachedPanel: () => void;
   focusMainWindow: () => void;
   handleToggleDetachPanel: () => void;
+  /** The panel window handed its tabs back but couldn't close itself. */
+  isPanelWindowDocked: boolean;
 }
 
-const buildPopupFeatures = (): string => {
-  const fallbackWidth = 1100;
-  const fallbackHeight = 780;
+const findPanelWindow = (windows: readonly WindowInfo[]): WindowInfo | null => (
+  windows.find((entry) => entry.type === 'panel') ?? null
+);
 
-  const outerWidth = Number.isFinite(window.outerWidth) ? window.outerWidth : fallbackWidth;
-  const outerHeight = Number.isFinite(window.outerHeight) ? window.outerHeight : fallbackHeight;
-  const screenX = Number.isFinite(window.screenX) ? window.screenX : 80;
-  const screenY = Number.isFinite(window.screenY) ? window.screenY : 60;
+export const usePopupPanel = ({ dispatch, isPanelDetached }: UsePopupPanelProps): UsePopupPanelReturn => {
+  const store = useStore<RootState>();
+  const windows = useChannelWindows();
+  const windowsRef = useRef(windows);
+  windowsRef.current = windows;
+  const announceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [isPanelWindowDocked, setIsDocked] = useState(false);
 
-  const width = Math.max(920, Math.min(outerWidth - 80, 1400));
-  const height = Math.max(640, Math.min(outerHeight - 80, 980));
-  const left = Math.max(0, screenX + Math.max(20, Math.round((outerWidth - width) / 2)));
-  const top = Math.max(0, screenY + Math.max(20, Math.round((outerHeight - height) / 2)));
+  const focusMainWindow = useCallback(() => {
+    const bibleWindow = mostRecentWindowOfType('bible');
+    if (bibleWindow) {
+      focusChannelWindow(bibleWindow.id);
+    }
+  }, []);
 
-  return [
-    'popup=yes',
-    `width=${width}`,
-    `height=${height}`,
-    `left=${left}`,
-    `top=${top}`,
-    'resizable=yes',
-    'scrollbars=yes',
-    'status=no',
-    'toolbar=no',
-    'location=no',
-    'menubar=no',
-  ].join(',');
-};
-
-export const usePopupPanel = ({
-  dispatch,
-  theme,
-  isPanelDetached,
-  detachedPanelName,
-}: UsePopupPanelProps): UsePopupPanelReturn => {
-  const [popupContainer, setPopupContainer] = useState<HTMLElement | null>(null);
-  const popupWindowRef = useRef<Window | null>(null);
-  const popupCleanupRef = useRef<(() => void) | null>(null);
-
-  const focusDetachedPanel = () => {
-    const popup = popupWindowRef.current;
-    if (!popup || popup.closed) {
+  // The panel window closes itself once the last regular tab is gone (allowing for refreshes).
+  useEffect(() => {
+    if (!windowChannel.isPanelWindow || !windowChannel.isAvailable) {
       return;
     }
-    popup.focus();
-  };
+    return watchForLastRegularWindow(windowChannel, { onGone: () => window.close() });
+  }, []);
 
-  const focusMainWindow = () => {
-    const popup = popupWindowRef.current;
-    if (!popup || popup.closed) {
-      window.focus();
+  // Resource links and other hash changes must not turn the panel window into a regular tab on refresh.
+  useEffect(() => {
+    if (!windowChannel.isPanelWindow) {
       return;
     }
 
-    const opener = popup.opener;
-    if (opener && !opener.closed) {
-      opener.focus();
-      return;
-    }
-
-    window.focus();
-  };
-
-  const attachPopupWindow = (popup: Window, windowName: string) => {
-    popupWindowRef.current = popup;
-
-    popup.document.title = 'Marginalia Panel';
-    popup.document.body.className = document.body.className;
-    popup.document.documentElement.setAttribute('data-theme', theme);
-    popup.document.documentElement.setAttribute('data-bs-theme', theme);
-    popup.document.documentElement.style.height = '100%';
-    popup.document.body.style.height = '100%';
-    popup.document.body.style.margin = '0';
-    popup.document.body.style.padding = '1rem';
-    popup.document.body.style.display = 'flex';
-    popup.document.body.style.flexDirection = 'column';
-
-    const existingRoot = popup.document.getElementById('marginalia-popout-root');
-    const root = existingRoot ?? popup.document.createElement('div');
-    root.id = 'marginalia-popout-root';
-    root.style.display = 'flex';
-    root.style.flexDirection = 'column';
-    root.style.flex = '1 1 auto';
-    root.style.minHeight = '0';
-    if (!existingRoot) {
-      popup.document.body.innerHTML = '';
-      popup.document.body.appendChild(root);
-    }
-
-    if (!popup.document.getElementById('marginalia-popout-base')) {
-      const baseStyle = popup.document.createElement('style');
-      baseStyle.id = 'marginalia-popout-base';
-      baseStyle.textContent = `
-        body {
-          background: var(--bs-body-bg);
-          color: var(--bs-body-color);
-        }
-
-        #marginalia-popout-root .popout-panel-shell {
-          display: flex;
-          flex: 1 1 auto;
-          flex-direction: column;
-          min-height: 0;
-          max-height: none;
-        }
-
-        #marginalia-popout-root .popout-panel-shell.workspace-scroll {
-          height: 100%;
-          max-height: none;
-          overflow: auto;
-        }
-
-        #marginalia-popout-root .popout-panel-shell > .card {
-          flex: 1 1 auto;
-          min-height: 0;
-        }
-
-        #marginalia-popout-root .popout-panel-shell .card-body {
-          min-height: 0;
-        }
-
-        #marginalia-popout-root .popout-panel-shell .search-results-card {
-          flex: 1 1 auto;
-          min-height: 0;
-        }
-
-        #marginalia-popout-root .popout-panel-shell .search-results-body {
-          flex: 1 1 auto;
-          min-height: 0;
-        }
-      `;
-      popup.document.head.appendChild(baseStyle);
-    }
-
-    document.querySelectorAll('link[rel="stylesheet"], style').forEach((styleNode) => {
-      const clone = styleNode.cloneNode(true) as HTMLElement;
-
-      if (styleNode.tagName === 'LINK') {
-        const href = styleNode.getAttribute('href');
-        if (!href) return;
-        const existing = Array.from(popup.document.querySelectorAll('link[rel="stylesheet"]')).some(
-          (candidate) => candidate.getAttribute('href') === href
+    const keepPopoutParam = () => {
+      const nextHash = withPopoutParam(window.location.hash);
+      if (nextHash !== window.location.hash) {
+        window.history.replaceState(
+          window.history.state,
+          '',
+          `${window.location.pathname}${window.location.search}${nextHash}`
         );
-        if (existing) return;
       }
-
-      if (styleNode.tagName === 'STYLE') {
-        const styleId = styleNode.getAttribute('id');
-        if (styleId) {
-          const existing = popup.document.getElementById(styleId);
-          if (existing) return;
-        }
-      }
-
-      popup.document.head.appendChild(clone);
-    });
-
-    const handlePopupBeforeUnload = () => {
-      dispatch(setPanelDetached({ detached: false, panelName: null }));
-      setPopupContainer(null);
-      popupWindowRef.current = null;
-      sessionStorage.removeItem('marginalia-popout-name');
     };
 
-    popup.addEventListener('beforeunload', handlePopupBeforeUnload);
-    popupCleanupRef.current = () => {
-      popup.removeEventListener('beforeunload', handlePopupBeforeUnload);
-    };
+    keepPopoutParam();
+    window.addEventListener('hashchange', keepPopoutParam);
+    return () => window.removeEventListener('hashchange', keepPopoutParam);
+  }, []);
 
-    setPopupContainer(root);
-    dispatch(setPanelDetached({ detached: true, panelName: windowName }));
-    sessionStorage.setItem('marginalia-popout-name', windowName);
-  };
+  useEffect(() => () => {
+    if (announceTimerRef.current !== null) {
+      clearTimeout(announceTimerRef.current);
+    }
+  }, []);
 
-  const openOrReconnectPopup = (forceOpen: boolean) => {
-    const storedName = detachedPanelName ?? sessionStorage.getItem('marginalia-popout-name');
-    const windowName =
-      storedName && storedName.trim().length > 0
-        ? storedName
-        : `marginalia-panel-${Date.now()}`;
-
-    const popupFeatures = buildPopupFeatures();
-
-    let popup = window.open('', windowName, popupFeatures);
-    if (!popup || popup.closed) {
-      popup = window.open('about:blank', windowName, popupFeatures);
+  const dockPanelWindow = useCallback(() => {
+    const target = panelHomeWindow(windowsRef.current, windowChannel.getSelf().openerId);
+    if (target) {
+      windowChannel.post({ type: 'panel-state', to: target.id, state: buildPanelHandoff(store.getState()) });
     }
 
-    if (!popup || popup.closed) {
+    try {
+      window.sessionStorage.removeItem(PANEL_WINDOW_STATE_KEY);
+    } catch {
+      // Storage unavailable.
+    }
+
+    window.close();
+    // A window the user opened themselves can't be closed by script. It leaves the other windows (so the
+    // main window shows its docked panel again) but never turns into a Bible window.
+    window.setTimeout(() => {
+      if (!window.closed) {
+        windowChannel.stop();
+        setIsDocked(true);
+      }
+    }, CLOSE_CHECK_MS);
+  }, [store]);
+
+  const handleToggleDetachPanel = useCallback(() => {
+    if (windowChannel.isPanelWindow) {
+      dockPanelWindow();
       return;
     }
 
-    attachPopupWindow(popup, windowName);
-    if (forceOpen) {
-      popup.focus();
-    }
-  };
-
-  // Reconnect popup on mount if session storage indicates one was open
-  useEffect(() => {
-    const popupName = sessionStorage.getItem('marginalia-popout-name');
-    if (!popupName) return;
-    openOrReconnectPopup(false);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // Detect popup closed while detached state still set
-  useEffect(() => {
-    if (!isPanelDetached) return;
-
-    const popup = popupWindowRef.current;
-    if (!popup || popup.closed) {
-      dispatch(setPanelDetached({ detached: false, panelName: null }));
-      setPopupContainer(null);
-      sessionStorage.removeItem('marginalia-popout-name');
-    }
-  }, [isPanelDetached, dispatch]);
-
-  // Sync theme to popup window when it changes
-  useEffect(() => {
-    const popup = popupWindowRef.current;
-    if (popup && !popup.closed) {
-      popup.document.documentElement.setAttribute('data-theme', theme);
-      popup.document.documentElement.setAttribute('data-bs-theme', theme);
-    }
-  }, [theme]);
-
-  // Cleanup on unmount
-  useEffect(() => {
-    return () => {
-      popupCleanupRef.current?.();
-    };
-  }, []);
-
-  const handleToggleDetachPanel = () => {
-    if (isPanelDetached) {
-      dispatch(setPanelDetached({ detached: false, panelName: null }));
-      setPopupContainer(null);
-      sessionStorage.removeItem('marginalia-popout-name');
-      popupCleanupRef.current?.();
-
-      const popup = popupWindowRef.current;
-      popupWindowRef.current = null;
-      if (popup && !popup.closed) {
-        popup.close();
+    const existing = findPanelWindow(windowsRef.current);
+    if (existing) {
+      if (!isPanelDetached) {
+        dispatch(setPanelDetached(true));
       }
-
-      window.focus();
+      focusChannelWindow(existing.id);
       return;
     }
 
-    openOrReconnectPopup(true);
-  };
+    const placement = resolvePopupPlacement(
+      readPopupMetrics(document.getElementById(SIDE_PANEL_ELEMENT_ID)),
+      readPopoutBounds('panel'),
+      getScreenLayout()
+    );
+    const popup = window.open(buildPopoutUrl(window.location), PANEL_WINDOW_NAME, formatPopupFeatures(placement));
+    if (!popup) {
+      return;
+    }
 
-  return { popupContainer, focusDetachedPanel, focusMainWindow, handleToggleDetachPanel };
+    registerWindowRef(popup);
+    offerScreenPlacement(placement.source === 'default' ? () => moveToOtherScreen(popup) : undefined);
+    dispatch(setPanelDetached(true));
+    if (announceTimerRef.current !== null) {
+      clearTimeout(announceTimerRef.current);
+    }
+    announceTimerRef.current = setTimeout(() => {
+      announceTimerRef.current = null;
+      if (!findPanelWindow(windowChannel.getWindows())) {
+        dispatch(setPanelDetached(false));
+      }
+    }, POPOUT_ANNOUNCE_TIMEOUT_MS);
+  }, [dispatch, dockPanelWindow, isPanelDetached]);
+
+  return { focusMainWindow, handleToggleDetachPanel, isPanelWindowDocked };
 };

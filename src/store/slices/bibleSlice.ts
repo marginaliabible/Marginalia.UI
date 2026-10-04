@@ -17,7 +17,6 @@ interface BibleState {
   activeTabId: string | null;
   lastVersePanelType: 'translations' | 'resources' | 'links';
   isPanelDetached: boolean;
-  detachedPanelName: string | null;
 }
 
 const MAX_SEARCH_MATCHES = 1000;
@@ -38,8 +37,7 @@ const initialState: BibleState = {
   tabs: [],
   activeTabId: null,
   lastVersePanelType: 'resources',
-  isPanelDetached: false,
-  detachedPanelName: null
+  isPanelDetached: false
 };
 
 const buildSearchResults = (
@@ -288,6 +286,29 @@ export const loadTranslations = createAsyncThunk(
   }
 );
 
+export interface PanelSearchRequest {
+  query: string;
+  /** 'replace' reuses the active search tab when there is one. */
+  action: 'replace' | 'new';
+  translationIds: string[];
+}
+
+export const runPanelSearch = createAsyncThunk(
+  'bible/runPanelSearch',
+  async (request: PanelSearchRequest, thunkApi) => {
+    await thunkApi.dispatch(loadTranslations(request.translationIds));
+    const { activeTabId, tabs } = (thunkApi.getState() as { bible: BibleState }).bible;
+    const activeTab = activeTabId ? tabs.find((tab) => tab.id === activeTabId) : undefined;
+    const search = { query: request.query, translationIds: request.translationIds };
+
+    if (request.action === 'replace' && activeTabId && activeTab?.type === 'search') {
+      thunkApi.dispatch(bibleSlice.actions.runSearchInTab({ tabId: activeTabId, ...search }));
+    } else {
+      thunkApi.dispatch(bibleSlice.actions.runSearchInNewTab(search));
+    }
+  }
+);
+
 const bibleSlice = createSlice({
   name: 'bible',
   initialState,
@@ -456,11 +477,20 @@ const bibleSlice = createSlice({
         }
       }
     },
-    setPanelDetached: (state, action: PayloadAction<{ detached: boolean; panelName?: string | null }>) => {
-      state.isPanelDetached = action.payload.detached;
-      if (action.payload.panelName !== undefined) {
-        state.detachedPanelName = action.payload.panelName;
-      }
+    setPanelDetached: (state, action: PayloadAction<boolean>) => {
+      state.isPanelDetached = action.payload;
+    },
+    restorePanelTabs: (state, action: PayloadAction<{
+      tabs: PanelTab[];
+      activeTabId: string | null;
+      lastVersePanelType: 'translations' | 'resources' | 'links';
+    }>) => {
+      const { tabs, activeTabId, lastVersePanelType } = action.payload;
+      state.tabs = tabs;
+      state.activeTabId = activeTabId && tabs.some((tab) => tab.id === activeTabId)
+        ? activeTabId
+        : (tabs[tabs.length - 1]?.id ?? null);
+      state.lastVersePanelType = lastVersePanelType;
     },
     clearSearch: (state) => {
       state.tabs = [];
@@ -597,6 +627,7 @@ export const {
   setActiveTab,
   closeTab,
   setPanelDetached,
+  restorePanelTabs,
   clearSearch,
   updateActiveVerseTabContext,
   clearVerseTabContexts,

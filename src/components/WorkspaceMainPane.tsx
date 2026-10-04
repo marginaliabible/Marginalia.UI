@@ -14,10 +14,13 @@ import {
 } from '../store/slices/uiSlice';
 import { bibleService } from '../services/bibleService';
 import { searchIndexService } from '../services/searchIndexService';
+import { routeInteraction } from '../services/windowRouting';
+import { isDocumentWindow } from '../services/windowChannel';
 import { scrollToVerse } from '../App';
 import type { BibleChapter, BibleTranslationMeta, QuickJumpTarget } from '../models/bible';
 import { markupFlagsFromBible } from '../utils/verseMarkup';
 import { useSourcePreferences } from '../hooks/useSourcePreferences';
+import { MAIN_PANE_ELEMENT_ID } from '../hooks/useDocumentPopout';
 import type { WorkspacePanelKey } from '../App';
 
 interface WorkspaceMainPaneProps {
@@ -32,7 +35,6 @@ interface WorkspaceMainPaneProps {
   onShareCurrentVerse: () => Promise<void> | void;
   shareButtonLabel: string;
   goToReference: (target: QuickJumpTarget, translationId?: string) => Promise<void>;
-  focusDetachedPanel: () => void;
   miniSearchFocusToken: number;
   isMiniSearchVisible: boolean;
   setIsMiniSearchVisible: (open: boolean) => void;
@@ -60,7 +62,6 @@ const WorkspaceMainPane: React.FC<WorkspaceMainPaneProps> = ({
   onShareCurrentVerse,
   shareButtonLabel,
   goToReference,
-  focusDetachedPanel,
   miniSearchFocusToken,
   isMiniSearchVisible,
   setIsMiniSearchVisible,
@@ -257,7 +258,11 @@ const WorkspaceMainPane: React.FC<WorkspaceMainPaneProps> = ({
           sourceUrls,
           sourcePreferences
         );
-        dispatch(openVerseTabs({ book: selectedBook, chapter: selectedChapter, verse, hasResources }));
+        const payload = { book: selectedBook, chapter: selectedChapter, verse, hasResources };
+        routeInteraction(
+          { kind: 'panel', type: 'open-verse-tabs', payload },
+          () => dispatch(openVerseTabs(payload))
+        );
       })();
     }
   };
@@ -479,15 +484,16 @@ const WorkspaceMainPane: React.FC<WorkspaceMainPaneProps> = ({
     return () => window.removeEventListener('keydown', handleArrowSelectionKey, true);
   }, [handleArrowSelectionKey]);
 
-  const shouldRenderDocumentViewer = pdfViewer.isOpen && !isPanelDetached;
+  const shouldRenderDocumentViewer = pdfViewer.isOpen;
 
-  if (!currentBible && !shouldRenderDocumentViewer) {
+  if (!currentBible && !shouldRenderDocumentViewer && !isDocumentWindow) {
     return null;
   }
 
   return (
     <section
-      className="workspace-pane workspace-main"
+      id={MAIN_PANE_ELEMENT_ID}
+      className={`workspace-pane workspace-main ${shouldRenderDocumentViewer ? 'has-document-viewer' : ''}`}
       ref={mainPaneRef}
       tabIndex={-1}
       onPointerDownCapture={focusMainPane}
@@ -503,6 +509,8 @@ const WorkspaceMainPane: React.FC<WorkspaceMainPaneProps> = ({
             pdfViewer.kind === 'markup'
               ? <MarkupDocumentViewer onScriptureReferenceOpen={expandMobilePanel} />
               : <PdfViewerPane onScriptureReferenceOpen={expandMobilePanel} />
+          ) : isDocumentWindow ? (
+            <p className="text-body-secondary mb-0">No document is open in this window. You can close it.</p>
           ) : selectedBook ? (
             <VerseDisplay
               chaptersByTranslation={chaptersByTranslation}
@@ -529,7 +537,6 @@ const WorkspaceMainPane: React.FC<WorkspaceMainPaneProps> = ({
               starredTranslationIds={starredTranslationIds}
               goToReference={goToReference}
               isPanelDetached={isPanelDetached}
-              focusDetachedPanel={focusDetachedPanel}
               miniSearchFocusToken={miniSearchFocusToken}
               isMiniSearchVisible={isMiniSearchVisible}
               setIsMiniSearchVisible={setIsMiniSearchVisible}

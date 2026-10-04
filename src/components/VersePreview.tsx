@@ -11,14 +11,35 @@ import {
 interface VerseReferenceLabelProps {
   verseContext: VerseContext;
   className?: string;
+  /** Makes the reference a link, e.g. to show the verse in the Bible window. */
+  onClick?: () => void;
 }
 
 export const VerseReferenceLabel: React.FC<VerseReferenceLabelProps> = ({
   verseContext,
   className,
-}) => (
-  <span className={className}>{formatVerseReference(verseContext)}</span>
-);
+  onClick,
+}) => {
+  const reference = formatVerseReference(verseContext);
+  if (!onClick) {
+    return <span className={className}>{reference}</span>;
+  }
+
+  return (
+    <a
+      href="#"
+      role="button"
+      className={className}
+      onClick={(event) => {
+        event.preventDefault();
+        onClick();
+      }}
+      title={`Show ${reference} in the Bible window`}
+    >
+      {reference}
+    </a>
+  );
+};
 
 interface VerseTextListProps {
   verses: Array<{ verse: number; text: string }>;
