@@ -1656,14 +1656,19 @@ const AccountControl: React.FC<AccountControlProps> = ({ subscriptions }) => {
     microsoft: isProviderConnected('microsoft'),
   }), [isProviderConnected]);
 
+  const discardAndCloseModal = () => {
+    folderPickerRef.current?.cancel();
+    setHasUnsavedFileSyncChanges(false);
+    setConnectModalProvider(null);
+    setIsModalOpen(false);
+  };
+
   const closeModal = () => {
     if (hasUnsavedFileSyncChanges && !window.confirm(UNSAVED_FILE_SYNC_CONFIRMATION)) {
       return;
     }
 
-    setHasUnsavedFileSyncChanges(false);
-    setConnectModalProvider(null);
-    setIsModalOpen(false);
+    discardAndCloseModal();
   };
 
   const connectModalMode = connectModalProvider ? getConnectMode(connectModalProvider) : null;
@@ -1808,8 +1813,7 @@ const AccountControl: React.FC<AccountControlProps> = ({ subscriptions }) => {
                     <button
                       type="button"
                       className="btn btn-outline-secondary"
-                      disabled={!hasUnsavedFileSyncChanges}
-                      onClick={() => folderPickerRef.current?.cancel()}
+                      onClick={discardAndCloseModal}
                     >
                       Cancel
                     </button>

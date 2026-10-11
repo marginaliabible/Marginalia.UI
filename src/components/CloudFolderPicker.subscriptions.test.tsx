@@ -1,6 +1,6 @@
 import { createRef } from 'react';
 import { act, fireEvent, render, screen, within } from '@testing-library/react';
-import CloudFolderPicker, { type CloudFolderPickerHandle } from './CloudFolderPicker';
+import CloudFolderPicker, { type CloudFolderPickerHandle, type FolderSelectionTarget } from './CloudFolderPicker';
 import type { SubscriptionsBinding } from '../models/subscription';
 import { __resetToastsForTests, getToasts } from '../services/toastService';
 
@@ -12,7 +12,7 @@ jest.mock('../services/cloudConfigProviderService', () => ({
 const PUBLISHER_URL = 'https://publisher.example/library.json';
 
 const sessions = { google: null, microsoft: null };
-const initialSelections = { google: [], microsoft: [] };
+const initialSelections: Record<'google' | 'microsoft', FolderSelectionTarget[]> = { google: [], microsoft: [] };
 const providerFlags = { google: false, microsoft: false };
 
 function makeBinding(overrides: Partial<SubscriptionsBinding> = {}): SubscriptionsBinding {
@@ -66,14 +66,14 @@ function makeBinding(overrides: Partial<SubscriptionsBinding> = {}): Subscriptio
   };
 }
 
-function renderPicker(binding: SubscriptionsBinding) {
+function renderPicker(binding: SubscriptionsBinding, selections: typeof initialSelections = initialSelections) {
   const ref = createRef<CloudFolderPickerHandle>();
   const onSelectionsChange = jest.fn();
   const onDirtyChange = jest.fn();
   render(
     <CloudFolderPicker
       sessions={sessions}
-      initialSelections={initialSelections}
+      initialSelections={selections}
       providerSyncFilesEnabled={providerFlags}
       linkedProviders={providerFlags}
       focusRequest={null}
@@ -88,7 +88,6 @@ function renderPicker(binding: SubscriptionsBinding) {
 }
 
 function openSubscriptions() {
-  fireEvent.click(screen.getByRole('button', { name: 'Subscriptions' }));
   return within(screen.getByRole('list', { name: 'Subscription libraries' }));
 }
 
@@ -120,6 +119,37 @@ describe('CloudFolderPicker subscriptions', () => {
     expect(left.queryByText('Translations')).toBeNull();
   });
 
+  it('shows subscription libraries as root rows beside the selected folders', () => {
+    renderPicker(makeBinding(), {
+      google: [{ id: 'g-folder', kind: 'folder', name: 'Notes', path: 'Google Drive/Notes' }],
+      microsoft: [],
+    });
+
+    expect(screen.getByText('Selected Files & Folders')).toBeTruthy();
+    expect(screen.queryByText('Enabled')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Google Drive/\u200BNotes' })).toBeTruthy();
+
+    const panel = openSubscriptions();
+    expect(panel.getByRole('button', { name: 'Subscriptions/\u200BBuilt-In' })).toBeTruthy();
+    expect(panel.getByRole('button', { name: 'Subscriptions/\u200BPublisher' })).toBeTruthy();
+  });
+
+  it('reveals a library from the left without hiding the selected folders', () => {
+    renderPicker(makeBinding(), {
+      google: [{ id: 'g-folder', kind: 'folder', name: 'Notes', path: 'Google Drive/Notes' }],
+      microsoft: [],
+    });
+
+    const left = within(screen.getByRole('list', { name: 'Subscriptions' }));
+    fireEvent.click(left.getByRole('button', { name: 'Expand Subscriptions' }));
+    fireEvent.click(left.getByRole('button', { name: 'Publisher' }));
+
+    const panel = openSubscriptions();
+    expect(panel.getByText('Translations')).toBeTruthy();
+    expect(panel.getByRole('button', { name: 'Subscriptions/\u200BBuilt-In' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Google Drive/\u200BNotes' })).toBeTruthy();
+  });
+
   it('disables disconnect for Built-In but not for connected libraries', () => {
     renderPicker(makeBinding());
     const panel = openSubscriptions();
@@ -132,11 +162,11 @@ describe('CloudFolderPicker subscriptions', () => {
     renderPicker(makeBinding());
     const panel = openSubscriptions();
 
-    fireEvent.click(panel.getByText('Built-In'));
+    fireEvent.click(panel.getByRole('button', { name: 'Expand Built-In' }));
     expect(panel.getByText('KJV')).toBeTruthy();
     expect(panel.queryByText('Translations')).toBeNull();
 
-    fireEvent.click(panel.getByText('Publisher'));
+    fireEvent.click(panel.getByRole('button', { name: 'Expand Publisher' }));
     expect(panel.getByText('Translations')).toBeTruthy();
     expect(panel.getByText('Resources')).toBeTruthy();
     expect(panel.queryByText('Romans Notes')).toBeNull();
@@ -149,7 +179,7 @@ describe('CloudFolderPicker subscriptions', () => {
   it('hides lower-level toggles once the library is staged for disconnect', () => {
     renderPicker(makeBinding());
     const panel = openSubscriptions();
-    fireEvent.click(panel.getByText('Publisher'));
+    fireEvent.click(panel.getByRole('button', { name: 'Expand Publisher' }));
 
     const typeToggle = panel.getByRole('button', { name: 'Exclude Translations in Publisher from sync', hidden: true }) as HTMLButtonElement;
     expect(typeToggle.disabled).toBe(false);
@@ -164,7 +194,7 @@ describe('CloudFolderPicker subscriptions', () => {
     const { ref, onSelectionsChange, onDirtyChange } = renderPicker(binding);
     const panel = openSubscriptions();
 
-    fireEvent.click(panel.getByText('Built-In'));
+    fireEvent.click(panel.getByRole('button', { name: 'Expand Built-In' }));
     fireEvent.click(panel.getByRole('button', { name: 'Exclude KJV from sync' }));
     fireEvent.click(panel.getByRole('button', { name: 'Stop syncing Publisher' }));
     expect(onDirtyChange).toHaveBeenLastCalledWith(true);
@@ -215,7 +245,7 @@ describe('CloudFolderPicker subscriptions', () => {
     const { ref, onDirtyChange } = renderPicker(binding);
     const panel = openSubscriptions();
 
-    fireEvent.click(panel.getByText('Built-In'));
+    fireEvent.click(panel.getByRole('button', { name: 'Expand Built-In' }));
     fireEvent.click(panel.getByRole('button', { name: 'Exclude ASV from sync' }));
     expect(onDirtyChange).toHaveBeenLastCalledWith(true);
 

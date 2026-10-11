@@ -31,6 +31,8 @@ const ROOT_LABEL: Record<FederatedProvider, string> = {
 // Group key for the right panel's top-level accordion (only one selected root expanded at a time).
 const RIGHT_PANEL_TOP_LEVEL_GROUP = '__root__';
 
+const SUBFOLDER_CHECK_CONCURRENCY = 3;
+
 export interface FolderSelectionTarget {
   id: string;
   kind: 'folder';
@@ -62,8 +64,6 @@ interface CloudFolderPickerProps {
   subscriptions?: SubscriptionsBinding;
   ref?: React.Ref<CloudFolderPickerHandle>;
 }
-
-type RightPanelMode = 'files' | 'subscriptions';
 
 export interface CloudFolderPickerHandle {
   apply: () => void;
@@ -105,6 +105,12 @@ interface SelectedFolder {
 interface VisibleNode {
   key: string;
   depth: number;
+}
+
+interface SubfolderCheckRequest {
+  key: string;
+  session: FederatedSession;
+  generation: number;
 }
 
 interface RightVisibleRow {
@@ -280,6 +286,18 @@ function hasSelectedAncestor(
   }
 
   return false;
+}
+
+function isNodeVisibleInTree(nodeKey: string, nodes: Record<string, FolderTreeNode>): boolean {
+  let cursor = nodes[nodeKey];
+  while (cursor?.parentKey) {
+    cursor = nodes[cursor.parentKey];
+    if (!cursor?.isExpanded) {
+      return false;
+    }
+  }
+
+  return cursor?.id === 'root';
 }
 
 // Walks from a descendant node up to (but not including) its selected root, checking whether
@@ -477,7 +495,6 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
   ref,
 }) => {
   const [loadingRoots, setLoadingRoots] = useState(true);
-  const [rightPanelMode, setRightPanelMode] = useState<RightPanelMode>('files');
   const [isSubscriptionsExpanded, setIsSubscriptionsExpanded] = useState(false);
   const [isConnectModalOpen, setIsConnectModalOpen] = useState(false);
   const [pendingSubscriptionReveal, setPendingSubscriptionReveal] = useState<SubscriptionRevealTarget | null>(null);
@@ -504,11 +521,17 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
   const nodesRef = useRef<Record<string, FolderTreeNode>>({});
   const inFlightLoadsRef = useRef<Record<string, Promise<FolderTreeNode[]>>>({});
   const inFlightFolderSizeReadsRef = useRef<Partial<Record<string, Promise<void>>>>({});
+  const subfolderCheckQueueRef = useRef<SubfolderCheckRequest[]>([]);
+  const pendingSubfolderCheckKeysRef = useRef<Set<string>>(new Set());
+  const checkedSubfolderKeysRef = useRef<Set<string>>(new Set());
+  const activeSubfolderChecksRef = useRef(0);
+  const subfolderCheckGenerationRef = useRef(0);
   const nodeRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const selectedRowRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const rootRowRefs = useRef<Record<FederatedProvider, HTMLDivElement | null>>({ google: null, microsoft: null });
   const initialSelectionsRef = useRef(initialSelections);
   const hasBootstrappedSelectionsRef = useRef(false);
+  const requestedRightExpandedLoadKeysRef = useRef<Set<string>>(new Set());
   const {
     primaryPercent: splitPercent,
     secondaryPercent: selectedPanePercent,
@@ -563,10 +586,7 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
     };
   }, [focusRequest]);
 
-  const loadChildren = useCallback(async (
-    nodeKey: string,
-    options?: { checkSubfolders?: boolean }
-  ): Promise<FolderTreeNode[]> => {
+  const loadChildren = useCallback(async (nodeKey: string): Promise<FolderTreeNode[]> => {
     const node = nodesRef.current[nodeKey];
     if (!node) {
       return [];
@@ -603,8 +623,6 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
       },
     }));
 
-    const checkSubfolders = options?.checkSubfolders ?? false;
-
     const loadPromise = (async () => {
       try {
         const children = await listFolderChildrenForSession(session, node.id, node.driveId);
@@ -616,22 +634,6 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
 
           return left.kind === 'folder' ? -1 : 1;
         });
-
-        // The left panel only ever navigates folders, so its chevron should only appear when a
-        // subfolder actually has its own subfolders (checked one level ahead), instead of guessing.
-        let subfolderPresenceById: Record<string, boolean> | null = null;
-        if (checkSubfolders) {
-          const folderChildren = sortedChildren.filter((child) => child.kind === 'folder');
-          const checks = await Promise.all(folderChildren.map(async (child) => {
-            try {
-              const grandchildren = await listFolderChildrenForSession(session, child.id, child.driveId);
-              return [child.id, grandchildren.some((entry) => entry.kind === 'folder')] as const;
-            } catch {
-              return [child.id, child.hasChildren] as const;
-            }
-          }));
-          subfolderPresenceById = Object.fromEntries(checks);
-        }
 
         const nextChildren: FolderTreeNode[] = [];
         updateNodes((current) => {
@@ -647,11 +649,11 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
             const childKey = makeNodeKey(parent.provider, child.id);
             childKeys.push(childKey);
 
+            const existingChild = next[childKey];
             const hasChildren = child.kind === 'folder'
-              ? subfolderPresenceById?.[child.id] ?? child.hasChildren
+              ? existingChild?.hasChildren ?? child.hasChildren
               : false;
 
-            const existingChild = next[childKey];
             next[childKey] = {
               key: childKey,
               provider: parent.provider,
@@ -678,7 +680,7 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
             childKeys,
             childrenLoaded: true,
             isLoading: false,
-            hasChildren: childKeys.length > 0,
+            hasChildren: sortedChildren.some((child) => child.kind === 'folder'),
           };
 
           return next;
@@ -797,6 +799,10 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
 
     return () => {
       cancelled = true;
+      subfolderCheckGenerationRef.current += 1;
+      subfolderCheckQueueRef.current = [];
+      pendingSubfolderCheckKeysRef.current.clear();
+      checkedSubfolderKeysRef.current.clear();
     };
   }, [sessions]);
 
@@ -827,6 +833,92 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
     return result;
   }, [nodes, rootKeys]);
 
+  const pumpSubfolderChecks = useCallback(() => {
+    while (activeSubfolderChecksRef.current < SUBFOLDER_CHECK_CONCURRENCY) {
+      const request = subfolderCheckQueueRef.current.shift();
+      if (!request) {
+        return;
+      }
+
+      if (request.generation !== subfolderCheckGenerationRef.current) {
+        continue;
+      }
+
+      const node = nodesRef.current[request.key];
+      if (!node || !node.hasChildren || node.childrenLoaded || node.isLoading || !isNodeVisibleInTree(request.key, nodesRef.current)) {
+        pendingSubfolderCheckKeysRef.current.delete(request.key);
+        continue;
+      }
+
+      activeSubfolderChecksRef.current += 1;
+      void (async () => {
+        try {
+          const children = await listFolderChildrenForSession(request.session, node.id, node.driveId);
+          if (request.generation !== subfolderCheckGenerationRef.current) {
+            return;
+          }
+
+          const hasSubfolders = children.some((entry) => entry.kind === 'folder');
+          updateNodes((current) => {
+            const existing = current[request.key];
+            if (!existing || existing.childrenLoaded || existing.hasChildren === hasSubfolders) {
+              return current;
+            }
+
+            return {
+              ...current,
+              [request.key]: {
+                ...existing,
+                hasChildren: hasSubfolders,
+              },
+            };
+          });
+        } catch {
+          // Keep the chevron visible if the check fails.
+        } finally {
+          activeSubfolderChecksRef.current -= 1;
+          if (request.generation === subfolderCheckGenerationRef.current) {
+            pendingSubfolderCheckKeysRef.current.delete(request.key);
+            checkedSubfolderKeysRef.current.add(request.key);
+          }
+          pumpSubfolderChecks();
+        }
+      })();
+    }
+  }, [updateNodes]);
+
+  useEffect(() => {
+    const generation = subfolderCheckGenerationRef.current;
+    const requests: SubfolderCheckRequest[] = [];
+    for (const { key } of visibleNodes) {
+      const node = nodes[key];
+      if (!node || node.id === 'root' || !node.hasChildren || node.childrenLoaded || node.isLoading) {
+        continue;
+      }
+
+      if (checkedSubfolderKeysRef.current.has(key) || pendingSubfolderCheckKeysRef.current.has(key)) {
+        continue;
+      }
+
+      const session = sessions[node.provider];
+      if (!session) {
+        continue;
+      }
+
+      requests.push({ key, session, generation });
+    }
+
+    if (requests.length === 0) {
+      return;
+    }
+
+    for (const request of requests) {
+      pendingSubfolderCheckKeysRef.current.add(request.key);
+    }
+    subfolderCheckQueueRef.current = [...requests, ...subfolderCheckQueueRef.current];
+    pumpSubfolderChecks();
+  }, [nodes, pumpSubfolderChecks, sessions, visibleNodes]);
+
   const selectedRows = useMemo(() => {
     return Object.values(selected).sort((left, right) => left.path.localeCompare(right.path));
   }, [selected]);
@@ -846,7 +938,7 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
     }));
 
     if (!node.childrenLoaded) {
-      void loadChildren(key, { checkSubfolders: true });
+      void loadChildren(key);
     }
   }, [loadChildren, nodes, updateNodes]);
 
@@ -917,7 +1009,7 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
   );
 
   useEffect(() => {
-    if (!pendingSubscriptionReveal || rightPanelMode !== 'subscriptions') {
+    if (!pendingSubscriptionReveal) {
       return;
     }
     if (!subscriptionLibraries.some((library) => library.key === pendingSubscriptionReveal.libraryKey)) {
@@ -926,14 +1018,7 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
 
     subscriptionsPanelRef.current?.reveal(pendingSubscriptionReveal);
     setPendingSubscriptionReveal(null);
-  }, [pendingSubscriptionReveal, rightPanelMode, subscriptionLibraries]);
-
-  const showSubscriptions = useCallback((target?: SubscriptionRevealTarget) => {
-    setRightPanelMode('subscriptions');
-    if (target) {
-      setPendingSubscriptionReveal(target);
-    }
-  }, []);
+  }, [pendingSubscriptionReveal, subscriptionLibraries]);
 
   const handleApply = useCallback(() => {
     const shouldApplyFiles = areFilesDirty || !areSubscriptionsDirty;
@@ -941,7 +1026,6 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
       ? findFirstUntaggedSelection(selectedRows, nodes, providerSyncFilesEnabled, sessions)
       : null;
     if (untagged) {
-      setRightPanelMode('files');
       window.alert('You must supply tags for all files before saving.');
 
       setRightExpandedKeyByParent((current) => {
@@ -971,7 +1055,7 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
       );
       if (blocked) {
         window.alert('At least one of your starred translations must stay enabled.');
-        showSubscriptions({ ...blocked, flash: true });
+        setPendingSubscriptionReveal({ ...blocked, flash: true });
         return;
       }
     }
@@ -1001,7 +1085,6 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
     providerSyncFilesEnabled,
     selectedRows,
     sessions,
-    showSubscriptions,
     subscriptionStaging,
     subscriptions,
   ]);
@@ -1030,7 +1113,7 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
         }
 
         if (!node.childrenLoaded && !node.isLoading) {
-          await loadChildren(nodeKey, { checkSubfolders: true });
+          await loadChildren(nodeKey);
         }
 
         if (node.isLoading) {
@@ -1377,6 +1460,34 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
     }
   }, [rightVisibleRows, sessions, updateNodes]);
 
+  // Right-panel expansion outlives the node tree, which is rebuilt whenever sessions change.
+  useEffect(() => {
+    for (const visibleRow of rightVisibleRows) {
+      const node = nodesRef.current[visibleRow.key];
+      if (!node || node.kind !== 'folder') {
+        continue;
+      }
+
+      if (node.childrenLoaded) {
+        requestedRightExpandedLoadKeysRef.current.delete(visibleRow.key);
+        continue;
+      }
+
+      const groupKey = visibleRow.isRootSelection ? RIGHT_PANEL_TOP_LEVEL_GROUP : node.parentKey || RIGHT_PANEL_TOP_LEVEL_GROUP;
+      if (rightExpandedKeyByParent[groupKey] !== visibleRow.key || node.isLoading || !sessions[node.provider]) {
+        continue;
+      }
+
+      // Failed loads stay requested so a persistent error can't retrigger this effect in a loop.
+      if (requestedRightExpandedLoadKeysRef.current.has(visibleRow.key)) {
+        continue;
+      }
+
+      requestedRightExpandedLoadKeysRef.current.add(visibleRow.key);
+      void loadChildren(visibleRow.key);
+    }
+  }, [loadChildren, rightExpandedKeyByParent, rightVisibleRows, sessions]);
+
   return (
     <section className="cloud-folder-picker" aria-label="File Sync">
       <div ref={layoutRef} className="cloud-folder-picker-layout">
@@ -1414,7 +1525,6 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
                       }}
                       className={`cloud-folder-tree-row${highlightNodeKey === key ? ' is-highlighted' : ''}${isRoot && highlightServiceProvider === node.provider ? ' is-service-highlighted' : ''}`}
                       style={{ paddingLeft: `${depth * 0.55}rem` }}
-                      onClickCapture={() => setRightPanelMode('files')}
                     >
                       {node.hasChildren ? (
                         <button
@@ -1471,18 +1581,12 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
           {subscriptions && (
             <ul className="cloud-folder-tree-list" aria-label="Subscriptions">
               <li>
-                <div
-                  className={`cloud-folder-tree-row no-checkbox${rightPanelMode === 'subscriptions' ? ' is-active' : ''}`}
-                  style={{ paddingLeft: 0 }}
-                >
+                <div className="cloud-folder-tree-row no-checkbox" style={{ paddingLeft: 0 }}>
                   <button
                     type="button"
                     className="cloud-folder-tree-chevron"
                     aria-label={isSubscriptionsExpanded ? 'Collapse Subscriptions' : 'Expand Subscriptions'}
-                    onClick={() => {
-                      setIsSubscriptionsExpanded((current) => !current);
-                      showSubscriptions();
-                    }}
+                    onClick={() => setIsSubscriptionsExpanded((current) => !current)}
                   >
                     <i className={`fa-solid ${isSubscriptionsExpanded ? 'fa-chevron-down' : 'fa-chevron-right'}`} aria-hidden="true"></i>
                   </button>
@@ -1490,7 +1594,7 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
                     <button
                       type="button"
                       className="cloud-folder-tree-name"
-                      onClick={() => showSubscriptions()}
+                      onClick={() => setIsSubscriptionsExpanded((current) => !current)}
                     >
                       Subscriptions
                     </button>
@@ -1514,7 +1618,7 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
                         type="button"
                         className="cloud-folder-tree-name"
                         title={library.isBuiltIn ? undefined : library.key}
-                        onClick={() => showSubscriptions({ libraryKey: library.key, flash: true })}
+                        onClick={() => setPendingSubscriptionReveal({ libraryKey: library.key, flash: true })}
                       >
                         {library.name}
                       </button>
@@ -1533,32 +1637,16 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
         />
 
         <div className="cloud-folder-picker-right" style={{ flexBasis: `${selectedPanePercent}%` }}>
-          {rightPanelMode === 'subscriptions' ? (
-            <div className="cloud-folder-selected-header">
-              <span className="cloud-folder-selected-header-name">Subscriptions</span>
-              <span className="cloud-folder-selected-header-size text-end" title="Disable libraries, document types, or individual documents.">Enabled</span>
-            </div>
-          ) : (
-            <div className="cloud-folder-selected-header">
-              <span className="cloud-folder-selected-header-name">Selected Files & Folders</span>
-              <span className="cloud-folder-selected-header-size text-end" title="Shows file sync size and status. Unsupported file types are excluded.">Synchronization</span>
-            </div>
-          )}
+          <div className="cloud-folder-selected-header">
+            <span className="cloud-folder-selected-header-name">Selected Files & Folders</span>
+            <span className="cloud-folder-selected-header-size text-end" title="Shows file sync size and status. Unsupported file types are excluded.">Synchronization</span>
+          </div>
 
-          {subscriptions && (
-            <SubscriptionsPanel
-              ref={subscriptionsPanelRef}
-              binding={subscriptions}
-              staging={subscriptionStaging}
-              hidden={rightPanelMode !== 'subscriptions'}
-            />
-          )}
-
-          {rightPanelMode === 'files' && selectedRows.length === 0 && (
+          {selectedRows.length === 0 && subscriptionLibraries.length === 0 && (
             <p className="small text-body-secondary mb-0">No folders selected yet.</p>
           )}
 
-          {rightPanelMode === 'files' && selectedRows.length > 0 && (
+          {selectedRows.length > 0 && (
             <ul className="cloud-folder-selected-list">
               {rightVisibleRows.map((visibleRow) => {
                 const node = nodes[visibleRow.key];
@@ -1764,6 +1852,14 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
               })}
             </ul>
           )}
+
+          {subscriptions && (
+            <SubscriptionsPanel
+              ref={subscriptionsPanelRef}
+              binding={subscriptions}
+              staging={subscriptionStaging}
+            />
+          )}
         </div>
       </div>
 
@@ -1811,7 +1907,7 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
           onConnected={(url) => {
             setIsConnectModalOpen(false);
             setIsSubscriptionsExpanded(true);
-            showSubscriptions({ libraryKey: url, flash: true });
+            setPendingSubscriptionReveal({ libraryKey: url, flash: true });
           }}
           onClose={() => setIsConnectModalOpen(false)}
         />

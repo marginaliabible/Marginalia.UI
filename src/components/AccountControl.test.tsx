@@ -2194,17 +2194,35 @@ describe('AccountControl', () => {
 
     expect(screen.getByRole('button', { name: 'Apply' })).toBeEnabled();
 
+    const confirmSpy = jest.spyOn(window, 'confirm');
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
 
-    await waitFor(() => {
-      expect(screen.getByLabelText('Google Drive/Bible Notes Folder')).not.toBeChecked();
-    });
+    expect(confirmSpy).not.toHaveBeenCalled();
+    confirmSpy.mockRestore();
+    expect(screen.queryByText('Account Sync')).not.toBeInTheDocument();
 
     const persisted = JSON.parse(window.localStorage.getItem('marginalia:provider-sync-preferences') || '{}');
     expect(persisted.google.selectedTargets).toEqual([]);
+
+    openAccountModal();
+    fireEvent.click(await screen.findByLabelText('Expand Google Drive'));
+    expect(await screen.findByLabelText('Google Drive/Bible Notes Folder')).not.toBeChecked();
   });
 
-  it('only shows a left-panel chevron for subfolders that themselves contain a subfolder', async () => {
+  it('keeps Cancel enabled and closes the modal when nothing has changed', async () => {
+    await renderAccountControl();
+    openAccountModal();
+
+    const cancelButton = await screen.findByRole('button', { name: 'Cancel' });
+    expect(cancelButton).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Apply' })).toBeDisabled();
+
+    fireEvent.click(cancelButton);
+
+    expect(screen.queryByText('Account Sync')).not.toBeInTheDocument();
+  });
+
+  it('shows left-panel chevrons immediately, then hides them for subfolders without their own subfolders', async () => {
     mockReadState.mockReturnValue({
       lastTranslationId: 'KJV',
       lastTranslationIds: ['KJV'],
@@ -2273,10 +2291,174 @@ describe('AccountControl', () => {
     });
 
     await waitFor(() => {
-      expect(screen.getByLabelText('Expand HasSub')).toBeInTheDocument();
+      expect(screen.queryByLabelText('Expand NoSub')).not.toBeInTheDocument();
     });
 
-    expect(screen.queryByLabelText('Expand NoSub')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Expand HasSub')).toBeInTheDocument();
+  });
+
+  it('renders subfolders before their subfolder checks finish and keeps the chevron when a check fails', async () => {
+    mockReadState.mockReturnValue({
+      lastTranslationId: 'KJV',
+      lastTranslationIds: ['KJV'],
+      cloudLinkedAccounts: [
+        {
+          provider: 'google',
+          providerAccountId: 'g-user-1',
+          email: 'g@example.com',
+          linkedAt: Date.now() - 5000,
+        },
+      ],
+      cloudConfigUpdatedAt: Date.now() - 10_000,
+      cloudConfigLastSyncedAt: Date.now() - 10_000,
+    });
+
+    window.localStorage.setItem('marginalia:provider-sync-preferences', JSON.stringify({
+      google: {
+        syncSettings: true,
+        syncFiles: true,
+        selectedTargets: [],
+      },
+      microsoft: {
+        syncSettings: false,
+        syncFiles: false,
+        selectedTargets: [],
+      },
+    }));
+
+    let resolveNoSubCheck: (children: unknown[]) => void = () => undefined;
+    mockGetStoredSessions.mockReturnValue({ google: googleSession });
+    mockGetFreshSessions.mockResolvedValue({ google: googleSession });
+    mockListFolderChildrenForSession.mockImplementation(async (_session: unknown, parentId: string) => {
+      if (parentId === 'root') {
+        return [
+          { id: 'g-no-sub', name: 'NoSub', kind: 'folder', sizeBytes: 0, hasChildren: true },
+          { id: 'g-broken', name: 'Broken', kind: 'folder', sizeBytes: 0, hasChildren: true },
+        ];
+      }
+
+      if (parentId === 'g-no-sub') {
+        return new Promise((resolve) => {
+          resolveNoSubCheck = resolve;
+        });
+      }
+
+      if (parentId === 'g-broken') {
+        throw new Error('Drive unavailable');
+      }
+
+      return [];
+    });
+
+    await renderAccountControl();
+    openAccountModal();
+
+    await waitFor(() => {
+      expect(screen.getByText('Google Drive')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByLabelText('Expand Google Drive'));
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('Expand NoSub')).toBeInTheDocument();
+      expect(screen.getByLabelText('Expand Broken')).toBeInTheDocument();
+    });
+
+    await waitFor(() => {
+      expect(mockListFolderChildrenForSession).toHaveBeenCalledWith(googleSession, 'g-broken', undefined);
+    });
+
+    await act(async () => {
+      resolveNoSubCheck([{ id: 'g-leaf-file', name: 'leaf.txt', kind: 'file', sizeBytes: 10, hasChildren: false }]);
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByLabelText('Expand NoSub')).not.toBeInTheDocument();
+    });
+
+    expect(screen.getByLabelText('Expand Broken')).toBeInTheDocument();
+  });
+
+  it('loads a subfolder normally when it is expanded before its subfolder check completes', async () => {
+    mockReadState.mockReturnValue({
+      lastTranslationId: 'KJV',
+      lastTranslationIds: ['KJV'],
+      cloudLinkedAccounts: [
+        {
+          provider: 'google',
+          providerAccountId: 'g-user-1',
+          email: 'g@example.com',
+          linkedAt: Date.now() - 5000,
+        },
+      ],
+      cloudConfigUpdatedAt: Date.now() - 10_000,
+      cloudConfigLastSyncedAt: Date.now() - 10_000,
+    });
+
+    window.localStorage.setItem('marginalia:provider-sync-preferences', JSON.stringify({
+      google: {
+        syncSettings: true,
+        syncFiles: true,
+        selectedTargets: [],
+      },
+      microsoft: {
+        syncSettings: false,
+        syncFiles: false,
+        selectedTargets: [],
+      },
+    }));
+
+    const pendingChecks: Array<(children: unknown[]) => void> = [];
+    mockGetStoredSessions.mockReturnValue({ google: googleSession });
+    mockGetFreshSessions.mockResolvedValue({ google: googleSession });
+    mockListFolderChildrenForSession.mockImplementation(async (_session: unknown, parentId: string) => {
+      if (parentId === 'root') {
+        return [
+          { id: 'g-slow', name: 'Slow', kind: 'folder', sizeBytes: 0, hasChildren: true },
+        ];
+      }
+
+      if (parentId === 'g-slow') {
+        return new Promise((resolve) => {
+          pendingChecks.push(resolve);
+        });
+      }
+
+      return [];
+    });
+
+    await renderAccountControl();
+    openAccountModal();
+
+    await waitFor(() => {
+      expect(screen.getByText('Google Drive')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByLabelText('Expand Google Drive'));
+
+    await waitFor(() => {
+      expect(pendingChecks).toHaveLength(1);
+    });
+
+    fireEvent.click(screen.getByLabelText('Expand Slow'));
+
+    await waitFor(() => {
+      expect(pendingChecks).toHaveLength(2);
+    });
+
+    await act(async () => {
+      pendingChecks[1]([{ id: 'g-slow-child', name: 'SlowChild', kind: 'folder', sizeBytes: 0, hasChildren: true }]);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('Google Drive/Slow/SlowChild')).toBeInTheDocument();
+    });
+
+    await act(async () => {
+      pendingChecks[0]([]);
+    });
+
+    expect(screen.getByLabelText('Collapse Slow')).toBeInTheDocument();
   });
 
   it('hides a right-panel folder chevron once expansion reveals it is completely empty', async () => {

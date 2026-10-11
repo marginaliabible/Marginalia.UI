@@ -35,7 +35,6 @@ export interface SubscriptionsPanelHandle {
 interface SubscriptionsPanelProps {
   binding: SubscriptionsBinding;
   staging: SubscriptionStaging;
-  hidden?: boolean;
   ref?: React.Ref<SubscriptionsPanelHandle>;
 }
 
@@ -62,7 +61,7 @@ function formatCount(count: number): string {
   return count === 1 ? '1 item' : `${count} items`;
 }
 
-const SubscriptionsPanel: React.FC<SubscriptionsPanelProps> = ({ binding, staging, hidden = false, ref }) => {
+const SubscriptionsPanel: React.FC<SubscriptionsPanelProps> = ({ binding, staging, ref }) => {
   const [expandedByParent, setExpandedByParent] = useState<Record<string, string>>({});
   const [flashKey, setFlashKey] = useState<string | null>(null);
   const [copiedUrl, setCopiedUrl] = useState<string | null>(null);
@@ -202,7 +201,7 @@ const SubscriptionsPanel: React.FC<SubscriptionsPanelProps> = ({ binding, stagin
   };
 
   return (
-    <div className="subscriptions-panel" hidden={hidden}>
+    <div className="subscriptions-panel">
       {binding.isCatalogLoading && libraries.every((library) => exposedTypes(library).length === 0) && (
         <p className="small text-body-secondary mb-0">Loading subscriptions...</p>
       )}
@@ -239,9 +238,17 @@ const SubscriptionsPanel: React.FC<SubscriptionsPanelProps> = ({ binding, stagin
                     <i className={`fa-solid ${isExpanded ? 'fa-chevron-down' : 'fa-chevron-right'}`} aria-hidden="true"></i>
                   </button>
                   <div className="cloud-folder-selected-name-wrap">
-                    <span className={`cloud-folder-selected-name fw-semibold${libraryOff ? ' is-unsupported' : ''}`} title={library.isBuiltIn ? undefined : library.key}>
-                      {library.name}
-                    </span>
+                    <button
+                      type="button"
+                      className={`btn btn-link btn-sm p-0 text-start cloud-folder-selected-path${libraryOff ? ' text-body-secondary' : ''}`}
+                      title={library.isBuiltIn ? undefined : library.key}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        toggleExpanded(ROOT_GROUP, row.key);
+                      }}
+                    >
+                      {`Subscriptions/\u200B${library.name}`}
+                    </button>
                     {!library.isBuiltIn && (
                       <button
                         type="button"

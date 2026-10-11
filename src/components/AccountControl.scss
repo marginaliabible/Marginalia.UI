@@ -201,10 +201,6 @@
   grid-template-columns: auto 1fr;
 }
 
-.cloud-folder-tree-row.is-active {
-  background: var(--bs-tertiary-bg);
-}
-
 .cloud-folder-tree-chevron {
   border: 0;
   background: transparent;
@@ -250,6 +246,10 @@
   display: flex;
   flex-direction: column;
   gap: 0.2rem;
+}
+
+.cloud-folder-selected-list + .subscriptions-panel {
+  margin-top: 0.2rem;
 }
 
 .cloud-folder-selected-row {
