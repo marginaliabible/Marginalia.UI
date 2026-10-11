@@ -131,7 +131,7 @@ async function fetchLibraryName(url: string): Promise<string | null> {
   let name: string | null = null;
   for (const candidate of buildFetchUrlCandidates(url)) {
     try {
-      const response = await fetchStorageAware(candidate, { cache: 'no-store' });
+      const response = await fetchStorageAware(candidate, { cache: 'no-cache' });
       if (!response.ok) {
         continue;
       }

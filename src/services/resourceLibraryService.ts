@@ -646,7 +646,7 @@ async function fetchJsonPayload(sourceUrl: string): Promise<unknown> {
 
   for (const candidate of buildFetchUrlCandidates(sourceUrl)) {
     try {
-      const response = await fetchStorageAware(candidate, { cache: 'no-store' });
+      const response = await fetchStorageAware(candidate, { cache: 'no-cache' });
       if (!response.ok) {
         failures.push(`${candidate} -> ${response.status}`);
         continue;

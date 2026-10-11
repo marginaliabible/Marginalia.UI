@@ -1,13 +1,36 @@
+import { getAuthServiceUrl, getConfiguredStorageBaseUrl, getDocumentRenderEpochOverride } from './storageEnv';
+
 const DEFAULT_STORAGE_HOST = 'storage.marginaliabible.com';
+
+/**
+ * The gateway serves `/documents/` files as immutable for a year when this epoch is in
+ * the URL. Bump it only after re-rendered output is in R2, or browsers will cache the
+ * old render under the new epoch.
+ */
+export const DOCUMENT_RENDER_EPOCH = '1';
+const DOCUMENT_RENDER_EPOCH_PARAM = 'r';
 
 let cachedStorageUserId = '';
 
-function getAuthServiceUrl(): string {
-  return (import.meta.env['VITE_AUTH_SERVICE_URL'] || '').trim().replace(/\/$/, '');
+function getDocumentRenderEpoch(): string {
+  return getDocumentRenderEpochOverride() || DOCUMENT_RENDER_EPOCH;
 }
 
-function getConfiguredStorageBaseUrl(): string {
-  return (import.meta.env['VITE_STORAGE_PUBLIC_BASE_URL'] || '').trim().replace(/\/$/, '');
+/** Add the render epoch query parameter to gateway `/documents/` URLs; other URLs are returned unchanged. */
+export function withDocumentRenderEpoch(url: string): string {
+  if (!isStorageGatewayUrl(url)) {
+    return url;
+  }
+  try {
+    const parsed = new URL(url);
+    if (!parsed.pathname.startsWith('/documents/')) {
+      return url;
+    }
+    parsed.searchParams.set(DOCUMENT_RENDER_EPOCH_PARAM, getDocumentRenderEpoch());
+    return parsed.toString();
+  } catch {
+    return url;
+  }
 }
 
 /** Keep the signed-in user id available for 401 session refresh retries. */
@@ -91,18 +114,19 @@ type FetchInit = RequestInit & { cache?: RequestCache };
 
 /**
  * fetch() that sends credentials for storage-gateway URLs and retries once after
- * refreshing the storage session when the Worker returns 401.
+ * refreshing the storage session when the Worker returns 401. Caching follows the
+ * gateway's Cache-Control unless the caller passes `cache`.
  */
 export async function fetchStorageAware(input: string, init: FetchInit = {}): Promise<Response> {
-  const url = String(input);
-  if (!isStorageGatewayUrl(url)) {
-    return fetch(url, init);
+  const original = String(input);
+  if (!isStorageGatewayUrl(original)) {
+    return fetch(original, init);
   }
 
+  const url = withDocumentRenderEpoch(original);
   const nextInit: FetchInit = {
     ...init,
     credentials: 'include',
-    cache: init.cache ?? 'no-store',
   };
 
   let response = await fetch(url, nextInit);

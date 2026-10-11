@@ -819,7 +819,7 @@ class BibleService {
     let lastStatus = 0;
 
     for (const candidate of buildFetchUrlCandidates(sourceUrl)) {
-      const response = await fetchStorageAware(candidate, { cache: 'no-store' });
+      const response = await fetchStorageAware(candidate, { cache: 'no-cache' });
       if (response.ok) {
         try {
           return { ok: true, payload: (await response.json()) as unknown };
