@@ -194,6 +194,30 @@ describe('mergeSyncedCloudConfigs', () => {
     expect(merged.config.resourceTagOverrides).toEqual({ 'abc:doc': { added: ['Old'], removed: [] } });
   });
 
+  it('merges tag colors per tag, keeping the color each tag was first given', () => {
+    const original = makeDoc(
+      { resourceTagColors: { Teaching: { color: '#0aa7a0', assignedAt: 1000 } } },
+      createFieldStamps(1000)
+    );
+    const newerDevice = makeDoc(
+      {
+        resourceTagColors: {
+          Teaching: { color: '#f1c40f', assignedAt: 5000 },
+          Notes: { color: '#e84393', assignedAt: 5000 },
+        },
+      },
+      createFieldStamps(9000)
+    );
+
+    const merged = mergeSyncedCloudConfigs([newerDevice, original]);
+
+    expect(merged.config.resourceTagColors).toEqual({
+      Teaching: { color: '#0aa7a0', assignedAt: 1000 },
+      Notes: { color: '#e84393', assignedAt: 5000 },
+    });
+    expect(syncedConfigsEqual(merged, mergeSyncedCloudConfigs([original, newerDevice]))).toBe(true);
+  });
+
   it('keeps the earliest non-empty userId', () => {
     const original = makeDoc({ userId: 'first@example.com' }, { userId: 1000 });
     const later = makeDoc({ userId: 'second@example.com' }, { userId: 9000 });

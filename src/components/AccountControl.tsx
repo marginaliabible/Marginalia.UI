@@ -23,6 +23,7 @@ import {
 import {
   SYNCED_CONFIG_FIELDS,
   createFieldStamps,
+  entryMergedFingerprint,
   fieldFingerprints,
   folderSelectionChanged,
   maxFieldStamp,
@@ -31,7 +32,6 @@ import {
   normalizeFieldStamps,
   readConfigOwner,
   removedFolderIds,
-  sourceRegistryFingerprint,
   stableStringify,
   syncedConfigsEqual,
   type SyncedConfigField,
@@ -39,6 +39,8 @@ import {
 } from '../services/cloudConfigMerge';
 import { queueCloudFolderSelection, reportSyncActivity, type CloudSyncStatus } from '../services/cloudControlService';
 import { useCloudSyncStatus } from '../hooks/useCloudSyncStatus';
+import { useResourceTagColorEntries } from '../hooks/useResourceTagColors';
+import { mergeIntoResourceTagColors, normalizeResourceTagColors } from '../utils/resourceTagColors';
 import { showToast } from '../services/toastService';
 import { formatProviderList, formatSyncCompleteToast, type FolderApplyResult } from '../utils/syncToastMessages';
 import {
@@ -321,6 +323,7 @@ function toLocalConfigView(
       : true,
     userId: remote.userId,
     providerFolderSelections: folders,
+    resourceTagColors: normalizeResourceTagColors(remote.resourceTagColors),
   };
 }
 
@@ -331,7 +334,7 @@ function localConfigDiffers(local: SyncedCloudConfig['config'], next: SyncedClou
   const userIdDiffers = !String(local.userId ?? '').trim() && Boolean(String(next.userId ?? '').trim());
   return userIdDiffers
     || SYNCED_CONFIG_FIELDS.some((field) => field !== 'userId' && localPrints[field] !== nextPrints[field])
-    || sourceRegistryFingerprint(local) !== sourceRegistryFingerprint(next);
+    || entryMergedFingerprint(local) !== entryMergedFingerprint(next);
 }
 
 interface ReconcileResult {
@@ -477,6 +480,7 @@ const AccountControl: React.FC<AccountControlProps> = ({ subscriptions }) => {
     ready,
     userId,
   } = useAppSelector((state) => state.ui);
+  const resourceTagColors = useResourceTagColorEntries();
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
@@ -512,10 +516,10 @@ const AccountControl: React.FC<AccountControlProps> = ({ subscriptions }) => {
   const lastSyncActivityReportAtRef = useRef(0);
   const fieldStampsRef = useRef<SyncedFieldStamps>(createFieldStamps(0));
   const lastFingerprintsRef = useRef<Record<SyncedConfigField, string> | null>(null);
-  const lastSourceUrlsFingerprintRef = useRef('');
+  const lastEntryMergedFingerprintRef = useRef('');
   // Fingerprints of the last config pulled from the cloud; state catching up to it is not a local edit.
   const appliedFingerprintsRef = useRef<Record<SyncedConfigField, string> | null>(null);
-  const appliedSourceUrlsFingerprintRef = useRef<string | null>(null);
+  const appliedEntryMergedFingerprintRef = useRef<string | null>(null);
   const declinedUserIdRef = useRef<string | null>(null);
 
   const configSnapshot = useMemo<SyncedCloudConfig['config']>(() => {
@@ -540,6 +544,7 @@ const AccountControl: React.FC<AccountControlProps> = ({ subscriptions }) => {
         google: providerSyncPreferences.google.selectedTargets,
         microsoft: providerSyncPreferences.microsoft.selectedTargets,
       },
+      resourceTagColors,
     };
   }, [
     selectedTranslationId,
@@ -559,10 +564,11 @@ const AccountControl: React.FC<AccountControlProps> = ({ subscriptions }) => {
     translatorParagraphMarks,
     userId,
     providerSyncPreferences,
+    resourceTagColors,
   ]);
 
   const syncedFieldFingerprints = useMemo(() => fieldFingerprints(configSnapshot), [configSnapshot]);
-  const sourceUrlsFingerprint = useMemo(() => sourceRegistryFingerprint(configSnapshot), [configSnapshot]);
+  const entryMergedFingerprintValue = useMemo(() => entryMergedFingerprint(configSnapshot), [configSnapshot]);
 
   const activeSession = useMemo(() => getMostRecentlyGrantedSession(sessions), [sessions]);
 
@@ -742,7 +748,8 @@ const AccountControl: React.FC<AccountControlProps> = ({ subscriptions }) => {
 
   const applyRemoteConfig = useCallback(async (remote: SyncedCloudConfig['config']) => {
     appliedFingerprintsRef.current = fieldFingerprints(remote);
-    appliedSourceUrlsFingerprintRef.current = sourceRegistryFingerprint(remote);
+    appliedEntryMergedFingerprintRef.current = entryMergedFingerprint(remote);
+    mergeIntoResourceTagColors(remote.resourceTagColors);
 
     dispatch(restoreState({
       selectedTranslationId: remote.lastTranslationId || 'KJV',
@@ -1229,9 +1236,9 @@ const AccountControl: React.FC<AccountControlProps> = ({ subscriptions }) => {
     }
 
     const previous = lastFingerprintsRef.current;
-    const previousSourceUrls = lastSourceUrlsFingerprintRef.current;
+    const previousEntryMerged = lastEntryMergedFingerprintRef.current;
     lastFingerprintsRef.current = syncedFieldFingerprints;
-    lastSourceUrlsFingerprintRef.current = sourceUrlsFingerprint;
+    lastEntryMergedFingerprintRef.current = entryMergedFingerprintValue;
 
     // Baseline capture: this is not a modification.
     if (!previous) {
@@ -1245,9 +1252,9 @@ const AccountControl: React.FC<AccountControlProps> = ({ subscriptions }) => {
       && previous[field] !== syncedFieldFingerprints[field]
       && applied?.[field] !== syncedFieldFingerprints[field]
     ));
-    const sourceUrlsChanged = previousSourceUrls !== sourceUrlsFingerprint
-      && appliedSourceUrlsFingerprintRef.current !== sourceUrlsFingerprint;
-    if (changedFields.length === 0 && !sourceUrlsChanged) {
+    const entryMergedChanged = previousEntryMerged !== entryMergedFingerprintValue
+      && appliedEntryMergedFingerprintRef.current !== entryMergedFingerprintValue;
+    if (changedFields.length === 0 && !entryMergedChanged) {
       return;
     }
 
@@ -1265,7 +1272,7 @@ const AccountControl: React.FC<AccountControlProps> = ({ subscriptions }) => {
     setConfigUpdatedAt(stamp);
     persistCloudState({ cloudConfigUpdatedAt: stamp, cloudFieldUpdatedAt: nextStamps });
     setHasPendingSync(true);
-  }, [ready, syncedFieldFingerprints, sourceUrlsFingerprint, persistCloudState]);
+  }, [ready, syncedFieldFingerprints, entryMergedFingerprintValue, persistCloudState]);
 
   useEffect(() => {
     // Wait for linked accounts to load; the first render's closure still has none.

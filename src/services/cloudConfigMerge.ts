@@ -4,11 +4,12 @@ import {
   type SyncedCloudConfig,
   type SyncedCloudFolderSelection,
 } from './cloudConfigProviderService';
+import { mergeResourceTagColors } from '../utils/resourceTagColors';
 
 type SyncedConfig = SyncedCloudConfig['config'];
 
-// sourceUrls (with its sourceUrlAddedAt / sourceUrlTombstones stamps) is intentionally absent: it
-// merges per URL instead of per field.
+// sourceUrls (with its sourceUrlAddedAt / sourceUrlTombstones stamps) and resourceTagColors are
+// intentionally absent: they merge per URL / per tag instead of per field.
 export const SYNCED_CONFIG_FIELDS = [
   'lastTranslationId',
   'lastTranslationIds',
@@ -193,19 +194,21 @@ function mergeSourceUrls(docs: SyncedCloudConfig[]): Pick<SyncedConfig, 'sourceU
   };
 }
 
-/** Everything that decides the merged sourceUrls; a change to any of it must be synced. */
-export function sourceRegistryFingerprint(config: SyncedConfig): string {
+/** Everything merged per entry rather than per field (sourceUrls, tag colors); a change to any of it must be synced. */
+export function entryMergedFingerprint(config: SyncedConfig): string {
   return stableStringify({
     sourceUrls: config.sourceUrls ?? [],
     sourceUrlAddedAt: config.sourceUrlAddedAt ?? {},
     sourceUrlTombstones: config.sourceUrlTombstones ?? {},
+    resourceTagColors: config.resourceTagColors ?? {},
   });
 }
 
 /**
  * Commutative, idempotent merge: each field takes the value with the newest stamp (ties broken by
- * value so every device picks the same winner), userId keeps the earliest owner, and sourceUrls is
- * the union of all copies minus URLs removed after they were last added.
+ * value so every device picks the same winner), userId keeps the earliest owner, sourceUrls is
+ * the union of all copies minus URLs removed after they were last added, and each tag keeps the
+ * color it was first given on any device.
  */
 export function mergeSyncedCloudConfigs(docs: SyncedCloudConfig[]): SyncedCloudConfig {
   if (docs.length === 0) {
@@ -249,6 +252,7 @@ export function mergeSyncedCloudConfigs(docs: SyncedCloudConfig[]): SyncedCloudC
   }
 
   Object.assign(config, mergeSourceUrls(docs));
+  config.resourceTagColors = mergeResourceTagColors(docs.map((doc) => doc.config.resourceTagColors));
 
   const linkedAccounts = docs.reduce(
     (accounts, doc) => mergeLinkedAccounts(accounts, doc.linkedAccounts),

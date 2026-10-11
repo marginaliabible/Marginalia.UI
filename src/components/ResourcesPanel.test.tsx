@@ -22,9 +22,8 @@ jest.mock('../services/bibleService', () => ({
   },
 }));
 
-jest.mock('../utils/resourceTagColors', () => ({
-  getOrAssignResourceTagColors: jest.fn(() => new Map()),
-  TAG_COLOR_PALETTE: [],
+jest.mock('../hooks/useResourceTagColors', () => ({
+  useResourceTagColors: jest.fn(() => new Map()),
 }));
 
 const resourcesTab: PanelTab = {

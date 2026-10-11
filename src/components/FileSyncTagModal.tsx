@@ -3,7 +3,8 @@ import { createPortal } from 'react-dom';
 import CreatableSelect from 'react-select/creatable';
 import type { MultiValue } from 'react-select';
 import { createMultiSelectStyles } from './sharedMultiSelectStyles';
-import { getOrAssignResourceTagColors, getStoredResourceTagColors } from '../utils/resourceTagColors';
+import { assignResourceTagColors, getResourceTagColors } from '../utils/resourceTagColors';
+import { useResourceTagColors } from '../hooks/useResourceTagColors';
 import './FileSyncTagModal.scss';
 
 const DEFAULT_SEED_TAGS = ['Teaching', 'Research Materials', 'Syllabus'];
@@ -21,14 +22,10 @@ interface FileSyncTagModalProps {
 }
 
 const FileSyncTagModal: React.FC<FileSyncTagModalProps> = ({ itemLabel, initialTags, onDone, onClose }) => {
-  const [tagColors, setTagColors] = useState<Map<string, string>>(() => {
-    const stored = getStoredResourceTagColors();
-    if (stored.size > 0) {
-      return stored;
-    }
-
-    return getOrAssignResourceTagColors(DEFAULT_SEED_TAGS);
-  });
+  const [seedTags] = useState(() => (
+    Object.keys(getResourceTagColors()).length === 0 ? DEFAULT_SEED_TAGS : undefined
+  ));
+  const tagColors = useResourceTagColors(seedTags);
   const [selectedTags, setSelectedTags] = useState<string[]>(initialTags);
 
   const options = useMemo<TagOption[]>(() => {
@@ -52,8 +49,7 @@ const FileSyncTagModal: React.FC<FileSyncTagModalProps> = ({ itemLabel, initialT
       return;
     }
 
-    const nextColors = getOrAssignResourceTagColors([...tagColors.keys(), name]);
-    setTagColors(nextColors);
+    assignResourceTagColors([name]);
     setSelectedTags((current) => (current.includes(name) ? current : [...current, name]));
   };
 

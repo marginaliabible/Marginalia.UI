@@ -2,6 +2,7 @@ import type { FederatedProvider, LinkedCloudAccount, MarginaliaState } from '../
 import type { FederatedSession } from './federatedAuthService';
 import type { SyncedConfigField } from './cloudConfigMerge';
 import { isSupportedMarkupFileName } from '../utils/supportedMarkupFileTypes';
+import type { ResourceTagColors } from '../utils/resourceTagColors';
 
 const GOOGLE_APPDATA_FILENAME = 'marginalia-config.json';
 const MICROSOFT_CONFIG_PATH = 'marginalia-config.json';
@@ -134,6 +135,7 @@ export interface SyncedCloudConfig {
     | 'userId'
   > & {
     providerFolderSelections?: Partial<Record<FederatedProvider, SyncedCloudFolderSelection[]>>;
+    resourceTagColors?: ResourceTagColors;
   };
   // Absent on files written by clients that predate per-field stamps.
   fieldUpdatedAt?: Partial<Record<SyncedConfigField, number>>;

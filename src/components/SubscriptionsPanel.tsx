@@ -9,7 +9,7 @@ import {
   typeItemKey,
   type SubscriptionDocumentType,
 } from '../utils/sourceSubscriptions';
-import { getStoredResourceTagColors } from '../utils/resourceTagColors';
+import { useResourceTagColors } from '../hooks/useResourceTagColors';
 import FileSyncTagModal from './FileSyncTagModal';
 import FileSyncTagRowTags from './FileSyncTagRowTags';
 
@@ -65,7 +65,7 @@ const SubscriptionsPanel: React.FC<SubscriptionsPanelProps> = ({ binding, stagin
   const [expandedByParent, setExpandedByParent] = useState<Record<string, string>>({});
   const [flashKey, setFlashKey] = useState<string | null>(null);
   const [copiedUrl, setCopiedUrl] = useState<string | null>(null);
-  const [tagColors, setTagColors] = useState<Map<string, string>>(() => getStoredResourceTagColors());
+  const tagColors = useResourceTagColors();
   const [tagModalTarget, setTagModalTarget] = useState<{
     resourceKey: string;
     label: string;
@@ -411,7 +411,6 @@ const SubscriptionsPanel: React.FC<SubscriptionsPanelProps> = ({ binding, stagin
               tagModalTarget.resourceKey,
               buildResourceTagOverride(tagModalTarget.publisherTags, nextTags)
             );
-            setTagColors(getStoredResourceTagColors());
             setTagModalTarget(null);
           }}
           onClose={() => setTagModalTarget(null)}

@@ -17,7 +17,7 @@ import SubscriptionsPanel, {
   type SubscriptionsPanelHandle,
 } from './SubscriptionsPanel';
 import SubscriptionConnectModal from './SubscriptionConnectModal';
-import { getStoredResourceTagColors } from '../utils/resourceTagColors';
+import { useResourceTagColors } from '../hooks/useResourceTagColors';
 import type { SubscriptionsBinding } from '../models/subscription';
 import { findStarredTranslationBlock, useSubscriptionStaging } from '../hooks/useSubscriptionStaging';
 import { showToast } from '../services/toastService';
@@ -507,7 +507,7 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
   const [highlightNodeKey, setHighlightNodeKey] = useState<string | null>(null);
   const [highlightServiceProvider, setHighlightServiceProvider] = useState<FederatedProvider | null>(null);
   const [rightExpandedKeyByParent, setRightExpandedKeyByParent] = useState<Record<string, string | null>>({});
-  const [tagColors, setTagColors] = useState<Map<string, string>>(() => getStoredResourceTagColors());
+  const tagColors = useResourceTagColors();
   const [flashTagAddKey, setFlashTagAddKey] = useState<string | null>(null);
   const [tagModalTarget, setTagModalTarget] = useState<{
     rootSelectionKey: string;
@@ -1892,7 +1892,6 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
               setFlashTagAddKey((current) => (current === itemKey ? null : current));
             }
 
-            setTagColors(getStoredResourceTagColors());
             setTagModalTarget(null);
           }}
           onClose={() => setTagModalTarget(null)}

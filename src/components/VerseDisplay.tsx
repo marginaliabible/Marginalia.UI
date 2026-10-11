@@ -2,7 +2,7 @@ import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 're
 import type { BibleBook, BibleChapter } from '../models/bible';
 import MiniSearchBar, { type MiniSearchBarHandle } from './MiniSearchBar';
 import type { QuickJumpTarget } from '../models/bible';
-import { getOrAssignResourceTagColors } from '../utils/resourceTagColors';
+import { useResourceTagColors } from '../hooks/useResourceTagColors';
 import {
   markupFlagsFromBible,
   renderVerseMarkers,
@@ -265,10 +265,11 @@ const VerseDisplay: React.FC<VerseDisplayProps> = ({
 
   const hiddenTagSet = useMemo(() => new Set(resourceHiddenTags), [resourceHiddenTags]);
 
-  const resourceTagColors = useMemo(() => {
-    const tags = Array.from(new Set(Array.from(resourceVerseTagsByVerse.values()).flat()));
-    return getOrAssignResourceTagColors(tags);
-  }, [resourceVerseTagsByVerse]);
+  const resourceTags = useMemo(
+    () => Array.from(new Set(Array.from(resourceVerseTagsByVerse.values()).flat())),
+    [resourceVerseTagsByVerse]
+  );
+  const resourceTagColors = useResourceTagColors(resourceTags);
 
   const selectedVerseSet = useMemo(() => new Set(selectedVerses), [selectedVerses]);
 

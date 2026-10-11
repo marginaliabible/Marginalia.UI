@@ -4,7 +4,8 @@ import { useAppDispatch, useAppSelector } from '../store/hooks';
 import { setResourceHiddenTags, setResourceVerseMatchMode } from '../store/slices/uiSlice';
 import { bibleService, type VerseResourcesPayload } from '../services/bibleService';
 import { buildDocumentLinkRoute, REOPEN_DOCUMENT_LINK_EVENT } from '../App';
-import { getOrAssignResourceTagColors, TAG_COLOR_PALETTE } from '../utils/resourceTagColors';
+import { TAG_COLOR_PALETTE } from '../utils/resourceTagColors';
+import { useResourceTagColors } from '../hooks/useResourceTagColors';
 import { versesFromContext } from '../utils/selectedVerseContext';
 import { mergePageLinks, mergeVerseResourcePayloads, type ResourceVerseMatchMode } from '../utils/verseResources';
 import { markupFlagsFromBible } from '../utils/verseMarkup';
@@ -45,7 +46,6 @@ const ResourcesPanel: React.FC<ResourcesPanelProps> = ({ tab, isActive, onBefore
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [versePayloads, setVersePayloads] = useState<VerseResourcesPayload[]>([]);
-  const [tagColors, setTagColors] = useState<Map<string, string>>(new Map());
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -121,13 +121,7 @@ const ResourcesPanel: React.FC<ResourcesPanelProps> = ({ tab, isActive, onBefore
     [versePayloads, matchMode]
   );
 
-  useEffect(() => {
-    if (!payload) {
-      return;
-    }
-
-    setTagColors(getOrAssignResourceTagColors(payload.tags));
-  }, [payload]);
+  const tagColors = useResourceTagColors(payload?.tags);
 
   const verseTexts = useMemo(() => {
     if (!verseContext || !currentBible) {

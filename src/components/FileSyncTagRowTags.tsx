@@ -3,7 +3,7 @@ import React from 'react';
 interface FileSyncTagRowTagsProps {
   effectiveTags: string[];
   ownTags: string[];
-  tagColors: Map<string, string>;
+  tagColors: ReadonlyMap<string, string>;
   flashAddButton?: boolean;
   onAdd: (event: React.MouseEvent) => void;
   onEditOwn: (event: React.MouseEvent) => void;
