@@ -602,8 +602,11 @@ const AccountControl: React.FC<AccountControlProps> = ({ subscriptions }) => {
     }
   }, [missingProviderPrompts]);
 
-  // Background polling only runs while a watch started by an Account Sync Apply is outstanding.
+  // Background polling only runs while a watch started by an Account Sync Apply is outstanding, or
+  // until one status has been read for the current file-sync providers (to spot a pending reconnect).
   const [syncWatch, setSyncWatch] = useState<SyncWatch | null>(null);
+  const reconnectCheckKey = userId && fileSyncProviders.length > 0 ? `${userId}|${fileSyncProviders.join(',')}` : '';
+  const [reconnectCheckedKey, setReconnectCheckedKey] = useState('');
   const {
     status: cloudSyncStatus,
     fetchId: cloudSyncFetchId,
@@ -611,12 +614,35 @@ const AccountControl: React.FC<AccountControlProps> = ({ subscriptions }) => {
   } = useCloudSyncStatus({
     userId,
     providers: fileSyncProviders,
-    enabled: isModalOpen || syncWatch !== null,
+    enabled: isModalOpen || syncWatch !== null || reconnectCheckKey !== reconnectCheckedKey,
   });
   const cloudSyncFetchIdRef = useRef(cloudSyncFetchId);
   useEffect(() => {
     cloudSyncFetchIdRef.current = cloudSyncFetchId;
   }, [cloudSyncFetchId]);
+
+  useEffect(() => {
+    if (!reconnectCheckKey || reconnectCheckKey === reconnectCheckedKey || !cloudSyncStatus) {
+      return;
+    }
+    if (fileSyncProviders.every((provider) => cloudSyncStatus.providers[provider])) {
+      setReconnectCheckedKey(reconnectCheckKey);
+    }
+  }, [cloudSyncStatus, fileSyncProviders, reconnectCheckKey, reconnectCheckedKey]);
+
+  // Signed back in with File Sync on, but the restored selection hasn't been applied yet. Until the
+  // user applies, CloudControlService treats the provider as still signed out.
+  const [appliedReconnects, setAppliedReconnects] = useState<Partial<Record<FederatedProvider, string>>>({});
+  const reconnectPendingProviders = useMemo(() => fileSyncProviders.filter((provider) => {
+    const disconnectedAt = cloudSyncStatus?.providers?.[provider]?.disconnectedAt;
+    return Boolean(disconnectedAt) && appliedReconnects[provider] !== disconnectedAt;
+  }), [appliedReconnects, cloudSyncStatus, fileSyncProviders]);
+  const reconnectPendingRef = useRef(reconnectPendingProviders);
+  reconnectPendingRef.current = reconnectPendingProviders;
+  const reconnectPendingByProvider = useMemo<Partial<Record<FederatedProvider, boolean>>>(
+    () => Object.fromEntries(reconnectPendingProviders.map((provider) => [provider, true])),
+    [reconnectPendingProviders]
+  );
 
   const startSyncWatch = useCallback((providers: FederatedProvider[]) => {
     setSyncWatch((current) => startOrExtendSyncWatch(current, providers, Date.now(), cloudSyncFetchIdRef.current));
@@ -852,11 +878,19 @@ const AccountControl: React.FC<AccountControlProps> = ({ subscriptions }) => {
    * Reads every signed-in provider's copy, merges it with `localDoc`, applies the result locally,
    * and writes it back to each provider whose copy differs. Providers whose read failed are not
    * written, so an unreadable copy is never clobbered.
+   *
+   * `forceQueueProviders` are notified even when their selection is unchanged (the first Apply
+   * after signing back in); `skipQueueProviders` are never notified.
    */
   const reconcileWithCloud = useCallback(async (
     localDoc: SyncedCloudConfig,
     currentSessions: Partial<Record<FederatedProvider, FederatedSession>>,
-    options: { queueFolderChanges: boolean }
+    options: {
+      queueFolderChanges: boolean;
+      trigger?: 'apply' | 'background';
+      forceQueueProviders?: FederatedProvider[];
+      skipQueueProviders?: FederatedProvider[];
+    }
   ): Promise<ReconcileResult> => {
     const failures: string[] = [];
     const remotes = new Map<FederatedProvider, SyncedCloudConfig | null>();
@@ -920,9 +954,14 @@ const AccountControl: React.FC<AccountControlProps> = ({ subscriptions }) => {
     }
 
     const written: FederatedProvider[] = [];
+    const upToDate: FederatedProvider[] = [];
     for (const [provider, remote] of remotes) {
       const session = currentSessions[provider];
-      if (!session || syncedConfigsEqual(remote, merged)) {
+      if (!session) {
+        continue;
+      }
+      if (syncedConfigsEqual(remote, merged)) {
+        upToDate.push(provider);
         continue;
       }
 
@@ -950,14 +989,18 @@ const AccountControl: React.FC<AccountControlProps> = ({ subscriptions }) => {
     const libraryUrls: string[] = [];
     const queuedProviders: FederatedProvider[] = [];
     if (options.queueFolderChanges && ownerUserId) {
-      await Promise.all(written.map(async (provider) => {
-        if (!providerSyncPreferences[provider].syncFiles) {
+      const forced = new Set(options.forceQueueProviders ?? []);
+      const skipped = new Set(options.skipQueueProviders ?? []);
+      // A forced provider whose copy was already current still needs the notification.
+      const candidates = [...written, ...upToDate.filter((provider) => forced.has(provider))];
+      await Promise.all(candidates.map(async (provider) => {
+        if (!providerSyncPreferences[provider].syncFiles || skipped.has(provider)) {
           return;
         }
 
         const before = remotes.get(provider)?.config.providerFolderSelections?.[provider];
         const after = merged.config.providerFolderSelections?.[provider];
-        if (!folderSelectionChanged(before, after)) {
+        if (!forced.has(provider) && !folderSelectionChanged(before, after)) {
           return;
         }
 
@@ -967,7 +1010,11 @@ const AccountControl: React.FC<AccountControlProps> = ({ subscriptions }) => {
             provider,
             removed: removedFolderIds(before, after),
             accessToken: currentSessions[provider]?.accessToken,
+            trigger: options.trigger ?? 'background',
           });
+          if (result?.awaitingApply) {
+            return;
+          }
           queuedProviders.push(provider);
           const libraryUrl = String(result?.libraryUrl ?? '').trim();
           if (libraryUrl) {
@@ -1021,7 +1068,11 @@ const AccountControl: React.FC<AccountControlProps> = ({ subscriptions }) => {
         setStatusMessage(null);
       }
 
-      const result = await reconcileWithCloud(buildLocalDoc(), currentSessions, { queueFolderChanges: true });
+      const result = await reconcileWithCloud(buildLocalDoc(), currentSessions, {
+        queueFolderChanges: true,
+        trigger: 'background',
+        skipQueueProviders: reconnectPendingRef.current,
+      });
 
       if (result.failures.length > 0) {
         setSyncState('error');
@@ -1410,6 +1461,22 @@ const AccountControl: React.FC<AccountControlProps> = ({ subscriptions }) => {
     setFileSyncFocusRequest({ provider, requestId });
   }, []);
 
+  // Opened on every load (and whenever another provider starts awaiting it) until the user applies.
+  const reconnectPendingKey = reconnectPendingProviders.join(',');
+  const autoOpenedReconnectKeyRef = useRef('');
+  useEffect(() => {
+    if (reconnectPendingKey === autoOpenedReconnectKeyRef.current) {
+      return;
+    }
+    autoOpenedReconnectKeyRef.current = reconnectPendingKey;
+    const [firstPending] = reconnectPendingRef.current;
+    if (!firstPending) {
+      return;
+    }
+    setIsModalOpen(true);
+    focusFileSyncService(firstPending);
+  }, [focusFileSyncService, reconnectPendingKey]);
+
   const handleDetachProvider = useCallback((provider: FederatedProvider) => {
     const nextLinked = linkedAccounts.filter((entry) => entry.provider !== provider);
     setLinkedAccounts(nextLinked);
@@ -1528,8 +1595,23 @@ const AccountControl: React.FC<AccountControlProps> = ({ subscriptions }) => {
         ...toSyncedCloudConfig({ ...configSnapshot, providerFolderSelections: nextFolders }, linkedAccounts, stamp),
         fieldUpdatedAt: { ...nextStamps },
       };
-      const result = await reconcileWithCloud(localDoc, currentSessions, { queueFolderChanges: true });
+      const reconnecting = reconnectPendingRef.current;
+      const result = await reconcileWithCloud(localDoc, currentSessions, {
+        queueFolderChanges: true,
+        trigger: 'apply',
+        forceQueueProviders: reconnecting,
+      });
       queuedProviders = result.queuedProviders;
+      const appliedReconnecting = reconnecting.filter((provider) => queuedProviders.includes(provider));
+      if (appliedReconnecting.length > 0) {
+        setAppliedReconnects((current) => ({
+          ...current,
+          ...Object.fromEntries(appliedReconnecting.map((provider) => [
+            provider,
+            cloudSyncStatus?.providers?.[provider]?.disconnectedAt ?? '',
+          ])),
+        }));
+      }
       if (queuedProviders.length > 0) {
         if (options.watchSync) {
           startSyncWatch(queuedProviders);
@@ -1573,6 +1655,7 @@ const AccountControl: React.FC<AccountControlProps> = ({ subscriptions }) => {
       return { queuedProviders, failures: [message] };
     }
   }, [
+    cloudSyncStatus,
     configSnapshot,
     dispatch,
     linkedAccounts,
@@ -1769,6 +1852,7 @@ const AccountControl: React.FC<AccountControlProps> = ({ subscriptions }) => {
                     onSelectionsChange={handleApplyFromAccountSync}
                     onConnectRequested={handleConnectRequestedFromPicker}
                     onDirtyChange={setHasUnsavedFileSyncChanges}
+                    reconnectPending={reconnectPendingByProvider}
                     subscriptions={subscriptions}
                     ref={folderPickerRef}
                   />
@@ -1827,7 +1911,7 @@ const AccountControl: React.FC<AccountControlProps> = ({ subscriptions }) => {
                     <button
                       type="button"
                       className="btn btn-primary"
-                      disabled={!hasUnsavedFileSyncChanges}
+                      disabled={!hasUnsavedFileSyncChanges && reconnectPendingProviders.length === 0}
                       onClick={() => folderPickerRef.current?.apply()}
                     >
                       Apply

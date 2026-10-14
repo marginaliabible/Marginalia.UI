@@ -8,11 +8,16 @@ export interface CloudFolderSelectionRequest {
   // Transient credential used only to enumerate the selected folders right now; CloudControlService
   // never persists it.
   accessToken?: string;
+  // 'background' marks a settings reconcile rather than the user's Apply; it never resumes a
+  // provider that was signed out.
+  trigger: 'apply' | 'background';
 }
 
 export interface CloudFolderSelectionResponse {
   ok: boolean;
   message?: string;
+  // The provider is still awaiting the user's first Apply after signing back in; nothing was queued.
+  awaitingApply?: boolean;
   libraryUrl?: string | null;
   userId?: string;
   provider?: string;
@@ -30,6 +35,9 @@ export interface CloudProviderSyncStatus {
   startsAt?: string;
   lastCompletedAt?: string;
   failedCount?: number;
+  // Set (with state 'attention') while the provider was signed out and its restored selection
+  // has not been applied since signing back in.
+  disconnectedAt?: string;
 }
 
 export interface CloudSyncStatus {

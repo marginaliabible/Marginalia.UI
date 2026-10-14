@@ -61,6 +61,8 @@ interface CloudFolderPickerProps {
   onSelectionsChange: (next: Record<FederatedProvider, FolderSelectionTarget[]>) => Promise<FolderApplyResult>;
   onConnectRequested: (provider: FederatedProvider) => void;
   onDirtyChange?: (isDirty: boolean) => void;
+  // Providers signed back in whose restored selections have not been applied yet.
+  reconnectPending?: Partial<Record<FederatedProvider, boolean>>;
   subscriptions?: SubscriptionsBinding;
   ref?: React.Ref<CloudFolderPickerHandle>;
 }
@@ -491,6 +493,7 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
   onSelectionsChange,
   onConnectRequested,
   onDirtyChange,
+  reconnectPending,
   subscriptions,
   ref,
 }) => {
@@ -1488,8 +1491,19 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
     }
   }, [loadChildren, rightExpandedKeyByParent, rightVisibleRows, sessions]);
 
+  const reconnectNotices = (Object.keys(ROOT_LABEL) as FederatedProvider[])
+    .filter((provider) => reconnectPending?.[provider])
+    .map((provider) => ({ provider, folderCount: initialSelections[provider].length }));
+
   return (
     <section className="cloud-folder-picker" aria-label="File Sync">
+      {reconnectNotices.map(({ provider, folderCount }) => (
+        <div key={provider} className="alert alert-info mb-0 cloud-folder-reconnect-notice" role="status">
+          Restored {folderCount} {folderCount === 1 ? 'folder' : 'folders'} from your previous {ROOT_LABEL[provider]} connection.
+          Review and Apply to resume syncing.
+        </div>
+      ))}
+
       <div ref={layoutRef} className="cloud-folder-picker-layout">
         <div className="cloud-folder-picker-left" style={{ flexBasis: `${splitPercent}%` }}>
           {loadingRoots && <p className="small text-body-secondary mb-0">Loading folder roots...</p>}

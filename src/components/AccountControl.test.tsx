@@ -581,12 +581,103 @@ describe('AccountControl', () => {
         provider: 'microsoft',
         removed: [],
         accessToken: msSession.accessToken,
+        trigger: 'background',
       });
     });
     expect(mockQueueCloudFolderSelection).not.toHaveBeenCalledWith(expect.objectContaining({ provider: 'google' }));
 
     const persisted = JSON.parse(window.localStorage.getItem('marginalia:provider-sync-preferences') || '{}');
     expect(persisted.microsoft.selectedTargets).toEqual([msTarget]);
+  });
+
+  describe('signing back in to a provider that was signed out', () => {
+    const disconnectedAt = '2026-10-01T00:00:00.000Z';
+    const restoredTarget = { id: 'g-notes', kind: 'folder', name: 'Notes', path: 'Google Drive/Notes', tags: ['Teaching'] };
+    const awaitingApplyStatus = {
+      ok: true,
+      userId: 'user-cloud-1',
+      overall: null,
+      pollAfterMs: 60_000,
+      providers: { google: { state: 'attention', disconnectedAt } },
+    };
+
+    function setUpSignedBackIn(syncFiles: boolean) {
+      mockUseAppSelector.mockImplementation((selector: (state: any) => any) => selector({
+        ui: { ...baseUiState, userId: 'user-cloud-1' },
+      }));
+      window.localStorage.setItem('marginalia:provider-sync-preferences', JSON.stringify({
+        google: { syncSettings: true, syncFiles, selectedTargets: [restoredTarget] },
+        microsoft: { syncSettings: false, syncFiles: false, selectedTargets: [] },
+      }));
+      mockReadState.mockReturnValue({
+        userId: 'user-cloud-1',
+        lastTranslationId: 'KJV',
+        lastTranslationIds: ['KJV'],
+        cloudLinkedAccounts: [linkedBothProviders()[0]],
+        cloudConfigUpdatedAt: Date.now() - 10_000,
+        cloudConfigLastSyncedAt: Date.now() - 10_000,
+      });
+      // The provider's own copy still names the restored selection, so no reconcile sees it change.
+      installFakeCloud({
+        google: {
+          schemaVersion: 1,
+          updatedAt: Date.now() - 10_000,
+          linkedAccounts: [linkedBothProviders()[0]],
+          config: { providerFolderSelections: { google: [restoredTarget], microsoft: [] } },
+        },
+      });
+      mockGetStoredSessions.mockReturnValue({ google: googleSession });
+      mockGetFreshSessions.mockResolvedValue({ google: googleSession });
+      mockFetchCloudSyncStatus.mockResolvedValue(awaitingApplyStatus);
+    }
+
+    it('opens Account Sync on load with the restored selection, and Apply resumes syncing without any edits', async () => {
+      setUpSignedBackIn(true);
+
+      await renderAccountControl();
+
+      expect(await screen.findByRole('region', { name: 'File Sync' })).toBeInTheDocument();
+      expect(await screen.findByText(/Restored 1 folder from your previous Google Drive connection\./)).toBeInTheDocument();
+      expect(mockQueueCloudFolderSelection).not.toHaveBeenCalled();
+      expect(screen.getByRole('button', { name: 'Apply' })).toBeEnabled();
+
+      mockQueueCloudFolderSelection.mockResolvedValue({ ok: true });
+      mockFetchCloudSyncStatus.mockResolvedValue({
+        ...awaitingApplyStatus,
+        overall: 'queued',
+        providers: { google: { state: 'queued', startsAt: new Date(Date.now() + 5 * 60_000).toISOString() } },
+      });
+      fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
+
+      await waitFor(() => {
+        expect(mockQueueCloudFolderSelection).toHaveBeenCalledWith(expect.objectContaining({
+          userId: 'user-cloud-1',
+          provider: 'google',
+          removed: [],
+          trigger: 'apply',
+        }));
+      });
+      await waitFor(() => {
+        expect(screen.queryByText(/Restored 1 folder/)).not.toBeInTheDocument();
+      });
+      expect(mockQueueCloudFolderSelection).toHaveBeenCalledTimes(1);
+    });
+
+    it('neither prompts nor queues File Sync when the provider was signed back in for settings only', async () => {
+      setUpSignedBackIn(false);
+
+      await renderAccountControl();
+      await waitFor(() => {
+        expect(mockReadCloudConfigForSession).toHaveBeenCalled();
+      });
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      });
+
+      expect(screen.queryByRole('region', { name: 'File Sync' })).not.toBeInTheDocument();
+      expect(mockFetchCloudSyncStatus).not.toHaveBeenCalled();
+      expect(mockQueueCloudFolderSelection).not.toHaveBeenCalled();
+    });
   });
 
   it('copies the User ID\'s original establishment time to a newly linked provider and never advances it', async () => {
@@ -1121,6 +1212,14 @@ describe('AccountControl', () => {
       mockGetFreshSessions.mockResolvedValue({ google: googleSession });
     }
 
+    // AccountControl reads the status once on load, to spot a provider awaiting its first Apply after signing back in.
+    async function renderAfterLoadCheck() {
+      await renderAccountControl();
+      await waitFor(() => {
+        expect(mockFetchCloudSyncStatus).toHaveBeenCalledTimes(1);
+      });
+    }
+
     function pollNow() {
       act(() => {
         document.dispatchEvent(new Event('visibilitychange'));
@@ -1134,11 +1233,12 @@ describe('AccountControl', () => {
     it('shows the completion message with a refresh link when syncing finishes while open, and clears it on close', async () => {
       setUpGoogleFileSync();
       mockFetchCloudSyncStatus
+        .mockResolvedValueOnce(idleStatus(0))
         .mockResolvedValueOnce(syncingStatus)
         .mockResolvedValueOnce(idleStatus(2))
         .mockResolvedValue(idleStatus(0));
 
-      await renderAccountControl();
+      await renderAfterLoadCheck();
       openAccountModal();
       expect(await screen.findByText('Syncing files...')).toBeInTheDocument();
 
@@ -1153,7 +1253,7 @@ describe('AccountControl', () => {
       closeAccountModal();
       openAccountModal();
       await waitFor(() => {
-        expect(mockFetchCloudSyncStatus).toHaveBeenCalledTimes(3);
+        expect(mockFetchCloudSyncStatus).toHaveBeenCalledTimes(4);
       });
       expect(await screen.findByText(/^Last synced/)).toBeInTheDocument();
       expect(screen.queryByText(/^Sync complete/)).not.toBeInTheDocument();
@@ -1163,12 +1263,13 @@ describe('AccountControl', () => {
     it('uses the singular form and "Sync complete!" wording based on failed files', async () => {
       setUpGoogleFileSync();
       mockFetchCloudSyncStatus
+        .mockResolvedValueOnce(idleStatus(0))
         .mockResolvedValueOnce(syncingStatus)
         .mockResolvedValueOnce(idleStatus(1))
         .mockResolvedValueOnce(syncingStatus)
         .mockResolvedValue(idleStatus(0));
 
-      await renderAccountControl();
+      await renderAfterLoadCheck();
       openAccountModal();
       expect(await screen.findByText('Syncing files...')).toBeInTheDocument();
 
@@ -1186,17 +1287,18 @@ describe('AccountControl', () => {
     it('does not report completion on reopen when the kept status was syncing and the first fresh poll is idle', async () => {
       setUpGoogleFileSync();
       mockFetchCloudSyncStatus
+        .mockResolvedValueOnce(idleStatus(0))
         .mockResolvedValueOnce(syncingStatus)
         .mockResolvedValue(idleStatus(0));
 
-      await renderAccountControl();
+      await renderAfterLoadCheck();
       openAccountModal();
       expect(await screen.findByText('Syncing files...')).toBeInTheDocument();
 
       closeAccountModal();
       openAccountModal();
       await waitFor(() => {
-        expect(mockFetchCloudSyncStatus).toHaveBeenCalledTimes(2);
+        expect(mockFetchCloudSyncStatus).toHaveBeenCalledTimes(3);
       });
       expect(await screen.findByText(/^Last synced/)).toBeInTheDocument();
       expect(screen.queryByText('Syncing files...')).not.toBeInTheDocument();
@@ -1271,7 +1373,9 @@ describe('AccountControl', () => {
         microsoft: { syncSettings: false, syncFiles: false, selectedTargets: [] },
       }));
 
-      await renderAccountControl();
+      mockFetchCloudSyncStatus.mockResolvedValue(idleStatus(0));
+
+      await renderAfterLoadCheck();
       await waitFor(() => {
         expect(getFileSyncExclusionSnapshot().google.canEdit).toBe(true);
       });
@@ -1286,7 +1390,7 @@ describe('AccountControl', () => {
       await act(async () => {
         await Promise.resolve();
       });
-      expect(mockFetchCloudSyncStatus).not.toHaveBeenCalled();
+      expect(mockFetchCloudSyncStatus).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -1514,6 +1618,7 @@ describe('AccountControl', () => {
       expect(mockQueueCloudFolderSelection).toHaveBeenCalledWith(expect.objectContaining({
         userId: 'user-cloud-1',
         provider: 'google',
+        trigger: 'apply',
       }));
     });
 
