@@ -1264,6 +1264,14 @@ const MarkupDocumentViewer: React.FC<MarkupDocumentViewerProps> = ({ onScripture
         </button>
 
         <div className="pdf-viewer-title fw-semibold text-truncate" title={title}>{title}</div>
+        {pdfViewer.shared && (
+          <span
+            className="badge rounded-pill text-bg-secondary"
+            title="Opened from a shared link. This document isn't in your libraries."
+          >
+            Shared
+          </span>
+        )}
 
         <div className="ms-auto d-flex align-items-center gap-2">
           <FileSyncExclusionButton syncItem={pdfViewer.syncItem} documentLabel={title} />

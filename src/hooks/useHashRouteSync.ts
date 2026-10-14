@@ -2,7 +2,15 @@ import { useCallback, useEffect, useRef } from 'react';
 import { setSelectedBook, setSelectedChapter, setVerseSelection, clearVerseSelection } from '../store/slices/uiSlice';
 import { useAppDispatch } from '../store/hooks';
 import type { BibleData } from '../models/bible';
-import { buildSearchHashRoute, buildHashRoute, parseHashRoute, parseSearchFromHash, scrollToVerse, VERSE_REFERENCE_SCROLL_OPTIONS } from '../App';
+import {
+  buildSearchHashRoute,
+  buildHashRoute,
+  parseDocumentLinkFromHash,
+  parseHashRoute,
+  parseSearchFromHash,
+  scrollToVerse,
+  VERSE_REFERENCE_SCROLL_OPTIONS,
+} from '../App';
 
 interface UseHashRouteSyncOptions {
   currentBible: BibleData | null;
@@ -173,6 +181,14 @@ export const useHashRouteSync = ({
     }
 
     if (window.location.hash === nextVerseHash) {
+      hasSyncedChapterHashRef.current = true;
+      lastSelectedChapterKeyRef.current = chapterKey;
+      return;
+    }
+
+    // A document link without a verse route (`#/?doc=…`) arrives with nothing for the saved reference
+    // to agree with. Replacing it on load would cancel the link's open while it is still resolving.
+    if (!hasSyncedChapterHashRef.current && !parsedCurrentHash && parseDocumentLinkFromHash(window.location.hash)) {
       hasSyncedChapterHashRef.current = true;
       lastSelectedChapterKeyRef.current = chapterKey;
       return;

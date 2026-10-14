@@ -3,8 +3,15 @@ import { useAppDispatch, useAppSelector } from '../store/hooks';
 import { openDocumentViewer, setDocumentLinkNotice } from '../store/slices/uiSlice';
 import { openVerseTabs } from '../store/slices/bibleSlice';
 import { bibleService } from '../services/bibleService';
+import {
+  findSharedDocument,
+  findSharedDocumentPageRaws,
+  normalizeSharedDocumentHash,
+  type SharedDocumentLookup,
+} from '../services/sharedDocumentService';
 import { buildMarkupDocumentShellUrl } from '../utils/resourceLibraryConfig';
 import { routeInteraction } from '../services/windowRouting';
+import type { OpenDocumentPayload } from '../models/windowMessages';
 import {
   REOPEN_DOCUMENT_LINK_EVENT,
   parseDocumentLinkFromHash,
@@ -16,6 +23,15 @@ import {
 } from '../App';
 
 export const DOCUMENT_LINK_NOT_FOUND_MESSAGE = "This document isn't in your libraries.";
+export const DOCUMENT_LINK_UNAVAILABLE_MESSAGE = 'This document is no longer available.';
+export const DOCUMENT_LINK_SIGN_IN_MESSAGE = 'Sign in to view this shared document.';
+export const DOCUMENT_LINK_LOAD_FAILED_MESSAGE = "This shared document couldn't be loaded. Try again later.";
+
+const SHARED_LOOKUP_MESSAGES: Record<Exclude<SharedDocumentLookup['status'], 'found'>, string> = {
+  'not-found': DOCUMENT_LINK_UNAVAILABLE_MESSAGE,
+  unauthorized: DOCUMENT_LINK_SIGN_IN_MESSAGE,
+  error: DOCUMENT_LINK_LOAD_FAILED_MESSAGE,
+};
 
 type DocumentLinkTrigger = 'initial' | 'hashchange' | 'reopen';
 
@@ -133,17 +149,54 @@ export const useDocumentLinkRoute = ({ ready }: UseDocumentLinkRouteOptions): vo
       return;
     }
 
-    if (!resolved) {
-      // Left unhandled so a later sourceUrls change (e.g. a cloud library arriving after sign-in) retries.
-      locallyRequestedHash = null;
-      dispatch(setDocumentLinkNotice(DOCUMENT_LINK_NOT_FOUND_MESSAGE));
-      return;
+    let target: Omit<OpenDocumentPayload, 'page' | 'matchRaws'>;
+    let sharedPagesUrl: string | null = null;
+    if (resolved) {
+      target = {
+        sourceUrl: resolved.viewer === 'markup' ? buildMarkupDocumentShellUrl(resolved.url) : resolved.url,
+        title: resolved.title,
+        kind: resolved.viewer,
+        syncItem: resolved.cloudProvider ? { provider: resolved.cloudProvider, itemId: resolved.documentId } : null,
+      };
+    } else {
+      // Not in the user's libraries: a content-hash link opens the rendered package straight from storage.
+      const sharedHash = link.lib ? null : normalizeSharedDocumentHash(link.doc);
+      const lookup: SharedDocumentLookup = sharedHash
+        ? await findSharedDocument(sharedHash, sourceUrls)
+        : { status: 'not-found' };
+      if (!isCurrent()) {
+        return;
+      }
+
+      if (lookup.status !== 'found') {
+        // Left unhandled so a later sourceUrls change (e.g. a cloud library arriving after sign-in) retries.
+        locallyRequestedHash = null;
+        dispatch(setDocumentLinkNotice(sharedHash ? SHARED_LOOKUP_MESSAGES[lookup.status] : DOCUMENT_LINK_NOT_FOUND_MESSAGE));
+        return;
+      }
+
+      sharedPagesUrl = lookup.pagesUrl;
+      target = {
+        sourceUrl: lookup.shellUrl,
+        title: lookup.title,
+        kind: 'markup',
+        syncItem: null,
+        shared: true,
+      };
     }
 
     const reference = parseHashRoute(hash);
     const verseResources = reference?.verse
       ? await collectVerseResources(reference, link, sourceUrls, selectionRef.current)
       : null;
+    // The user's resource shards don't index a shared document; its own page index does.
+    const matchRaws = sharedPagesUrl && reference && verseResources
+      ? await findSharedDocumentPageRaws(sharedPagesUrl, link.page, {
+        book: reference.book,
+        chapter: reference.chapter,
+        verses: verseResources.verses,
+      })
+      : verseResources?.matchRaws ?? [];
     if (!isCurrent()) {
       return;
     }
@@ -168,15 +221,7 @@ export const useDocumentLinkRoute = ({ ready }: UseDocumentLinkRouteOptions): vo
         { silent: true }
       );
     }
-    const matchRaws = verseResources?.matchRaws ?? [];
-    dispatch(openDocumentViewer({
-      sourceUrl: resolved.viewer === 'markup' ? buildMarkupDocumentShellUrl(resolved.url) : resolved.url,
-      page: link.page,
-      title: resolved.title,
-      matchRaws,
-      kind: resolved.viewer,
-      syncItem: resolved.cloudProvider ? { provider: resolved.cloudProvider, itemId: resolved.documentId } : null,
-    }));
+    dispatch(openDocumentViewer({ ...target, page: link.page, matchRaws }));
   }, [dispatch, sourceUrls]);
 
   // A bookmark taken after the viewer closes must not reopen it.

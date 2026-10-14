@@ -2,8 +2,16 @@ import { act, renderHook, waitFor } from '@testing-library/react';
 import { useAppDispatch, useAppSelector } from '../store/hooks';
 import { bibleService } from '../services/bibleService';
 import { routeInteraction } from '../services/windowRouting';
+import { findSharedDocument, findSharedDocumentPageRaws } from '../services/sharedDocumentService';
 import { REOPEN_DOCUMENT_LINK_EVENT } from '../App';
-import { DOCUMENT_LINK_NOT_FOUND_MESSAGE, openDocumentLinkHere, useDocumentLinkRoute } from './useDocumentLinkRoute';
+import {
+  DOCUMENT_LINK_LOAD_FAILED_MESSAGE,
+  DOCUMENT_LINK_NOT_FOUND_MESSAGE,
+  DOCUMENT_LINK_SIGN_IN_MESSAGE,
+  DOCUMENT_LINK_UNAVAILABLE_MESSAGE,
+  openDocumentLinkHere,
+  useDocumentLinkRoute,
+} from './useDocumentLinkRoute';
 
 jest.mock('../store/slices/bibleSlice', () => ({
   openVerseTabs: (payload: unknown) => ({ type: 'bible/openVerseTabs', payload }),
@@ -24,6 +32,34 @@ jest.mock('../services/bibleService', () => ({
 jest.mock('../services/windowRouting', () => ({
   routeInteraction: jest.fn(),
 }));
+
+jest.mock('../services/sharedDocumentService', () => ({
+  normalizeSharedDocumentHash: (doc: string) => (/^[0-9a-f]{64}$/i.test(doc) ? doc.toLowerCase() : null),
+  findSharedDocument: jest.fn(),
+  findSharedDocumentPageRaws: jest.fn(),
+}));
+
+const SHARED_HASH = 'ab'.repeat(32);
+const SHARED_PAGES_URL = `https://storage.example.com/documents/ab/ab/${SHARED_HASH}/pages/`;
+const SHARED_FOUND = {
+  status: 'found',
+  pagesUrl: SHARED_PAGES_URL,
+  shellUrl: `${SHARED_PAGES_URL}index.html`,
+  title: 'Shared document',
+};
+
+const sharedOpenAction = (title: string, matchRaws: string[]) => ({
+  type: 'ui/openDocumentViewer',
+  payload: {
+    sourceUrl: SHARED_FOUND.shellUrl,
+    page: 12,
+    title,
+    matchRaws,
+    kind: 'markup',
+    syncItem: null,
+    shared: true,
+  },
+});
 
 interface TestUiState {
   sourceUrls: string[];
@@ -102,6 +138,8 @@ describe('useDocumentLinkRoute', () => {
       .mockImplementation(async (_book: string, _chapter: number, verse: number) => (
         versePayload(verse, verse === 28 ? ['Rom 8:28'] : [`Rom 8:${verse}`])
       ));
+    (findSharedDocument as jest.Mock).mockReset().mockResolvedValue(SHARED_FOUND);
+    (findSharedDocumentPageRaws as jest.Mock).mockReset().mockResolvedValue(['Romans 8:28']);
     setHash('');
   });
 
@@ -241,6 +279,96 @@ describe('useDocumentLinkRoute', () => {
       { doc: 'abc', page: 12 },
       ['https://storage.example.com/users/u1/library.json']
     );
+  });
+
+  it('does not look in storage when the document is in a library', async () => {
+    setHash(`#/Romans/8/28?doc=${SHARED_HASH}&page=12`);
+
+    renderHook(() => useDocumentLinkRoute({ ready: true }));
+
+    // The mocked verse resources cite doc "abc", not this hash, so nothing is highlighted.
+    await waitFor(() => expect(dispatch).toHaveBeenCalledWith(openAction([])));
+    expect(findSharedDocument).not.toHaveBeenCalled();
+    expect(findSharedDocumentPageRaws).not.toHaveBeenCalled();
+  });
+
+  describe('when the document is not in any library', () => {
+    beforeEach(() => {
+      (bibleService.findDocumentByLink as jest.Mock).mockResolvedValue(null);
+    });
+
+    it('opens a content-hash link straight from storage as a shared document', async () => {
+      (findSharedDocument as jest.Mock).mockResolvedValue({ ...SHARED_FOUND, title: 'Sermon Notes' });
+      setHash(`#/Romans/8/28?doc=${SHARED_HASH.toUpperCase()}&page=12`);
+
+      renderHook(() => useDocumentLinkRoute({ ready: true }));
+
+      await waitFor(() => expect(dispatch).toHaveBeenCalledWith(sharedOpenAction('Sermon Notes', ['Romans 8:28'])));
+      expect(findSharedDocument).toHaveBeenCalledWith(SHARED_HASH, []);
+      expect(findSharedDocumentPageRaws).toHaveBeenCalledWith(SHARED_PAGES_URL, 12, { book: 'Romans', chapter: 8, verses: [28] });
+      expect(dispatch).toHaveBeenCalledWith({ type: 'ui/setDocumentLinkNotice', payload: null });
+      expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({
+        type: 'ui/setDocumentLinkNotice',
+        payload: expect.any(String),
+      }));
+    });
+
+    it('opens a shared link without a verse reference and highlights nothing', async () => {
+      setHash(`#/?doc=${SHARED_HASH}&page=12`);
+
+      renderHook(() => useDocumentLinkRoute({ ready: true }));
+
+      await waitFor(() => expect(dispatch).toHaveBeenCalledWith(sharedOpenAction('Shared document', [])));
+      expect(findSharedDocumentPageRaws).not.toHaveBeenCalled();
+      expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'bible/openVerseTabs' }));
+    });
+
+    it('does not reopen a shared document when sources change', async () => {
+      setHash(`#/Romans/8/28?doc=${SHARED_HASH}&page=12`);
+      const { rerender } = renderHook(() => useDocumentLinkRoute({ ready: true }));
+      await waitFor(() => expect(dispatch).toHaveBeenCalledWith(sharedOpenAction('Shared document', ['Romans 8:28'])));
+
+      ui = { ...ui, sourceUrls: ['https://storage.example.com/users/u1/library.json'] };
+      rerender();
+      await act(async () => {
+        await Promise.resolve();
+      });
+
+      expect(findSharedDocument).toHaveBeenCalledTimes(1);
+      expect(dispatch.mock.calls.filter(([action]) => action.type === 'ui/openDocumentViewer')).toHaveLength(1);
+    });
+
+    it.each([
+      ['not-found', DOCUMENT_LINK_UNAVAILABLE_MESSAGE],
+      ['unauthorized', DOCUMENT_LINK_SIGN_IN_MESSAGE],
+      ['error', DOCUMENT_LINK_LOAD_FAILED_MESSAGE],
+    ])('shows a notice when storage answers %s', async (status, message) => {
+      (findSharedDocument as jest.Mock).mockResolvedValue({ status });
+      setHash(`#/Romans/8/28?doc=${SHARED_HASH}&page=12`);
+
+      renderHook(() => useDocumentLinkRoute({ ready: true }));
+
+      await waitFor(() => expect(dispatch).toHaveBeenCalledWith({ type: 'ui/setDocumentLinkNotice', payload: message }));
+      expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'ui/openDocumentViewer' }));
+    });
+
+    it.each([
+      ['a non-hash doc', '#/Romans/8/28?doc=abc&page=12'],
+      ['a 63-character hash', `#/Romans/8/28?doc=${SHARED_HASH.slice(1)}&page=12`],
+      ['a non-hex hash', `#/Romans/8/28?doc=${'zz'.repeat(32)}&page=12`],
+      ['a library-keyed link', `#/Romans/8/28?lib=0a1b2c3d&doc=${SHARED_HASH}&page=12`],
+    ])('keeps the library notice and skips storage for %s', async (_label, hash) => {
+      setHash(hash);
+
+      renderHook(() => useDocumentLinkRoute({ ready: true }));
+
+      await waitFor(() => expect(dispatch).toHaveBeenCalledWith({
+        type: 'ui/setDocumentLinkNotice',
+        payload: DOCUMENT_LINK_NOT_FOUND_MESSAGE,
+      }));
+      expect(findSharedDocument).not.toHaveBeenCalled();
+      expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'ui/openDocumentViewer' }));
+    });
   });
 
   it('strips the document params from the hash when the viewer closes', async () => {

@@ -42,6 +42,7 @@ export interface OpenDocumentPayload {
   matchRaws?: string[];
   kind?: 'pdf' | 'markup';
   syncItem?: DocumentSyncItem | null;
+  shared?: boolean;
 }
 
 export type WindowCommand =
