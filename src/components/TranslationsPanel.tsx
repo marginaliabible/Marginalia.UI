@@ -7,6 +7,7 @@ import { useRevealVerseSelectionInBible } from '../hooks/useDocumentScriptureNav
 import { MAX_PANEL_VISIBLE_VERSES } from '../utils/documentTextMatch';
 import { versesFromContext } from '../utils/selectedVerseContext';
 import { markupFlagsFromBible } from '../utils/verseMarkup';
+import { missingVerseLabel, missingVerseNotice } from '../utils/translationAvailability';
 import { VerseReferenceLabel, VerseTextList } from './VersePreview';
 
 interface TranslationsPanelProps {
@@ -172,6 +173,7 @@ const TranslationsPanel: React.FC<TranslationsPanelProps> = ({
                   const label = meta?.label ?? record.id;
                   const chipText = `${record.id}: ${label}`;
                   const verseTexts = verseTextByTranslation.get(record.id) ?? [];
+                  const isTranslationLoaded = verseTextByTranslation.has(record.id);
                   const hasAnyVerseText = verseTexts.some((entry) => entry.text.length > 0);
                   const isLastStarred = record.starred && starredCount === 1;
 
@@ -256,13 +258,9 @@ const TranslationsPanel: React.FC<TranslationsPanelProps> = ({
                           ) : (
                             <span
                               className="text-muted"
-                              title={
-                                selectedVerseNumbers.length > 1
-                                  ? 'These verses are not available in this translation'
-                                  : 'This verse is not available in this translation'
-                              }
+                              title={missingVerseNotice(isTranslationLoaded, selectedVerseNumbers.length)}
                             >
-                              Not available in this translation
+                              {missingVerseLabel(isTranslationLoaded)}
                             </span>
                           )}
                         </div>
