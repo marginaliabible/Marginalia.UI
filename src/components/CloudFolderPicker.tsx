@@ -33,6 +33,10 @@ const RIGHT_PANEL_TOP_LEVEL_GROUP = '__root__';
 
 const SUBFOLDER_CHECK_CONCURRENCY = 3;
 
+function describeLowVerseRatioRejection(subject: string): string {
+  return `${subject} contains less than an average of one verse per page, and has been removed from your library.`;
+}
+
 export interface FolderSelectionTarget {
   id: string;
   kind: 'folder';
@@ -63,6 +67,8 @@ interface CloudFolderPickerProps {
   onDirtyChange?: (isDirty: boolean) => void;
   // Providers signed back in whose restored selections have not been applied yet.
   reconnectPending?: Partial<Record<FederatedProvider, boolean>>;
+  // Selected file ids MarkupServer kept out of the library for averaging under one verse per page.
+  rejectedDocumentIds?: Partial<Record<FederatedProvider, ReadonlySet<string>>>;
   subscriptions?: SubscriptionsBinding;
   ref?: React.Ref<CloudFolderPickerHandle>;
 }
@@ -494,6 +500,7 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
   onConnectRequested,
   onDirtyChange,
   reconnectPending,
+  rejectedDocumentIds,
   subscriptions,
   ref,
 }) => {
@@ -1681,11 +1688,16 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
                 const isCoveredByExcludedAncestor = !visibleRow.isRootSelection
                   && hasExcludedAncestor(visibleRow.key, visibleRow.rootSelectionKey, rootSelection, nodes);
                 const canToggleSync = isFolder || Boolean(fileIcon?.supported);
+                const isRejected = !isFolder
+                  && !visibleRow.isRootSelection
+                  && !isExcluded
+                  && !isCoveredByExcludedAncestor
+                  && Boolean(rejectedDocumentIds?.[node.provider]?.has(node.id));
                 const displayLabel = (visibleRow.isRootSelection ? rootSelection.path : node.name).replace(/\//g, '/\u200B');
                 const canActivateName = visibleRow.isRootSelection && showChevron;
                 const isTaggable = visibleRow.isRootSelection
                   ? providerAvailable
-                  : !isExcluded && !isCoveredByExcludedAncestor && canToggleSync && providerAvailable;
+                  : !isExcluded && !isCoveredByExcludedAncestor && !isRejected && canToggleSync && providerAvailable;
                 const itemTagId = visibleRow.isRootSelection ? null : node.id;
                 const { effectiveTags: effectiveItemTags, ownTags: ownItemTags } = computeEffectiveTags(
                   visibleRow.key,
@@ -1836,6 +1848,20 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
                             }}
                           >
                             <i className="fa-solid fa-arrows-rotate"></i>
+                          </button>
+                        ) : isRejected ? (
+                          <button
+                            type="button"
+                            className="btn btn-link btn-sm p-0 cloud-folder-selected-rejected"
+                            title={describeLowVerseRatioRejection('This file')}
+                            aria-label={describeLowVerseRatioRejection(`'${node.name}'`)}
+                            aria-disabled="true"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              showToast({ tone: 'info', message: describeLowVerseRatioRejection(`'${node.name}'`) });
+                            }}
+                          >
+                            <i className="fa-solid fa-upload"></i>
                           </button>
                         ) : canToggleSync && providerAvailable ? (
                           <button

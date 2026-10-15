@@ -323,6 +323,14 @@
   font-size: 0.78rem;
 }
 
+// Looks disabled but stays clickable, so a click can explain why in a toast.
+.btn.cloud-folder-selected-rejected {
+  font-size: 0.78rem;
+  color: var(--bs-secondary-color);
+  opacity: 0.55;
+  cursor: help;
+}
+
 .cloud-folder-selected-name-wrap {
   display: flex;
   flex-wrap: wrap;

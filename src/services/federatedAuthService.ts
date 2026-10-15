@@ -17,6 +17,9 @@ interface PendingAuthRequest {
   state: string;
   codeVerifier: string;
   createdAt: number;
+  options?: Required<FederatedAuthorizationOptions>;
+  // Whether this attempt already showed Google's consent screen, so a missing refresh token isn't retried forever.
+  consent?: boolean;
 }
 
 interface GoogleTokenResponse {
@@ -25,6 +28,8 @@ interface GoogleTokenResponse {
   token_type: string;
   scope?: string;
   refresh_token?: string;
+  // The User ID the broker stored this sign-in's refresh token under.
+  userId?: string;
 }
 
 interface MicrosoftTokenResponse {
@@ -33,6 +38,7 @@ interface MicrosoftTokenResponse {
   token_type: string;
   scope?: string;
   refresh_token?: string;
+  userId?: string;
 }
 
 interface GoogleProfileResponse {
@@ -52,6 +58,14 @@ interface MicrosoftProfileResponse {
 interface OAuthErrorPayload {
   error?: string;
   error_description?: string;
+}
+
+// The broker has no refresh token for this account and Google returned none without its consent screen.
+class GoogleConsentRequiredError extends Error {
+  constructor() {
+    super('Google must be asked for consent again.');
+    this.name = 'GoogleConsentRequiredError';
+  }
 }
 
 class FederatedTokenRefreshError extends Error {
@@ -87,6 +101,8 @@ export interface FederatedSession {
   grantedAt: number;
   scope?: string;
   profile: FederatedAccountProfile;
+  // The User ID the broker stored this sign-in's refresh token under, when it stored one.
+  userId?: string;
 }
 
 interface StoredFederatedSessions {
@@ -99,6 +115,8 @@ export interface OAuthCallbackResult {
   provider?: FederatedProvider;
   session?: FederatedSession;
   error?: string;
+  // The sign-in was restarted (to show Google's consent screen); the page is navigating away.
+  redirecting?: boolean;
 }
 
 export interface FederatedAuthorizationOptions {
@@ -278,7 +296,8 @@ function shouldRemoveSessionAfterRefreshFailure(error: unknown): boolean {
   const oauthError = (error.oauthError || '').toLowerCase();
   const oauthDescription = (error.oauthErrorDescription || '').toLowerCase();
 
-  if (oauthError === 'invalid_grant' || oauthError === 'invalid_request') {
+  // session_required: the broker's sign-in session for this browser is missing, expired, or for another account.
+  if (oauthError === 'invalid_grant' || oauthError === 'invalid_request' || oauthError === 'session_required') {
     return true;
   }
 
@@ -424,7 +443,8 @@ function buildGoogleAuthorizeUrl(
   redirectUri: string,
   state: string,
   challenge: string,
-  scope: string
+  scope: string,
+  forceConsent: boolean
 ): string {
   const url = new URL('https://accounts.google.com/o/oauth2/v2/auth');
   url.searchParams.set('client_id', clientId);
@@ -436,7 +456,9 @@ function buildGoogleAuthorizeUrl(
   url.searchParams.set('state', state);
     // Removed include_granted_scopes to only include explicitly requested scopes
   url.searchParams.set('access_type', 'offline');
-  url.searchParams.set('prompt', 'select_account consent');
+  // Google still shows consent on its own for a first grant or new scopes. Forcing it is only needed
+  // when the broker has lost the refresh token from an earlier grant.
+  url.searchParams.set('prompt', forceConsent ? 'select_account consent' : 'select_account');
   return url.toString();
 }
 
@@ -478,6 +500,7 @@ async function exchangeGoogleCode(
 
   const response = await fetch(endpoint, {
     method: 'POST',
+    credentials: 'include',
     headers: {
       'Content-Type': 'application/json',
     },
@@ -493,6 +516,13 @@ async function exchangeGoogleCode(
 
   if (!response.ok) {
     const text = await response.text();
+    const payload = tryParseOAuthErrorPayload(text);
+    if (payload?.error === 'consent_required') {
+      throw new GoogleConsentRequiredError();
+    }
+    if (payload?.error === 'account_not_linked' && payload.error_description) {
+      throw new Error(payload.error_description);
+    }
     throw new Error(`Google token exchange failed via broker (${response.status}): ${text}`);
   }
 
@@ -527,8 +557,10 @@ async function beginMicrosoftBffAuthorization(
 
   const returnUrl = `${window.location.origin}${window.location.pathname}`;
   const endpoint = buildAuthServiceEndpoint(lambdaBaseUrl, 'oauth/microsoft/start');
+  // Credentials let the broker set the cookie that ties the callback to this browser.
   const response = await fetch(endpoint, {
     method: 'POST',
+    credentials: 'include',
     headers: {
       'Content-Type': 'application/json',
     },
@@ -583,13 +615,16 @@ async function materializeFederatedSession(
     ? await fetchGoogleProfile(tokenPayload.access_token)
     : await fetchMicrosoftProfile(tokenPayload.access_token);
 
-  // The broker keeps the refresh token when it can identify the user; otherwise hand it over now
-  // (first link, before a user ID exists) so the browser never has to retain a long-lived credential.
+  // The broker normally keeps the refresh token itself. If it handed one back (no token store), offer
+  // it to the broker now so the browser never has to retain a long-lived credential.
   let retainedRefreshToken = tokenPayload.refresh_token;
+  let brokerUserId = tokenPayload.userId;
   if (retainedRefreshToken) {
     const storeUserId = readCurrentUserId() || profile.email || profile.providerAccountId;
-    if (await persistRefreshToken(provider, storeUserId, retainedRefreshToken)) {
+    const storedUnder = await persistRefreshToken(provider, storeUserId, retainedRefreshToken);
+    if (storedUnder) {
       retainedRefreshToken = undefined;
+      brokerUserId = storedUnder;
     }
   }
 
@@ -602,6 +637,7 @@ async function materializeFederatedSession(
     expiresAt: now + Math.max(300, tokenPayload.expires_in) * 1000,
     scope: tokenPayload.scope,
     profile,
+    ...(brokerUserId ? { userId: brokerUserId } : {}),
   };
 }
 
@@ -618,6 +654,7 @@ async function refreshProviderToken(
   const endpoint = buildTokenRefreshEndpoint(lambdaBaseUrl);
   const response = await fetch(endpoint, {
     method: 'POST',
+    credentials: 'include',
     headers: {
       'Content-Type': 'application/json',
     },
@@ -639,14 +676,15 @@ async function refreshProviderToken(
   return (await response.json()) as GoogleTokenResponse | MicrosoftTokenResponse;
 }
 
+/** Resolves the User ID the broker stored the token under, or null when it didn't store it. */
 async function persistRefreshToken(
   provider: FederatedProvider,
   userId: string,
   refreshToken: string
-): Promise<boolean> {
+): Promise<string | null> {
   const lambdaBaseUrl = readAwsLambdaBaseUrl();
   if (!lambdaBaseUrl || !userId) {
-    return false;
+    return null;
   }
 
   try {
@@ -654,33 +692,40 @@ async function persistRefreshToken(
     endpoint.pathname = `${endpoint.pathname.replace(/\/$/, '')}/oauth/token-store`;
     const response = await fetch(endpoint.toString(), {
       method: 'POST',
+      credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ provider, userId, refreshToken }),
     });
 
     if (!response.ok) {
-      return false;
+      return null;
     }
 
-    return Boolean(((await response.json()) as { stored?: boolean }).stored);
+    const payload = (await response.json()) as { stored?: boolean; userId?: string };
+    return payload.stored ? payload.userId || userId : null;
   } catch {
-    return false;
+    return null;
   }
 }
 
 /**
+ * 'failed': the broker could not be reached, so the caller can keep the placeholder and retry on the
+ * next sync. 'not-linked': no account signed in on this device is linked to `toUserId` yet.
+ */
+export type RekeyResult = 'moved' | 'failed' | 'not-linked';
+
+/**
  * Moves refresh tokens stored under a placeholder User ID to the established one and signs the
- * placeholder out of sync. Resolves false when the broker could not be reached, so the caller can
- * keep the placeholder and retry on the next sync.
+ * placeholder out of sync.
  */
 export async function rekeyStoredRefreshTokens(
   fromUserId: string,
   toUserId: string,
   providers: FederatedProvider[]
-): Promise<boolean> {
+): Promise<RekeyResult> {
   const lambdaBaseUrl = readAwsLambdaBaseUrl();
   if (!lambdaBaseUrl) {
-    return true;
+    return 'moved';
   }
 
   try {
@@ -688,12 +733,16 @@ export async function rekeyStoredRefreshTokens(
     endpoint.pathname = `${endpoint.pathname.replace(/\/$/, '')}/oauth/token-rekey`;
     const response = await fetch(endpoint.toString(), {
       method: 'POST',
+      credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ fromUserId, toUserId, providers }),
     });
-    return response.ok;
+    if (response.status === 403) {
+      return 'not-linked';
+    }
+    return response.ok ? 'moved' : 'failed';
   } catch {
-    return false;
+    return 'failed';
   }
 }
 
@@ -795,7 +844,14 @@ export async function beginFederatedAuthorization(
   provider: FederatedProvider,
   options?: FederatedAuthorizationOptions
 ): Promise<void> {
-  const authorizationOptions = normalizeAuthorizationOptions(options);
+  await startAuthorization(provider, normalizeAuthorizationOptions(options), false);
+}
+
+async function startAuthorization(
+  provider: FederatedProvider,
+  authorizationOptions: Required<FederatedAuthorizationOptions>,
+  forceConsent: boolean
+): Promise<void> {
 
   if (!readAwsLambdaBaseUrl()) {
     throw new Error('Missing VITE_AUTH_SERVICE_URL. Federated sign-in requires Lambda token exchange.');
@@ -827,6 +883,8 @@ export async function beginFederatedAuthorization(
     state,
     codeVerifier,
     createdAt: Date.now(),
+    options: authorizationOptions,
+    consent: forceConsent,
   };
 
   const map = readPendingRequestMap();
@@ -834,7 +892,7 @@ export async function beginFederatedAuthorization(
   writePendingRequestMap(map);
 
   window.location.assign(
-    buildGoogleAuthorizeUrl(clientId, redirectUri, state, codeChallenge, scope)
+    buildGoogleAuthorizeUrl(clientId, redirectUri, state, codeChallenge, scope, forceConsent)
   );
 }
 
@@ -945,6 +1003,10 @@ export async function completeFederatedAuthorizationFromUrl(): Promise<OAuthCall
     };
   } catch (callbackError) {
     clearOAuthQueryParams();
+    if (callbackError instanceof GoogleConsentRequiredError && !pending.consent) {
+      await startAuthorization('google', pending.options ?? normalizeAuthorizationOptions(), true);
+      return { handled: true, provider: 'google', redirecting: true };
+    }
     const message = callbackError instanceof Error ? callbackError.message : String(callbackError);
     return {
       handled: true,

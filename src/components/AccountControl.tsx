@@ -643,6 +643,13 @@ const AccountControl: React.FC<AccountControlProps> = ({ subscriptions }) => {
     () => Object.fromEntries(reconnectPendingProviders.map((provider) => [provider, true])),
     [reconnectPendingProviders]
   );
+  const rejectedDocumentIdsByProvider = useMemo<Partial<Record<FederatedProvider, ReadonlySet<string>>>>(
+    () => Object.fromEntries(fileSyncProviders.flatMap((provider) => {
+      const rejected = cloudSyncStatus?.providers?.[provider]?.rejectedDocuments ?? [];
+      return rejected.length > 0 ? [[provider, new Set(rejected.map((entry) => entry.documentId))]] : [];
+    })),
+    [cloudSyncStatus, fileSyncProviders]
+  );
 
   const startSyncWatch = useCallback((providers: FederatedProvider[]) => {
     setSyncWatch((current) => startOrExtendSyncWatch(current, providers, Date.now(), cloudSyncFetchIdRef.current));
@@ -828,7 +835,7 @@ const AccountControl: React.FC<AccountControlProps> = ({ subscriptions }) => {
     placeholderUserId: string,
     placeholderStamp: number,
     merged: SyncedCloudConfig
-  ): Promise<'adopted' | 'kept' | 'failed'> => {
+  ): Promise<'adopted' | 'kept' | 'failed' | 'not-linked'> => {
     const establishedUserId = String(merged.config.userId ?? '').trim();
     const establishedStamp = merged.fieldUpdatedAt?.userId ?? 0;
     if (!placeholderUserId || !establishedUserId || establishedUserId === placeholderUserId || establishedStamp <= 0) {
@@ -852,8 +859,9 @@ const AccountControl: React.FC<AccountControlProps> = ({ subscriptions }) => {
       }
     }
 
-    if (!(await rekeyStoredRefreshTokens(placeholderUserId, establishedUserId, PROVIDERS))) {
-      return 'failed';
+    const rekeyed = await rekeyStoredRefreshTokens(placeholderUserId, establishedUserId, PROVIDERS);
+    if (rekeyed !== 'moved') {
+      return rekeyed;
     }
 
     bibleService.replaceUserId(establishedUserId);
@@ -933,6 +941,8 @@ const AccountControl: React.FC<AccountControlProps> = ({ subscriptions }) => {
     const adoption = await adoptEstablishedUserId(localUserId, fieldStampsRef.current.userId, merged);
     if (adoption === 'failed') {
       failures.push(`Could not move this device to your account's User ID (${establishedUserId}); will retry.`);
+    } else if (adoption === 'not-linked') {
+      failures.push(`To move this device to your account's User ID (${establishedUserId}), sign in here with an account already linked to it.`);
     }
     const ownerUserId = adoption === 'adopted' || !localUserId ? establishedUserId : localUserId;
 
@@ -1116,7 +1126,8 @@ const AccountControl: React.FC<AccountControlProps> = ({ subscriptions }) => {
   // link adopts the ID this provider's settings already name; only a brand-new account uses the email.
   const establishUserIdForSession = useCallback(async (session: FederatedSession): Promise<string> => {
     const existing = String((bibleService.readState() as MarginaliaState).userId ?? '').trim();
-    const email = String(session.profile.email ?? '').trim();
+    // The broker picks the ID it stored this link's token under (normally the email), so start from that.
+    const email = String(session.userId ?? session.profile.email ?? '').trim();
     if (existing || !email) {
       return existing;
     }
@@ -1131,7 +1142,7 @@ const AccountControl: React.FC<AccountControlProps> = ({ subscriptions }) => {
 
     // With no User ID yet, the broker stored this link's refresh token under the email.
     const adopted = owner !== null
-      && (owner.userId === email || await rekeyStoredRefreshTokens(email, owner.userId, [session.provider]));
+      && (owner.userId === email || await rekeyStoredRefreshTokens(email, owner.userId, [session.provider]) === 'moved');
     const userId = adopted && owner ? owner.userId : email;
     dispatch(setUserId(userId));
     fieldStampsRef.current = { ...fieldStampsRef.current, userId: adopted && owner ? owner.stamp : Date.now() };
@@ -1853,6 +1864,7 @@ const AccountControl: React.FC<AccountControlProps> = ({ subscriptions }) => {
                     onConnectRequested={handleConnectRequestedFromPicker}
                     onDirtyChange={setHasUnsavedFileSyncChanges}
                     reconnectPending={reconnectPendingByProvider}
+                    rejectedDocumentIds={rejectedDocumentIdsByProvider}
                     subscriptions={subscriptions}
                     ref={folderPickerRef}
                   />

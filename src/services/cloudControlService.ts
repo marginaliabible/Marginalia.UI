@@ -30,11 +30,19 @@ export interface SyncActivityRequest {
 
 export type CloudSyncState = 'idle' | 'queued' | 'syncing' | 'attention';
 
+// A selected file MarkupServer kept out of the library for averaging under one verse reference per page.
+export interface CloudRejectedDocument {
+  documentId: string;
+  fileName: string;
+  verseRatio?: number;
+}
+
 export interface CloudProviderSyncStatus {
   state: CloudSyncState;
   startsAt?: string;
   lastCompletedAt?: string;
   failedCount?: number;
+  rejectedDocuments?: CloudRejectedDocument[];
   // Set (with state 'attention') while the provider was signed out and its restored selection
   // has not been applied since signing back in.
   disconnectedAt?: string;
@@ -70,6 +78,7 @@ export async function queueCloudFolderSelection(
   const provider = request.provider === 'google' ? 'GoogleDrive' : 'OneDrive';
   const response = await fetch(`${baseUrl}/sync/folder-selection`, {
     method: 'POST',
+    credentials: 'include',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
       ...request,
@@ -97,6 +106,7 @@ export async function fetchCloudSyncStatus(request: CloudSyncStatusRequest): Pro
 
   const response = await fetch(`${baseUrl}/sync/status`, {
     method: 'POST',
+    credentials: 'include',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ userId: request.userId, providers: request.providers }),
     signal: request.signal,
@@ -121,6 +131,7 @@ export async function reportSyncActivity(request: SyncActivityRequest): Promise<
   try {
     await fetch(`${baseUrl}/sync/activity`, {
       method: 'POST',
+      credentials: 'include',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ userId }),
     });

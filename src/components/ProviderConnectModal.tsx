@@ -148,7 +148,7 @@ const ProviderConnectModal: React.FC<ProviderConnectModalProps> = ({
                 <span className="account-provider-option-content">
                   <span className="account-provider-option-title">Sync my settings</span>
                   <span className="account-provider-option-description">
-                    Stores your Marginalia settings in {storageLabel}. We'll only access a tiny file in your {STORAGE_SHORT_LABEL[provider]}.
+                    Stores your Marginalia settings in {storageLabel}. This backs up your settings and lets you sync them across all your devices. We'll only access a tiny file in your {STORAGE_SHORT_LABEL[provider]}.
                   </span>
                 </span>
               </label>
@@ -165,8 +165,7 @@ const ProviderConnectModal: React.FC<ProviderConnectModalProps> = ({
                 <span className="account-provider-option-content">
                   <span className="account-provider-option-title">Sync my files</span>
                   <span className="account-provider-option-description">
-                    Access your own Bible notes accessible directly in Marginalia, indexed by verse!
-                    You pick which files & folders we have access to in your {storageLabel}. We'll only read those files.
+                    Access your own Bible notes directly in Marginalia, indexed by verse! This requires read access to your entire {storageLabel}, but you can pick which files & folders you want to sync and we pinky promise to only ever look at those files.
                   </span>
                 </span>
               </label>

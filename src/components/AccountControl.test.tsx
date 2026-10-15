@@ -237,7 +237,7 @@ describe('AccountControl', () => {
     mockWriteCloudConfigForSession.mockResolvedValue(undefined);
     mockQueueCloudFolderSelection.mockResolvedValue(null);
     mockFetchCloudSyncStatus.mockReset().mockResolvedValue(null);
-    mockRekeyStoredRefreshTokens.mockResolvedValue(true);
+    mockRekeyStoredRefreshTokens.mockResolvedValue('moved');
     mockGetFreshSessions.mockResolvedValue({});
     mockGetStoredSessions.mockReturnValue({});
     mockReadState.mockReturnValue({
