@@ -1,9 +1,10 @@
-import { render, waitFor } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import TranslationsPanel from './TranslationsPanel';
 import { bibleService } from '../services/bibleService';
 import { useAppDispatch, useAppSelector } from '../store/hooks';
 import type { PanelTab } from '../models/tab';
 import type { TranslationRecord } from '../models/bible';
+import { TRANSLATION_NOT_YET_LOADED, VERSE_NOT_AVAILABLE } from '../utils/translationAvailability';
 
 jest.mock('../services/bibleService', () => ({
   bibleService: {
@@ -213,5 +214,57 @@ describe('TranslationsPanel visibility gating', () => {
     expect(await findByText('text 5')).toBeTruthy();
     expect(queryByText('text 6')).toBeNull();
     expect(await findByText('...')).toBeTruthy();
+  });
+
+  it('shows a loading message until the newly selected translation arrives', async () => {
+    let resolveVerseText: ((value: string) => void) | undefined;
+    (bibleService.loadVerseText as jest.Mock).mockReturnValue(
+      new Promise<string>((resolve) => {
+        resolveVerseText = resolve;
+      })
+    );
+
+    render(
+      <TranslationsPanel
+        tab={translationsTab}
+        isActive={true}
+        translationRecords={translationRecords}
+        translationMetadataById={new Map()}
+        addableTranslations={[]}
+        onAddTranslation={noop}
+        onRemoveTranslation={noop}
+        onToggleStar={noop}
+        onReorder={noop}
+      />
+    );
+
+    expect(await screen.findByText(TRANSLATION_NOT_YET_LOADED)).toBeTruthy();
+    expect(screen.queryByText('Not available in this translation')).toBeNull();
+
+    resolveVerseText?.('In the beginning');
+    expect(await screen.findByText('In the beginning')).toBeTruthy();
+    expect(screen.queryByText(TRANSLATION_NOT_YET_LOADED)).toBeNull();
+  });
+
+  it('shows that the verse is unavailable after the translation has loaded', async () => {
+    (bibleService.loadVerseText as jest.Mock).mockResolvedValue('');
+
+    render(
+      <TranslationsPanel
+        tab={translationsTab}
+        isActive={true}
+        translationRecords={translationRecords}
+        translationMetadataById={new Map()}
+        addableTranslations={[]}
+        onAddTranslation={noop}
+        onRemoveTranslation={noop}
+        onToggleStar={noop}
+        onReorder={noop}
+      />
+    );
+
+    expect(await screen.findByText('Not available in this translation')).toBeTruthy();
+    expect(screen.getByTitle(VERSE_NOT_AVAILABLE)).toBeTruthy();
+    expect(screen.queryByText(TRANSLATION_NOT_YET_LOADED)).toBeNull();
   });
 });
