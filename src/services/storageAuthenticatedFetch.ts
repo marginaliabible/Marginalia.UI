@@ -7,7 +7,7 @@ const DEFAULT_STORAGE_HOST = 'storage.marginaliabible.com';
  * the URL. Bump it only after re-rendered output is in R2, or browsers will cache the
  * old render under the new epoch.
  */
-export const DOCUMENT_RENDER_EPOCH = '1';
+export const DOCUMENT_RENDER_EPOCH = '2';
 const DOCUMENT_RENDER_EPOCH_PARAM = 'r';
 
 let cachedStorageUserId = '';
