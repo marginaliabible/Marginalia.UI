@@ -425,6 +425,13 @@
   transition: border-color 120ms ease, background-color 120ms ease;
 }
 
+.verse-text.is-unloaded {
+  color: var(--bs-secondary-color);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .verse-italics {
   font-style: italic;
   color: var(--bs-secondary-color);

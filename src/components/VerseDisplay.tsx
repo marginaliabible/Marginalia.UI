@@ -11,6 +11,10 @@ import {
   type VerseMarkupSettings,
 } from '../utils/verseMarkup';
 import { verseElementId } from '../App';
+import {
+  isTranslationChapterLoaded,
+  missingVerseNotice,
+} from '../utils/translationAvailability';
 
 type VerseSelectionMode = 'single' | 'toggle' | 'range' | 'mobile-range' | 'mobile-anchor';
 
@@ -628,10 +632,12 @@ const VerseDisplay: React.FC<VerseDisplayProps> = ({
               />
             </span>
             {visibleTranslationIds.map((translationId) => {
+              const isTranslationLoaded = isTranslationChapterLoaded(chaptersByTranslation, translationId);
               const verseText =
                 chaptersByTranslation[translationId]?.verses.find((verse) => verse.verse === verseNumber)?.text ?? '';
               const markupFlags = markupFlagsByTranslation[translationId] ?? markupFlagsFromBible(null);
               const plainVerseText = verseText ? stripVerseMarkers(verseText, markupFlags) : '';
+              const missingNotice = missingVerseNotice(isTranslationLoaded);
               const isMobileAnchor =
                 mobileMultiSelectMode?.translationId === translationId
                 && mobileMultiSelectMode.anchorVerse === verseNumber;
@@ -653,10 +659,11 @@ const VerseDisplay: React.FC<VerseDisplayProps> = ({
                     isCtrlEligible ? 'is-ctrl-eligible' : '',
                     isRangePreview ? 'is-range-preview' : '',
                     isMobileAnchor ? 'is-mobile-anchor' : '',
+                    !plainVerseText && !isTranslationLoaded ? 'is-unloaded' : '',
                   ].filter(Boolean).join(' ')}
                   data-translation-id={translationId}
                   data-verse={verseNumber}
-                  title={plainVerseText ? undefined : 'This verse is not available in this translation'}
+                  title={plainVerseText ? undefined : missingNotice}
                   onMouseDown={(event) => {
                     if (event.shiftKey) {
                       event.preventDefault();
@@ -682,7 +689,7 @@ const VerseDisplay: React.FC<VerseDisplayProps> = ({
                 >
                   {verseText
                     ? renderVerseMarkers(verseText, markupFlags, verseMarkupSettings)
-                    : '-'}
+                    : (isTranslationLoaded ? '-' : missingNotice)}
                 </span>
               );
             })}
