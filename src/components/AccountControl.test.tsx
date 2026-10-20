@@ -72,6 +72,16 @@ jest.mock('../services/storageAuthenticatedFetch', () => ({
   clearStorageSession: jest.fn(),
   establishStorageSession: jest.fn(),
   setStorageSessionUserId: jest.fn(),
+  getStorageSessionUserId: jest.fn(() => 'user-1'),
+  fetchStorageAware: jest.fn(async () => new Response(null, { status: 404 })),
+}));
+
+jest.mock('../services/publicanService', () => ({
+  loadSyncPlanLedger: jest.fn(async () => ({
+    committed: [],
+    publishedByDocumentId: new Map(),
+    documentsById: new Map(),
+  })),
 }));
 
 jest.mock('../services/cloudConfigProviderService', () => ({
@@ -1392,6 +1402,76 @@ describe('AccountControl', () => {
       });
       expect(mockFetchCloudSyncStatus).toHaveBeenCalledTimes(1);
     });
+  });
+
+  it('shows the storage plan bar and Upgrade payment simulation when selection exceeds Free', async () => {
+    mockReadState.mockReturnValue({
+      lastTranslationId: 'KJV',
+      lastTranslationIds: ['KJV'],
+      cloudLinkedAccounts: [
+        {
+          provider: 'google',
+          providerAccountId: 'g-user-1',
+          email: 'g@example.com',
+          linkedAt: Date.now() - 5000,
+        },
+      ],
+      cloudConfigUpdatedAt: Date.now() - 10_000,
+      cloudConfigLastSyncedAt: Date.now() - 10_000,
+    });
+
+    window.localStorage.setItem('marginalia:provider-sync-preferences', JSON.stringify({
+      google: {
+        syncSettings: true,
+        syncFiles: true,
+        selectedTargets: [],
+      },
+      microsoft: {
+        syncSettings: false,
+        syncFiles: false,
+        selectedTargets: [],
+      },
+    }));
+
+    mockGetStoredSessions.mockReturnValue({ google: googleSession });
+    mockGetFreshSessions.mockResolvedValue({ google: googleSession });
+    const twoGb = 2 * 1024 * 1024 * 1024;
+    mockComputeSupportedFolderSizeForSession.mockResolvedValue(twoGb);
+    mockListFolderChildrenForSession.mockResolvedValue([
+      {
+        id: 'g-folder-big',
+        name: 'Big Library',
+        kind: 'folder',
+        sizeBytes: twoGb,
+        hasChildren: false,
+      },
+    ]);
+
+    await renderAccountControl();
+    openAccountModal();
+
+    expect(screen.getByRole('region', { name: 'Storage plan usage' })).toBeInTheDocument();
+    expect(screen.getByText('FREE')).toBeInTheDocument();
+
+    fireEvent.click(await screen.findByLabelText('Expand Google Drive'));
+    fireEvent.click(await screen.findByLabelText('Google Drive/Big Library'));
+    await assignFileSyncTag('Big Library');
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /Upgrade to Pro/i })).toBeEnabled();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /Upgrade to Pro/i }));
+    expect(await screen.findByText(/You would have been charged \$10\.99!/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByLabelText('Simulate failed payment'));
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+
+    await waitFor(() => {
+      expect(screen.queryByText(/You would have been charged/)).not.toBeInTheDocument();
+    });
+    expect(mockQueueCloudFolderSelection).not.toHaveBeenCalled();
+    expect(getToasts().some((toast) => /Payment simulation failed/i.test(toast.message))).toBe(true);
   });
 
   it('saves folder selections from the custom picker after clicking Apply', async () => {

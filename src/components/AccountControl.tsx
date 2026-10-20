@@ -55,8 +55,21 @@ import {
 } from '../services/storageAuthenticatedFetch';
 import type { FederatedProvider, LinkedCloudAccount, MarginaliaState } from '../models/bible';
 import type { SubscriptionsBinding } from '../models/subscription';
-import CloudFolderPicker, { type CloudFolderPickerHandle, type FolderSelectionTarget } from './CloudFolderPicker';
+import CloudFolderPicker, {
+  type CloudFolderPickerHandle,
+  type CloudFolderPickerUsageSnapshot,
+  type FolderSelectionTarget,
+} from './CloudFolderPicker';
 import ProviderConnectModal, { type ProviderConnectMode, type ProviderSyncDraft } from './ProviderConnectModal';
+import SyncPlanUsageBar from './SyncPlanUsageBar';
+import SyncPlanPaymentSimModal, { type PaymentSimResult } from './SyncPlanPaymentSimModal';
+import { loadSyncPlanLedger } from '../services/publicanService';
+import {
+  defaultActivePlan,
+  requiredPlanForBytes,
+  type SyncStoragePlan,
+} from '../utils/syncStoragePlans';
+import { computeSyncPlanUsage, type PublicanCommittedEntry, type SyncPlanDocumentRef } from '../utils/syncPlanUsage';
 import {
   isOwnLibraryUrl,
   ownLibraryUrlFor,
@@ -65,6 +78,7 @@ import {
   normalizeTimestampMap,
 } from '../utils/sourceSubscriptions';
 import './AccountControl.scss';
+
 
 type SyncState = 'idle' | 'syncing' | 'error';
 const THIRTY_MINUTES_MS = 30 * 60 * 1000;
@@ -494,6 +508,19 @@ const AccountControl: React.FC<AccountControlProps> = ({ subscriptions }) => {
   const [connectModalProvider, setConnectModalProvider] = useState<FederatedProvider | null>(null);
   const [fileSyncFocusRequest, setFileSyncFocusRequest] = useState<{ provider: FederatedProvider; requestId: number } | null>(null);
   const [hasUnsavedFileSyncChanges, setHasUnsavedFileSyncChanges] = useState(false);
+  const [pickerUsageSnapshot, setPickerUsageSnapshot] = useState<CloudFolderPickerUsageSnapshot>({
+    selectedBytes: 0,
+    sizesReady: true,
+    providersWithSelection: [],
+    stagedSelectedDocs: [],
+    appliedSelectedDocs: [],
+    deselectedAppliedRootBytes: [],
+  });
+  const [publicanCommitted, setPublicanCommitted] = useState<PublicanCommittedEntry[]>([]);
+  const [publishedByDocumentId, setPublishedByDocumentId] = useState<Map<string, string>>(() => new Map());
+  const [selectedStoragePlan, setSelectedStoragePlan] = useState<SyncStoragePlan>(() => defaultActivePlan());
+  const [paymentSimPlan, setPaymentSimPlan] = useState<SyncStoragePlan | null>(null);
+  const activeStoragePlan = useMemo(() => defaultActivePlan(), []);
   const [providerSyncPreferences, setProviderSyncPreferences] = useState<ProviderSyncPreferenceMap>(() => {
     const defaults = createDefaultProviderPreferences();
     const stored = readStoredProviderSyncPreferences();
@@ -1757,10 +1784,96 @@ const AccountControl: React.FC<AccountControlProps> = ({ subscriptions }) => {
     microsoft: isProviderConnected('microsoft'),
   }), [isProviderConnected]);
 
+  const folderPickerInitialSelections = useMemo(() => ({
+    google: providerSyncPreferences.google.selectedTargets,
+    microsoft: providerSyncPreferences.microsoft.selectedTargets,
+  }), [providerSyncPreferences.google.selectedTargets, providerSyncPreferences.microsoft.selectedTargets]);
+
+  const folderPickerSyncFilesEnabled = useMemo(() => ({
+    google: providerSyncPreferences.google.syncFiles,
+    microsoft: providerSyncPreferences.microsoft.syncFiles,
+  }), [providerSyncPreferences.google.syncFiles, providerSyncPreferences.microsoft.syncFiles]);
+
+  useEffect(() => {
+    if (!isModalOpen) {
+      return;
+    }
+    let cancelled = false;
+    const providers = PROVIDERS.filter((provider) => linkedProviders[provider]);
+    void loadSyncPlanLedger(providers, userId || undefined).then((ledger) => {
+      if (cancelled) {
+        return;
+      }
+      setPublicanCommitted(ledger.committed);
+      setPublishedByDocumentId(ledger.publishedByDocumentId);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [isModalOpen, linkedProviders.google, linkedProviders.microsoft, userId]);
+
+  const planUsage = useMemo(() => {
+    const enrich = (docs: SyncPlanDocumentRef[]): SyncPlanDocumentRef[] => {
+      const byId = new Map<string, SyncPlanDocumentRef>();
+      for (const doc of docs) {
+        const hash = publishedByDocumentId.get(doc.documentId) || doc.hash;
+        byId.set(doc.documentId, { ...doc, hash });
+      }
+      return Array.from(byId.values());
+    };
+
+    return computeSyncPlanUsage({
+      committed: publicanCommitted,
+      publishedByDocumentId,
+      stagedSelectedDocs: enrich(pickerUsageSnapshot.stagedSelectedDocs),
+      appliedSelectedDocs: enrich(pickerUsageSnapshot.appliedSelectedDocs),
+      deselectedAppliedRootBytes: pickerUsageSnapshot.deselectedAppliedRootBytes,
+      selectedBytes: pickerUsageSnapshot.selectedBytes,
+    });
+  }, [pickerUsageSnapshot, publicanCommitted, publishedByDocumentId]);
+
+  const requiredStoragePlan = useMemo(
+    () => requiredPlanForBytes(planUsage.billableBytes),
+    [planUsage.billableBytes]
+  );
+
+  const effectiveSelectedPlan = selectedStoragePlan.capGb < requiredStoragePlan.capGb
+    ? requiredStoragePlan
+    : selectedStoragePlan;
+  const needsPlanUpgrade = effectiveSelectedPlan.capGb > activeStoragePlan.capGb;
+
+  useEffect(() => {
+    if (!isModalOpen) {
+      return;
+    }
+    setSelectedStoragePlan(requiredPlanForBytes(0));
+  }, [isModalOpen]);
+
+  const handleAccountSyncApplyClick = useCallback(() => {
+    if (needsPlanUpgrade) {
+      setPaymentSimPlan(effectiveSelectedPlan);
+      return;
+    }
+    folderPickerRef.current?.apply();
+  }, [effectiveSelectedPlan, needsPlanUpgrade]);
+
+  const handlePaymentSimConfirm = useCallback((result: PaymentSimResult) => {
+    setPaymentSimPlan(null);
+    if (result === 'failed') {
+      showToast({ tone: 'error', message: 'Payment simulation failed. No changes were applied.' });
+      return;
+    }
+    // Upgrade can run with no File Sync edits; only Apply when there is something to persist.
+    if (hasUnsavedFileSyncChanges || reconnectPendingProviders.length > 0) {
+      folderPickerRef.current?.apply();
+    }
+  }, [hasUnsavedFileSyncChanges, reconnectPendingProviders.length]);
+
   const discardAndCloseModal = () => {
     folderPickerRef.current?.cancel();
     setHasUnsavedFileSyncChanges(false);
     setConnectModalProvider(null);
+    setPaymentSimPlan(null);
     setIsModalOpen(false);
   };
 
@@ -1850,23 +1963,27 @@ const AccountControl: React.FC<AccountControlProps> = ({ subscriptions }) => {
 
                   <CloudFolderPicker
                     sessions={providerSessionByType}
-                    initialSelections={{
-                      google: providerSyncPreferences.google.selectedTargets,
-                      microsoft: providerSyncPreferences.microsoft.selectedTargets,
-                    }}
-                    providerSyncFilesEnabled={{
-                      google: providerSyncPreferences.google.syncFiles,
-                      microsoft: providerSyncPreferences.microsoft.syncFiles,
-                    }}
+                    initialSelections={folderPickerInitialSelections}
+                    providerSyncFilesEnabled={folderPickerSyncFilesEnabled}
                     linkedProviders={linkedProviders}
                     focusRequest={fileSyncFocusRequest}
                     onSelectionsChange={handleApplyFromAccountSync}
                     onConnectRequested={handleConnectRequestedFromPicker}
                     onDirtyChange={setHasUnsavedFileSyncChanges}
+                    onUsageSnapshotChange={setPickerUsageSnapshot}
                     reconnectPending={reconnectPendingByProvider}
                     rejectedDocumentIds={rejectedDocumentIdsByProvider}
                     subscriptions={subscriptions}
                     ref={folderPickerRef}
+                  />
+
+                  <SyncPlanUsageBar
+                    committedBytes={planUsage.committedAdjustedBytes}
+                    selectedBytes={planUsage.selectedBytes}
+                    providersWithSelection={pickerUsageSnapshot.providersWithSelection}
+                    activePlan={activeStoragePlan}
+                    selectedPlan={effectiveSelectedPlan}
+                    onSelectedPlanChange={setSelectedStoragePlan}
                   />
                 </div>
 
@@ -1923,16 +2040,38 @@ const AccountControl: React.FC<AccountControlProps> = ({ subscriptions }) => {
                     <button
                       type="button"
                       className="btn btn-primary"
-                      disabled={!hasUnsavedFileSyncChanges && reconnectPendingProviders.length === 0}
-                      onClick={() => folderPickerRef.current?.apply()}
+                      disabled={
+                        !needsPlanUpgrade
+                        && !hasUnsavedFileSyncChanges
+                        && reconnectPendingProviders.length === 0
+                      }
+                      onClick={handleAccountSyncApplyClick}
                     >
-                      Apply
+                      {needsPlanUpgrade ? (
+                        <>
+                          <i className="fa-regular fa-gem me-2" aria-hidden="true" />
+                          Upgrade to {effectiveSelectedPlan.label}
+                        </>
+                      ) : (
+                        <>
+                          <i className="fa-solid fa-check me-2" aria-hidden="true" />
+                          Apply
+                        </>
+                      )}
                     </button>
                   </div>
                 </div>
               </div>
             </div>
           </div>
+
+          {paymentSimPlan && (
+            <SyncPlanPaymentSimModal
+              plan={paymentSimPlan}
+              onConfirm={handlePaymentSimConfirm}
+              onCancel={() => setPaymentSimPlan(null)}
+            />
+          )}
 
           {connectModalProvider && connectModalMode && connectModalInitialDraft && (
             <ProviderConnectModal
