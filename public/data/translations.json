@@ -1,845 +1,803 @@
 {
-  "modifiedOn": "2026-09-01T12:57:49.855Z",
+  "modifiedOn": "2026-10-21T14:50:07.000Z",
   "translations": [
     {
       "id": "CSlElizabeth",
       "label": "1757 Church Slavonic Elizabeth Bible",
       "language": "cu",
-      "address": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/CSlElizabeth.json"
+      "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/CSlElizabeth.json"
     },
     {
       "id": "BurJudson",
       "label": "1835 Judson Burmese Bible",
       "language": "my",
-      "address": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/BurJudson.json"
+      "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/BurJudson.json"
     },
     {
       "id": "Noyes",
       "label": "1869 Noyes Translation",
       "language": "en",
-      "address": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/Noyes.json"
+      "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/Noyes.json"
     },
     {
       "id": "GerGruenewald",
       "label": "1924 Grünewaldbibel",
       "language": "de",
-      "address": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/GerGruenewald.json"
+      "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/GerGruenewald.json"
     },
     {
       "id": "BBE",
       "label": "1949/1964 Bible in Basic English",
       "language": "en",
-      "address": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/BBE.json"
+      "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/BBE.json"
     },
     {
       "id": "ACV",
       "label": "A Conservative Version",
       "language": "en",
-      "address": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/ACV.json"
+      "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/ACV.json"
     },
     {
       "id": "SloChraska",
       "label": "ACV: A Conservative Version",
       "language": "sl",
-      "address": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/SloChraska.json"
+      "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/SloChraska.json"
     },
     {
       "id": "Alb",
       "label": "Albanian Bible",
       "language": "sq",
-      "address": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/Alb.json"
+      "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/Alb.json"
     },
     {
       "id": "AKJV",
       "label": "American King James Version",
       "language": "en",
-      "address": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/AKJV.json"
+      "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/AKJV.json"
     },
     {
       "id": "ASV",
       "label": "American Standard Version (1901)",
       "language": "en",
-      "address": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/ASV.json"
+      "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/ASV.json"
     },
     {
       "id": "Mg1865",
       "label": "Baiboly Malagasy (1865)",
       "language": "mg",
-      "address": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/Mg1865.json"
+      "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/Mg1865.json"
     },
     {
       "id": "BSB",
       "label": "Berean Standard Bible",
       "language": "en",
-      "address": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/BSB.json"
+      "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/BSB.json"
     },
     {
       "id": "Norsk",
       "label": "Bibelen på Norsk (1930)",
       "language": "nb",
-      "address": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/Norsk.json"
+      "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/Norsk.json"
     },
     {
       "id": "FreBDM1744",
       "label": "Bible David Martin (1744)",
       "language": "fr",
-      "address": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/FreBDM1744.json"
+      "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/FreBDM1744.json"
     },
     {
       "id": "FreJND",
-      "label": "Bible J.N. Darby in French",
+      "label": "Bible J.N. Darby in French with Strong's numbers",
       "language": "fr",
-      "address": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/FreJND.json"
+      "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/FreJND.json"
     },
     {
       "id": "FrePGR",
       "label": "Bible Perret-Gentil et Rilliet",
       "language": "fr",
-      "address": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/FrePGR.json"
+      "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/FrePGR.json"
     },
     {
       "id": "PorBLivre",
       "label": "Bíblia Livre",
       "language": "pt",
-      "address": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/PorBLivre.json"
+      "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/PorBLivre.json"
     },
     {
       "id": "PorBLivreTR",
       "label": "Bíblia Livre - Textus Receptus",
       "language": "pt",
-      "address": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/PorBLivreTR.json"
+      "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/PorBLivreTR.json"
     },
     {
       "id": "PorNVA",
       "label": "Bíblia Nova Versão de Acesso Livre",
       "language": "pt",
-      "address": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/PorNVA.json"
+      "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/PorNVA.json"
     },
     {
       "id": "SpaPlatense",
       "label": "Biblia Platense (Straubinger)",
       "language": "es",
-      "address": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/SpaPlatense.json"
+      "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/SpaPlatense.json"
     },
     {
       "id": "Wulfila",
       "label": "Bishop Wulfila Gothic Bible",
       "language": "got",
-      "address": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/Wulfila.json"
+      "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/Wulfila.json"
     },
     {
       "id": "CPDV",
       "label": "Catholic Public Domain Version",
       "language": "en",
-      "address": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/CPDV.json"
+      "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/CPDV.json"
     },
     {
       "id": "CebPinadayag",
       "label": "Cebuano Pinadayag",
       "language": "ceb",
-      "address": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/CebPinadayag.json"
+      "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/CebPinadayag.json"
     },
     {
       "id": "Che1860",
       "label": "Cherokee New Testament (1860) with Sequoyah transliterated forms",
       "language": "chr",
-      "address": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/Che1860.json"
+      "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/Che1860.json"
     },
     {
       "id": "VulgClementine",
       "label": "Clementine Vulgate",
       "language": "la",
-      "address": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/VulgClementine.json"
+      "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/VulgClementine.json"
     },
     {
       "id": "CzeBKR",
       "label": "Czech Bible Kralicka",
       "language": "cs",
-      "address": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/CzeBKR.json"
+      "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/CzeBKR.json"
     },
     {
       "id": "CzeCSP",
       "label": "Czech Český studijní překlad",
       "language": "cs",
-      "address": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/CzeCSP.json"
+      "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/CzeCSP.json"
     },
     {
       "id": "DaOT1871NT1907",
       "label": "Danish OT1871 + NT1907 with original orthography",
       "language": "da",
-      "address": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/DaOT1871NT1907.json"
+      "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/DaOT1871NT1907.json"
     },
     {
       "id": "Darby",
       "label": "Darby Bible (1889)",
       "language": "en",
-      "address": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/Darby.json"
+      "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/Darby.json"
     },
     {
       "id": "DutSVVA",
       "label": "De ganse Heilige Schrift bevattende al de kanonieke boeken van het Oude en Nieuwe Testament, met de apocriefe (deuterocanonieke) boeken",
       "language": "nl",
-      "address": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/DutSVVA.json"
+      "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/DutSVVA.json"
     },
     {
       "id": "GerBoLut",
       "label": "Deutsch Bolsingerߴs Luther 1545 Bibel (moderne Rechtschreibung)",
       "language": "de",
-      "address": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/GerBoLut.json"
+      "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/GerBoLut.json"
     },
     {
       "id": "GerTextbibel",
       "label": "Deutsch Textbibel (1906)",
       "language": "de",
-      "address": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/GerTextbibel.json"
+      "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/GerTextbibel.json"
     },
     {
       "id": "GerZurcher",
       "label": "Deutsche Zürcher Bibel von 1931.",
       "language": "de",
-      "address": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/GerZurcher.json"
+      "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/GerZurcher.json"
     },
     {
       "id": "DRC",
       "label": "Douay-Rheims Bible, Challoner Revision",
       "language": "en",
-      "address": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/DRC.json"
+      "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/DRC.json"
     },
     {
       "id": "DutSVV",
       "label": "Dutch Statenvertaling Bijbel",
       "language": "nl",
-      "address": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/DutSVV.json"
+      "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/DutSVV.json"
     },
     {
       "id": "ArmEastern",
       "label": "Eastern Armenian Bible",
       "language": "hy",
-      "address": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/ArmEastern.json"
+      "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/ArmEastern.json"
     },
     {
       "id": "Jubilee2000",
       "label": "English Jubilee 2000 Bible",
       "language": "en",
-      "address": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/Jubilee2000.json"
+      "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/Jubilee2000.json"
     },
     {
       "id": "Esperanto",
       "label": "Esperanto Londona Biblio",
       "language": "eo",
-      "address": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/Esperanto.json"
+      "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/Esperanto.json"
     },
     {
       "id": "Est",
       "label": "Estonian Bible",
       "language": "et",
-      "address": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/Est.json"
+      "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/Est.json"
     },
     {
       "id": "FinBiblia",
       "label": "Finnish Biblia (1776)",
       "language": "fi",
-      "address": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/FinBiblia.json"
+      "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/FinBiblia.json"
     },
     {
       "id": "FinPR",
       "label": "Finnish Pyhä Raamattu (1933/1938)",
       "language": "fi",
-      "address": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/FinPR.json"
+      "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/FinPR.json"
     },
     {
       "id": "FreBBB",
       "label": "French Bible Bovet Bonnet (1900)",
       "language": "fr",
-      "address": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/FreBBB.json"
+      "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/FreBBB.json"
     },
     {
       "id": "Geneva1599",
       "label": "Geneva Bible (1599)",
       "language": "en",
-      "address": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/Geneva1599.json"
+      "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/Geneva1599.json"
     },
     {
       "id": "GerAlbrecht",
       "label": "German Albrecht Neues Testament und Psalmen",
       "language": "de",
-      "address": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/GerAlbrecht.json"
+      "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/GerAlbrecht.json"
     },
     {
       "id": "GerElb1905",
       "label": "German Darby Unrevidierte Elberfelder (1905)",
       "language": "de",
-      "address": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/GerElb1905.json"
+      "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/GerElb1905.json"
     },
     {
       "id": "GerElb1871",
       "label": "German Elberfelder (1871) (sogenannt)",
       "language": "de",
-      "address": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/GerElb1871.json"
+      "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/GerElb1871.json"
     },
     {
       "id": "GerTafel",
       "label": "German Tafelbibel (1911)",
       "language": "de",
-      "address": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/GerTafel.json"
+      "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/GerTafel.json"
     },
     {
       "id": "LITV",
       "label": "Green's Literal Translation",
       "language": "en",
-      "address": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/LITV.json"
-    },
-    {
-      "id": "MKJV",
-      "label": "Green's Modern King James Version",
-      "language": "en",
-      "address": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/MKJV.json"
+      "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/LITV.json"
     },
     {
       "id": "Haitian",
       "label": "Haitian Creole Bible",
       "language": "ht",
-      "address": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/Haitian.json"
+      "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/Haitian.json"
     },
     {
       "id": "KorHKJV",
       "label": "Hangul King James Version",
       "language": "ko",
-      "address": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/KorHKJV.json"
+      "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/KorHKJV.json"
     },
     {
       "id": "Anderson",
       "label": "Henry Tompkins Anderson’s 1864 New Testament",
       "language": "en",
-      "address": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/Anderson.json"
+      "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/Anderson.json"
     },
     {
       "id": "vlsJoNT",
       "label": "Het Nieuwe Testament by Nicolaas De Jonge",
       "language": "vls",
-      "address": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/vlsJoNT.json"
+      "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/vlsJoNT.json"
     },
     {
       "id": "CroSaric",
       "label": "Hrvatska Biblija Ivana Šarića",
       "language": "hr",
-      "address": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/CroSaric.json"
+      "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/CroSaric.json"
     },
     {
       "id": "JapDenmo",
       "label": "Japanese Denmo 電網聖書",
       "language": "ja",
-      "address": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/JapDenmo.json"
+      "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/JapDenmo.json"
     },
     {
       "id": "JapKougo",
       "label": "Japanese Kougo-yaku 口語訳「聖書」(1954/1955年版)",
       "language": "ja",
-      "address": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/JapKougo.json"
+      "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/JapKougo.json"
     },
     {
       "id": "JPS",
       "label": "Jewish Publication Society Old Testament",
       "language": "en",
-      "address": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/JPS.json"
+      "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/JPS.json"
     },
     {
       "id": "Wycliffe",
       "label": "John Wycliffe Bible (c.1395)",
       "language": "enm",
-      "address": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/Wycliffe.json"
+      "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/Wycliffe.json"
     },
     {
       "id": "KJV",
-      "label": "King James Version (1769)",
+      "label": "King James Version (1769) with Strongs Numbers and Morphology and CatchWords",
       "language": "en",
       "address": "bibles/KJV.json"
-    },
-    {
-      "id": "KJVA",
-      "label": "King James Version (1769), including Apocrypha",
-      "language": "en",
-      "address": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/KJVA.json"
-    },
-    {
-      "id": "KJVPCE",
-      "label": "King James Version: Pure Cambridge Edition",
-      "language": "en",
-      "address": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/KJVPCE.json"
     },
     {
       "id": "TpiKJPB",
       "label": "King Jems Pisin Baibel",
       "language": "tpi",
-      "address": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/TpiKJPB.json"
+      "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/TpiKJPB.json"
     },
     {
       "id": "Viet",
       "label": "Kinh Thánh Tiếng Việt (1934)",
       "language": "vi",
-      "address": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/Viet.json"
+      "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/Viet.json"
     },
     {
       "id": "sml_BL_2008",
       "label": "Kitab Awal-Jaman maka Kitab Injil",
       "language": "sml",
-      "address": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/sml_BL_2008.json"
+      "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/sml_BL_2008.json"
     },
     {
       "id": "KLV",
       "label": "Klingon Language Version of the World English Bible",
       "language": "tlh",
-      "address": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/KLV.json"
+      "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/KLV.json"
     },
     {
       "id": "FreCrampon",
       "label": "La Bible Augustin Crampon 1923",
       "language": "fr",
-      "address": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/FreCrampon.json"
+      "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/FreCrampon.json"
     },
     {
       "id": "SpaRV1865",
       "label": "La Santa Biblia Reina-Valera (1865) con arreglos ortográficos",
       "language": "es",
-      "address": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/SpaRV1865.json"
+      "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/SpaRV1865.json"
     },
     {
       "id": "SpaRV",
       "label": "La Santa Biblia Reina-Valera (1909)",
       "language": "es",
-      "address": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/SpaRV.json"
+      "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/SpaRV.json"
     },
     {
       "id": "Vulgate",
       "label": "Latin Vulgate",
       "language": "la",
-      "address": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/Vulgate.json"
+      "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/Vulgate.json"
     },
     {
       "id": "LvGluck8",
       "label": "Latvian Glück 8th edition",
       "language": "lv",
-      "address": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/LvGluck8.json"
+      "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/LvGluck8.json"
     },
     {
       "id": "FreGeneve1669",
       "label": "Le Nouveau Testament de la Bible de Genève de 1669",
       "language": "fr",
-      "address": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/FreGeneve1669.json"
+      "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/FreGeneve1669.json"
     },
     {
       "id": "FreStapfer1889",
       "label": "Le Nouveau Testament traduction de Stapfer - 1889",
       "language": "fr",
-      "address": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/FreStapfer1889.json"
+      "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/FreStapfer1889.json"
     },
     {
       "id": "FreOltramare1874",
       "label": "Le Nouveau Testament Version Oltramare 1874",
       "language": "fr",
-      "address": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/FreOltramare1874.json"
+      "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/FreOltramare1874.json"
     },
     {
       "id": "FreSynodale1921",
       "label": "Le Nouveau Testament Version Synodale 1921 et le livre des Psaumes",
       "language": "fr",
-      "address": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/FreSynodale1921.json"
-    },
-    {
-      "id": "GerLeoNA28",
-      "label": "Leonberger Bibel, NT (NA28)",
-      "language": "de",
-      "address": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/GerLeoNA28.json"
+      "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/FreSynodale1921.json"
     },
     {
       "id": "ManxGaelic",
       "label": "Manx Gaelic Scripture Portions",
       "language": "gv",
-      "address": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/ManxGaelic.json"
+      "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/ManxGaelic.json"
     },
     {
       "id": "Maori",
       "label": "Maori Bible",
       "language": "mi",
-      "address": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/Maori.json"
+      "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/Maori.json"
     },
     {
       "id": "GerMenge",
       "label": "Menge-Bibel (1939)",
       "language": "de",
-      "address": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/GerMenge.json"
+      "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/GerMenge.json"
     },
     {
       "id": "HebModern",
       "label": "Modern Hebrew Bible",
       "language": "he",
-      "address": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/HebModern.json"
+      "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/HebModern.json"
     },
     {
       "id": "GreVamvas",
       "label": "Neophytos Vamvas's translation of the Holy Bible into modern Greek (1850)",
       "language": "el",
-      "address": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/GreVamvas.json"
+      "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/GreVamvas.json"
     },
     {
       "id": "NHEB",
       "label": "New Heart English Bible",
       "language": "en",
-      "address": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/NHEB.json"
+      "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/NHEB.json"
     },
     {
       "id": "NHEBJE",
       "label": "New Heart English Bible: Jehovah Edition",
       "language": "en",
-      "address": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/NHEBJE.json"
+      "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/NHEBJE.json"
     },
     {
       "id": "NHEBME",
       "label": "New Heart English Bible: Messianic Edition",
       "language": "en",
-      "address": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/NHEBME.json"
+      "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/NHEBME.json"
     },
     {
       "id": "SloStritar",
       "label": "Novi testament in Psalmi Davidovi Josipa Stritarja (1882)",
       "language": "sl",
-      "address": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/SloStritar.json"
+      "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/SloStritar.json"
     },
     {
       "id": "GerOffBiSt",
       "label": "Offene Bibel - Studienfassung",
       "language": "de",
-      "address": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/GerOffBiSt.json"
+      "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/GerOffBiSt.json"
     },
     {
       "id": "SloOjacano",
       "label": "Ojačano Sveto pismo (Ps + Gal)",
       "language": "sl",
-      "address": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/SloOjacano.json"
+      "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/SloOjacano.json"
     },
     {
       "id": "PohnOld",
       "label": "Old Public Domain Pohnpeian Bible",
       "language": "pon",
-      "address": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/PohnOld.json"
-    },
-    {
-      "id": "OEBcth",
-      "label": "Open English Bible (Commonwealth Spelling)",
-      "language": "en",
-      "address": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/OEBcth.json"
+      "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/PohnOld.json"
     },
     {
       "id": "OEB",
       "label": "Open English Bible (US Spelling)",
       "language": "en",
-      "address": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/OEB.json"
+      "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/OEB.json"
     },
     {
       "id": "NlCanisius1939",
       "label": "Petrus Canisius Translation",
       "language": "nl",
-      "address": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/NlCanisius1939.json"
+      "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/NlCanisius1939.json"
     },
     {
       "id": "TagAngBiblia",
       "label": "Philippine Bible Society (1905)",
       "language": "tl",
-      "address": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/TagAngBiblia.json"
+      "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/TagAngBiblia.json"
     },
     {
       "id": "PolGdanska",
       "label": "Polish Biblia Gdanska (1881)",
       "language": "pl",
-      "address": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/PolGdanska.json"
+      "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/PolGdanska.json"
     },
     {
       "id": "FinSTLK2017",
       "label": "Pyhä Raamattu (STLK 2017)",
       "language": "fi",
-      "address": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/FinSTLK2017.json"
-    },
-    {
-      "id": "SpaRVG",
-      "label": "Reina Valera Gómez",
-      "language": "es",
-      "address": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/SpaRVG.json"
+      "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/FinSTLK2017.json"
     },
     {
       "id": "RNKJV",
       "label": "Restored Name King James Version",
       "language": "en",
-      "address": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/RNKJV.json"
+      "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/RNKJV.json"
     },
     {
       "id": "HunKar",
       "label": "Revideált Károli Biblia 1908",
       "language": "hu",
-      "address": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/HunKar.json"
+      "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/HunKar.json"
     },
     {
       "id": "RLT",
-      "label": "Revised Literal Translation (2018)",
+      "label": "Revised Literal Translation (2018) of the King James Version with Strongs Numbers and Morphology",
       "language": "en",
-      "address": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/RLT.json"
+      "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/RLT.json"
     },
     {
       "id": "RWebster",
       "label": "Revised Webster Version (1833)",
       "language": "en",
-      "address": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/RWebster.json"
+      "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/RWebster.json"
     },
     {
       "id": "CopSahBible2",
       "label": "Sahidic Bible 2",
       "language": "cop-sa",
-      "address": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/CopSahBible2.json"
+      "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/CopSahBible2.json"
     },
     {
       "id": "SP",
       "label": "Samaritan Pentateuch",
       "language": "hbo",
-      "address": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/SP.json"
+      "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/SP.json"
     },
     {
       "id": "Mal1910",
       "label": "Sathyavedapusthakam (Malayalam Bible)",
-      "language": "mlf",
-      "address": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/Mal1910.json"
+      "language": "ml",
+      "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/Mal1910.json"
     },
     {
       "id": "GerSch",
       "label": "Schlachter Bibel (1951)",
       "language": "de",
-      "address": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/GerSch.json"
+      "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/GerSch.json"
     },
     {
       "id": "SrKDEkavski",
       "label": "Serbian Bible Daničić-Karadžić Ekavski",
       "language": "sr",
-      "address": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/SrKDEkavski.json"
+      "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/SrKDEkavski.json"
     },
     {
       "id": "SrKDIjekav",
       "label": "Serbian Bible Daničić-Karadžić Ijekavski",
       "language": "sr",
-      "address": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/SrKDIjekav.json"
+      "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/SrKDIjekav.json"
     },
     {
       "id": "SloKJV",
       "label": "Slovenian translation of Holy Bible King James Version (1769)",
       "language": "sl",
-      "address": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/SloKJV.json"
+      "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/SloKJV.json"
     },
     {
       "id": "StatResGNT",
       "label": "Statistical Restoration Greek New Testament",
       "language": "grc",
-      "address": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/StatResGNT.json"
+      "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/StatResGNT.json"
     },
     {
       "id": "NorSMB",
       "label": "Studentmållagsbibelen frå 1921",
       "language": "nn",
-      "address": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/NorSMB.json"
+      "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/NorSMB.json"
     },
     {
       "id": "SweKarlXII",
       "label": "Svenska Karl XII:s Bibel (1703)",
       "language": "sv",
-      "address": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/SweKarlXII.json"
+      "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/SweKarlXII.json"
     },
     {
       "id": "SweKarlXII1873",
       "label": "Svenska Karl XII:s Bibel (1873)",
       "language": "sv",
-      "address": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/SweKarlXII1873.json"
+      "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/SweKarlXII1873.json"
     },
     {
       "id": "Swe1917",
       "label": "Swedish Bible (1917)",
       "language": "sv",
-      "address": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/Swe1917.json"
+      "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/Swe1917.json"
     },
     {
       "id": "Peshitta",
       "label": "Syriac Peshitta",
       "language": "syr",
-      "address": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/Peshitta.json"
+      "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/Peshitta.json"
     },
     {
       "id": "Tausug",
       "label": "Tausug Kitab Injil",
       "language": "tsg",
-      "address": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/Tausug.json"
+      "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/Tausug.json"
     },
     {
       "id": "TR",
       "label": "Textus Receptus (1550/1894)",
       "language": "grc",
-      "address": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/TR.json"
+      "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/TR.json"
     },
     {
       "id": "ThaiKJV",
       "label": "Thai King James Version",
       "language": "th",
-      "address": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/ThaiKJV.json"
+      "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/ThaiKJV.json"
     },
     {
       "id": "Rotherham",
       "label": "The Emphasised Bible by J. B. Rotherham",
       "language": "en",
-      "address": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/Rotherham.json"
+      "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/Rotherham.json"
     },
     {
       "id": "BeaMRK",
       "label": "The Gospel of Mark in Beaver (Danezaa)",
       "language": "bea",
-      "address": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/BeaMRK.json"
+      "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/BeaMRK.json"
     },
     {
       "id": "LEB",
       "label": "The Lexham English Bible",
       "language": "en",
-      "address": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/LEB.json"
+      "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/LEB.json"
     },
     {
       "id": "Byz",
       "label": "The New Testament in the Original Greek: Byzantine Textform 2013",
       "language": "grc",
-      "address": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/Byz.json"
+      "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/Byz.json"
     },
     {
       "id": "RusMakarij",
       "label": "The Pentateuch of Moses in Russian",
       "language": "ru",
-      "address": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/RusMakarij.json"
+      "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/RusMakarij.json"
     },
     {
       "id": "Haweis",
       "label": "Thomas Haweis 1795 New Testament",
       "language": "en",
-      "address": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/Haweis.json"
+      "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/Haweis.json"
     },
     {
       "id": "FreLXX",
       "label": "Traduction de la LXX par P. GIGUET et autres traducteurs, 1872.",
       "language": "fr",
-      "address": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/FreLXX.json"
+      "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/FreLXX.json"
     },
     {
       "id": "FreLXXGiguet",
       "label": "Traduction de la LXX par Pierre GIGUET et autres traducteurs, 1872.",
       "language": "fr",
-      "address": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/FreLXXGiguet.json"
+      "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/FreLXXGiguet.json"
     },
     {
       "id": "Twenty",
       "label": "Twentieth Century New Testament",
       "language": "en",
-      "address": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/Twenty.json"
+      "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/Twenty.json"
     },
     {
       "id": "PolUGdanska",
       "label": "Updated Gdańsk Bible",
       "language": "pl",
-      "address": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/PolUGdanska.json"
+      "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/PolUGdanska.json"
     },
     {
       "id": "UKJV",
       "label": "Updated King James Version",
       "language": "en",
-      "address": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/UKJV.json"
-    },
-    {
-      "id": "VulgConte",
-      "label": "Vulgata Clementina, Conte editore",
-      "language": "la",
-      "address": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/VulgConte.json"
+      "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/UKJV.json"
     },
     {
       "id": "VulgHetzenauer",
       "label": "Vulgata Clementina, Hetzenauer editore",
       "language": "la",
-      "address": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/VulgHetzenauer.json"
+      "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/VulgHetzenauer.json"
     },
     {
       "id": "VulgSistine",
       "label": "Vulgata Sistina",
       "language": "la",
-      "address": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/VulgSistine.json"
+      "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/VulgSistine.json"
     },
     {
       "id": "Webster",
       "label": "Webster Bible",
       "language": "en",
-      "address": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/Webster.json"
+      "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/Webster.json"
     },
     {
       "id": "WLC",
       "label": "Westminster Leningrad Codex",
       "language": "hbo",
-      "address": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/WLC.json"
+      "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/WLC.json"
     },
     {
       "id": "Tyndale",
       "label": "William Tyndale Bible (1525/1530)",
       "language": "en",
-      "address": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/Tyndale.json"
+      "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/Tyndale.json"
     },
     {
       "id": "YLT",
       "label": "Young's Literal Translation (1898)",
       "language": "en",
-      "address": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/YLT.json"
+      "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/YLT.json"
     },
     {
       "id": "RusSynodal",
       "label": "Синодального Перевода Библии",
       "language": "ru",
-      "address": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/RusSynodal.json"
+      "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/RusSynodal.json"
     },
     {
       "id": "UkrOgienko",
       "label": "Українська Біблія. Переклад Івана Огієнка.",
       "language": "uk",
-      "address": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/UkrOgienko.json"
+      "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/UkrOgienko.json"
     },
     {
       "id": "MapM",
       "label": "מקרא על פי המסורה (Miqra `al pi ha-Mesorah)",
       "language": "hbo",
-      "address": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/MapM.json"
+      "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/MapM.json"
     },
     {
       "id": "KorRV",
       "label": "개역성경",
       "language": "ko",
-      "address": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/KorRV.json"
+      "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/KorRV.json"
     },
     {
       "id": "ChiUn",
       "label": "和合本 (繁體字)",
       "language": "zh-hant",
-      "address": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/ChiUn.json"
+      "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/ChiUn.json"
     },
     {
       "id": "ChiSB",
       "label": "思高本 (Sīgāo Běn), 聖經：思高聖經學會譯釋",
       "language": "zh-hant",
-      "address": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/ChiSB.json"
+      "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/ChiSB.json"
     },
     {
       "id": "JapBungo",
       "label": "明治元訳「舊約聖書」(1953年版) 大正改訳「新約聖書",
       "language": "ja",
-      "address": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/JapBungo.json"
+      "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/JapBungo.json"
     },
     {
       "id": "ChiUnL",
       "label": "聖經 (文理和合)",
       "language": "lzh",
-      "address": "https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/ChiUnL.json"
+      "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/ChiUnL.json"
     }
   ],
   "extraLanguages": [

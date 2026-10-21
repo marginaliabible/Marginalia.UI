@@ -68,7 +68,16 @@ export const BOOK_ALIAS_CONFIG: AliasConfig = {
   'II John': ['2 john', '2 jn', '2jo', 'ii john', 'ii jn', 'second john', '2nd john'],
   'III John': ['3 john', '3 jn', '3jo', 'iii john', 'iii jn', 'third john', '3rd john'],
   'Jude': ['jude', 'jud'],
-  'Revelation': ['revelation', 'rev', 're', 'revelations', 'apocalypse']
+  'Revelation': [
+    'revelation',
+    'rev',
+    're',
+    'revelations',
+    'apocalypse',
+    // scrollmapper / CrossWire style titles
+    'revelation of john',
+    'apocalypse of john'
+  ]
 };
 
 // Blue Letter Bible style three-character book codes, used for {abbr_book} hyperlink tokens.

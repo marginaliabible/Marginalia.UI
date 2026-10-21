@@ -7,7 +7,9 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "test": "jest",
-    "test:watch": "jest --watch"
+    "test:watch": "jest --watch",
+    "generate:scrollmapper": "node scripts/generate-scrollmapper.js",
+    "find:near-duplicates": "node scripts/find-near-duplicate-translations.js"
   },
   "prettier": {
     "printWidth": 100,

@@ -1,10 +1,12 @@
 #!/usr/bin/env node
 /**
- * Generates public/data/library.json and public/data/translations.json from Scrollmapper listings plus local overrides.
+ * Generates public/data/scrollmapper.translations.json from Scrollmapper listings plus local overrides.
+ * Diff this against public/data/translations.json when pulling in new upstream additions.
  * - Pulls the JSON file list from the GitHub API (falls back to local caches if offline).
  * - Parses README to capture language codes and human-readable names.
  * - Overlays any local Bible payload files in public/data/bibles so local copies win.
- * Run by executing `node scripts/generate-settings.js`
+ * - Drops entries listed in scripts/translation-blocklist.json (`blocklisted: { id: name }`).
+ * Run by executing `npm run generate:scrollmapper`
  */
 const fs = require('fs');
 const path = require('path');
@@ -12,14 +14,14 @@ const path = require('path');
 const ROOT = path.resolve(__dirname, '..');
 const DATA_DIR = path.join(ROOT, 'public', 'data');
 const BIBLES_DIR = path.join(ROOT, 'public', 'data', 'bibles');
-const LIBRARY_PATH = path.join(DATA_DIR, 'library.json');
-const TRANSLATIONS_PATH = path.join(DATA_DIR, 'translations.json');
+const OUTPUT_PATH = path.join(DATA_DIR, 'scrollmapper.translations.json');
+const BLOCKLIST_PATH = path.join(__dirname, 'translation-blocklist.json');
 const REMOTE_LIST_URL =
-  'https://api.github.com/repos/scrollmapper/bible_databases/contents/formats/json?ref=master';
+  'https://api.github.com/repos/grinn/scrollmapper_bible_databases/contents/formats/json?ref=master';
 const RAW_BASE =
-  'https://raw.githubusercontent.com/scrollmapper/bible_databases/master/formats/json/';
+  'https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/';
 const README_URL =
-  'https://raw.githubusercontent.com/scrollmapper/bible_databases/master/README.md';
+  'https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/README.md';
 const LOCAL_INDEX_CACHE = path.join(ROOT, 'scrollmapper.json');
 const LOCAL_README_CACHE = path.join(ROOT, 'scrollmapper_readme.md');
 const OFFLINE = process.argv.includes('--offline');
@@ -68,8 +70,16 @@ async function main() {
       };
     });
 
-  const merged = overlayLocal(remoteEntries);
-  merged.sort((a, b) => a.label.localeCompare(b.label));
+  const blocklist = loadBlocklist();
+  const merged = overlayLocal(remoteEntries)
+    .filter((entry) => {
+      if (!blocklist.has(entry.id)) {
+        return true;
+      }
+      console.log(`Skipping blocklisted translation: ${entry.id} (${blocklist.get(entry.id)})`);
+      return false;
+    })
+    .sort((a, b) => a.label.localeCompare(b.label));
 
   const translations = {
     modifiedOn,
@@ -77,17 +87,12 @@ async function main() {
     extraLanguages: loadExtraLanguages()
   };
 
-  const library = {
-    name: 'Built-In',
-    modifiedOn,
-    source: 'translations.json'
-  };
-
   ensureDir(DATA_DIR);
-  fs.writeFileSync(LIBRARY_PATH, JSON.stringify(library, null, 2));
-  fs.writeFileSync(TRANSLATIONS_PATH, JSON.stringify(translations, null, 2));
-  console.log(`Wrote built-in library to ${path.relative(ROOT, LIBRARY_PATH)}`);
-  console.log(`Wrote ${merged.length} entries to translations in ${path.relative(ROOT, TRANSLATIONS_PATH)}`);
+  fs.writeFileSync(OUTPUT_PATH, JSON.stringify(translations, null, 2));
+  console.log(`Wrote ${merged.length} entries to ${path.relative(ROOT, OUTPUT_PATH)}`);
+  if (blocklist.size > 0) {
+    console.log(`Applied blocklist (${blocklist.size}): ${path.relative(ROOT, BLOCKLIST_PATH)}`);
+  }
 }
 
 async function loadIndex() {
@@ -127,7 +132,7 @@ async function loadReadme() {
 }
 
 async function fetchJson(url) {
-  const res = await fetch(url, { headers: { 'User-Agent': 'marginalia-settings-generator' } });
+  const res = await fetch(url, { headers: { 'User-Agent': 'marginalia-scrollmapper-generator' } });
   if (!res.ok) {
     throw new Error(`Failed to fetch ${url}: ${res.status}`);
   }
@@ -135,7 +140,7 @@ async function fetchJson(url) {
 }
 
 async function fetchText(url) {
-  const res = await fetch(url, { headers: { 'User-Agent': 'marginalia-settings-generator' } });
+  const res = await fetch(url, { headers: { 'User-Agent': 'marginalia-scrollmapper-generator' } });
   if (!res.ok) {
     throw new Error(`Failed to fetch ${url}: ${res.status}`);
   }
@@ -189,6 +194,24 @@ function loadExtraLanguages() {
   return Object.entries(EXTRA_LANGUAGE_LABELS)
     .map(([code, label]) => ({ code, label }))
     .sort((a, b) => a.code.localeCompare(b.code));
+}
+
+/** @returns {Map<string, string>} id → translation name */
+function loadBlocklist() {
+  if (!fs.existsSync(BLOCKLIST_PATH)) {
+    return new Map();
+  }
+  const raw = JSON.parse(fs.readFileSync(BLOCKLIST_PATH, 'utf8'));
+  const blocklisted =
+    raw && typeof raw === 'object' && !Array.isArray(raw) ? raw.blocklisted : raw;
+  if (!blocklisted || typeof blocklisted !== 'object' || Array.isArray(blocklisted)) {
+    throw new Error(
+      `Invalid blocklist format in ${path.relative(ROOT, BLOCKLIST_PATH)} (expected blocklisted: { id: name })`
+    );
+  }
+  return new Map(
+    Object.entries(blocklisted).map(([id, name]) => [String(id), String(name)])
+  );
 }
 
 function prettifyId(id) {

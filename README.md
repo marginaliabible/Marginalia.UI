@@ -1,6 +1,6 @@
 # Marginalia
 
-Marginalia is a browser-only React application for exploring and searching Scripture. The default King James Version is bundled locally and additional translations are fetched directly from the [scrollmapper/bible_databases](https://github.com/scrollmapper/bible_databases/tree/master/formats/json) repository on demand. Translations are cached in IndexedDB for offline reuse, and your last location, search term, and theme preference are stored in `localStorage`.
+Marginalia is a browser-only React application for exploring and searching Scripture. The default King James Version is bundled locally and additional translations are fetched directly from the [grinn/scrollmapper_bible_databases](https://github.com/grinn/scrollmapper_bible_databases/tree/master/formats/json) repository on demand. Translations are cached in IndexedDB for offline reuse, and your last location, search term, and theme preference are stored in `localStorage`.
 
 ## Features
 
@@ -153,7 +153,7 @@ src/
 
 - Place additional bundled translations in `public/data/bibles/` to ship them with the app.
 - Remote translations must be accessible via raw JSON URLs. Add them to the Marginalia dropdown by uploading to GitHub (or any CORS-enabled host) following the same structure as the Scrollmapper data set.
-- Update `public/data/library.json` and `public/data/translations.json` to register built-in sources. `public/data/bibles/KJV.json` remains a local Bible payload file referenced from `public/data/translations.json`.
+- Run `npm run generate:scrollmapper` to refresh `public/data/scrollmapper.translations.json`, then diff/merge new entries into `public/data/translations.json`. `public/data/bibles/KJV.json` remains a local Bible payload file referenced from `public/data/translations.json`.
 
 ## License Notes
 
