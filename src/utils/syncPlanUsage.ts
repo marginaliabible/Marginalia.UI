@@ -19,6 +19,13 @@ export interface SyncPlanDocumentRef {
   provider: FederatedProvider;
 }
 
+/** A live Drive/OneDrive file under the current staged selection (from the folder size walk). */
+export interface SyncPlanLiveFile {
+  documentId: string;
+  lastModified?: string;
+  provider: FederatedProvider;
+}
+
 export interface SyncPlanUsageInput {
   committed: PublicanCommittedEntry[];
   /** documentId → published hash (from documents.json). */
@@ -38,6 +45,18 @@ export interface SyncPlanUsageInput {
   deselectedAppliedRootBytes: number[];
   /** Sum of selected supported cloud file bytes (exclusions already applied). */
   selectedBytes: number;
+  /**
+   * Live files under staged selected folders. Used with `membershipKnown` to decide which
+   * disconnect (stowed) publican mod/del rows to keep on the blue bar.
+   */
+  liveSelectedDocs?: readonly SyncPlanLiveFile[];
+  /**
+   * True when every reconnecting provider's staged folders have been listed.
+   * When false, stowed disconnect dels are hidden (same bar as never disconnected).
+   */
+  membershipKnown?: boolean;
+  /** ISO timestamps from `/sync/status` for providers awaiting reconnect Apply. */
+  disconnectedAtByProvider?: Partial<Record<FederatedProvider, string>>;
 }
 
 export interface SyncPlanUsageResult {
@@ -63,15 +82,100 @@ export function sumCommittedSizes(committed: readonly PublicanCommittedEntry[]):
   return committed.reduce((sum, entry) => sum + entrySize(entry), 0);
 }
 
+function parseTimeMs(value: string | undefined): number | null {
+  const raw = String(value ?? '').trim();
+  if (!raw) {
+    return null;
+  }
+  const ms = Date.parse(raw);
+  return Number.isFinite(ms) ? ms : null;
+}
+
+function committedProvider(entry: PublicanCommittedEntry): FederatedProvider | undefined {
+  const code = String(entry.provider ?? '').trim().toLowerCase();
+  if (code === 'g' || code === 'google' || code === 'googledrive' || code === 'google-drive') {
+    return 'google';
+  }
+  if (code === 'o' || code === 'microsoft' || code === 'onedrive' || code === 'one-drive') {
+    return 'microsoft';
+  }
+  return undefined;
+}
+
+/**
+ * A publican mod/del whose hash is still in documents.json is a disconnect (stowed-library) charge,
+ * not a historical one. Clear it when the live file is still selected and was not touched after
+ * disconnectedAt, or when membership is not known yet.
+ */
+function shouldClearStowedHash(
+  documentIds: readonly string[],
+  liveById: ReadonlyMap<string, SyncPlanLiveFile>,
+  membershipKnown: boolean,
+  disconnectedAtByProvider: Partial<Record<FederatedProvider, string>>,
+  providerByDocumentId: ReadonlyMap<string, FederatedProvider>
+): boolean {
+  if (!membershipKnown) {
+    return true;
+  }
+
+  for (const documentId of documentIds) {
+    const live = liveById.get(documentId);
+    if (!live) {
+      continue;
+    }
+    const lastModifiedMs = parseTimeMs(live.lastModified);
+    if (lastModifiedMs == null) {
+      return true;
+    }
+    const provider = live.provider || providerByDocumentId.get(documentId);
+    const disconnectedAtMs = provider ? parseTimeMs(disconnectedAtByProvider[provider]) : null;
+    if (disconnectedAtMs == null || lastModifiedMs <= disconnectedAtMs) {
+      return true;
+    }
+  }
+  return false;
+}
+
 /**
  * Preview publican adjustments before Apply:
  * - Selecting a doc whose published hash matches a mod/del row clears that row's size from blue.
  * - Deselecting an already-uploaded doc adds floor(fileSize/2) to blue.
+ * - Disconnect stowed dels (hash still published) follow live membership and last-modified vs disconnectedAt.
  */
 export function computeSyncPlanUsage(input: SyncPlanUsageInput): SyncPlanUsageResult {
   const committedBaseBytes = sumCommittedSizes(input.committed);
   const stagedIds = new Set(input.stagedSelectedDocs.map((doc) => doc.documentId));
   const appliedById = new Map(input.appliedSelectedDocs.map((doc) => [doc.documentId, doc]));
+  const liveById = new Map((input.liveSelectedDocs ?? []).map((doc) => [doc.documentId, doc]));
+  const membershipKnown = Boolean(input.membershipKnown);
+  const disconnectedAtByProvider = input.disconnectedAtByProvider ?? {};
+
+  const providerByDocumentId = new Map<string, FederatedProvider>();
+  for (const entry of input.committed) {
+    const provider = committedProvider(entry);
+    const documentId = String(entry.documentId ?? '').trim();
+    if (provider && documentId && !providerByDocumentId.has(documentId)) {
+      providerByDocumentId.set(documentId, provider);
+    }
+  }
+  for (const doc of [...input.stagedSelectedDocs, ...input.appliedSelectedDocs, ...(input.liveSelectedDocs ?? [])]) {
+    if (doc.documentId && !providerByDocumentId.has(doc.documentId)) {
+      providerByDocumentId.set(doc.documentId, doc.provider);
+    }
+  }
+
+  const publishedHashes = new Set<string>();
+  const documentIdsByPublishedHash = new Map<string, string[]>();
+  for (const [documentId, rawHash] of input.publishedByDocumentId) {
+    const hash = normalizeHash(rawHash);
+    if (!hash) {
+      continue;
+    }
+    publishedHashes.add(hash);
+    const ids = documentIdsByPublishedHash.get(hash) ?? [];
+    ids.push(documentId);
+    documentIdsByPublishedHash.set(hash, ids);
+  }
 
   const modDelByHash = new Map<string, number>();
   for (const entry of input.committed) {
@@ -88,11 +192,32 @@ export function computeSyncPlanUsage(input: SyncPlanUsageInput): SyncPlanUsageRe
 
   let clearedCommittedBytes = 0;
   const clearedHashes = new Set<string>();
+  const unclearedStowedHashes = new Set<string>();
+
+  for (const [hash, amount] of modDelByHash) {
+    if (!publishedHashes.has(hash) || !(amount > 0)) {
+      continue;
+    }
+    const documentIds = documentIdsByPublishedHash.get(hash) ?? [];
+    if (shouldClearStowedHash(
+      documentIds,
+      liveById,
+      membershipKnown,
+      disconnectedAtByProvider,
+      providerByDocumentId
+    )) {
+      clearedCommittedBytes += amount;
+      clearedHashes.add(hash);
+    } else {
+      unclearedStowedHashes.add(hash);
+    }
+  }
+
   for (const doc of input.stagedSelectedDocs) {
     const publishedHash = normalizeHash(
       input.publishedByDocumentId.get(doc.documentId) ?? doc.hash
     );
-    if (!publishedHash || clearedHashes.has(publishedHash)) {
+    if (!publishedHash || clearedHashes.has(publishedHash) || publishedHashes.has(publishedHash)) {
       continue;
     }
     const amount = modDelByHash.get(publishedHash);
@@ -103,10 +228,14 @@ export function computeSyncPlanUsage(input: SyncPlanUsageInput): SyncPlanUsageRe
   }
 
   let pendingDelChargeBytes = 0;
-  for (const rootBytes of input.deselectedAppliedRootBytes ?? []) {
-    const sizeBytes = Math.max(0, Math.floor(Number(rootBytes) || 0));
-    if (sizeBytes > 0) {
-      pendingDelChargeBytes += Math.floor(sizeBytes / 2);
+  const skipFolderPendingDels = membershipKnown && unclearedStowedHashes.size > 0
+    && [...input.publishedByDocumentId.keys()].some((documentId) => !liveById.has(documentId));
+  if (!skipFolderPendingDels) {
+    for (const rootBytes of input.deselectedAppliedRootBytes ?? []) {
+      const sizeBytes = Math.max(0, Math.floor(Number(rootBytes) || 0));
+      if (sizeBytes > 0) {
+        pendingDelChargeBytes += Math.floor(sizeBytes / 2);
+      }
     }
   }
   for (const [documentId, applied] of appliedById) {
@@ -117,6 +246,9 @@ export function computeSyncPlanUsage(input: SyncPlanUsageInput): SyncPlanUsageRe
       input.publishedByDocumentId.get(documentId) ?? applied.hash
     );
     if (!publishedHash) {
+      continue;
+    }
+    if (unclearedStowedHashes.has(publishedHash)) {
       continue;
     }
     const sizeBytes = Math.max(0, Math.floor(Number(applied.sizeBytes) || 0));

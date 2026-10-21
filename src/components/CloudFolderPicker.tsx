@@ -3,7 +3,8 @@ import type { FederatedProvider } from '../models/bible';
 import type { FederatedSession } from '../services/federatedAuthService';
 import {
   listFolderChildrenForSession,
-  computeSupportedFolderSizeForSession,
+  listSupportedFolderContentsForSession,
+  type SupportedFolderFile,
 } from '../services/cloudConfigProviderService';
 import { getMarkupFileIcon, isSupportedMarkupFileName } from '../utils/supportedMarkupFileTypes';
 import { useHorizontalSplit } from '../hooks/useHorizontalSplit';
@@ -23,7 +24,7 @@ import type { SubscriptionsBinding } from '../models/subscription';
 import { findStarredTranslationBlock, useSubscriptionStaging } from '../hooks/useSubscriptionStaging';
 import { showToast } from '../services/toastService';
 import { formatAccountSyncApplyToast, type FolderApplyResult } from '../utils/syncToastMessages';
-import type { SyncPlanDocumentRef } from '../utils/syncPlanUsage';
+import type { SyncPlanDocumentRef, SyncPlanLiveFile } from '../utils/syncPlanUsage';
 
 const ROOT_LABEL: Record<FederatedProvider, string> = {
   google: 'Google Drive',
@@ -41,6 +42,13 @@ export interface CloudFolderPickerUsageSnapshot {
   appliedSelectedDocs: SyncPlanDocumentRef[];
   /** Full supported sizes of applied roots that were removed from the staged selection. */
   deselectedAppliedRootBytes: number[];
+  /** Supported files under staged folders from the size walk (exclusions applied). */
+  liveSelectedDocs: SyncPlanLiveFile[];
+  /**
+   * True when every reconnecting provider's staged folder has a completed file inventory,
+   * or there is nothing to list for those providers.
+   */
+  membershipKnown: boolean;
 }
 
 // Group key for the right panel's top-level accordion (only one selected root expanded at a time).
@@ -563,16 +571,29 @@ function resolveRootSizeBytes(
   return 0;
 }
 
+function isFileExcludedFromSelection(file: SupportedFolderFile, excludedItemIds: ReadonlySet<string>): boolean {
+  if (excludedItemIds.size === 0) {
+    return false;
+  }
+  if (excludedItemIds.has(file.id)) {
+    return true;
+  }
+  return file.ancestorIds.some((ancestorId) => excludedItemIds.has(ancestorId));
+}
+
 function computeUsageSnapshot(
   selectedRows: SelectedFolder[],
   nodes: Record<string, FolderTreeNode>,
-  appliedPayload: Record<FederatedProvider, FolderSelectionTarget[]>
+  appliedPayload: Record<FederatedProvider, FolderSelectionTarget[]>,
+  folderContentsByRoot: Record<string, SupportedFolderFile[]>,
+  reconnectPending?: Partial<Record<FederatedProvider, boolean>>
 ): CloudFolderPickerUsageSnapshot {
   let selectedBytes = 0;
   let sizesReady = true;
   const providers = new Set<FederatedProvider>();
   const stagedSelectedDocs: SyncPlanDocumentRef[] = [];
   const stagedRootKeys = new Set(selectedRows.map((row) => row.key));
+  const liveById = new Map<string, SyncPlanLiveFile>();
 
   for (const row of selectedRows) {
     providers.add(row.provider);
@@ -590,6 +611,16 @@ function computeUsageSnapshot(
     }
     selectedBytes += rootBytes;
     stagedSelectedDocs.push(...collectFileDocsUnderSelection(row, nodes));
+    for (const file of folderContentsByRoot[row.key] ?? []) {
+      if (isFileExcludedFromSelection(file, row.excludedItemIds)) {
+        continue;
+      }
+      liveById.set(file.id, {
+        documentId: file.id,
+        provider: row.provider,
+        ...(file.lastModified ? { lastModified: file.lastModified } : {}),
+      });
+    }
   }
 
   const appliedSelected = buildSelectedMapFromPayload(appliedPayload);
@@ -607,6 +638,13 @@ function computeUsageSnapshot(
     appliedSelectedDocs.push(...collectFileDocsUnderSelection(row, nodes));
   }
 
+  const reconnectRoots = selectedRows.filter((row) => reconnectPending?.[row.provider]);
+  const reconnecting = (Object.keys(ROOT_LABEL) as FederatedProvider[]).some((provider) => (
+    Boolean(reconnectPending?.[provider])
+  ));
+  const membershipKnown = reconnecting
+    && reconnectRoots.every((row) => Object.prototype.hasOwnProperty.call(folderContentsByRoot, row.key));
+
   return {
     selectedBytes,
     sizesReady: selectedRows.length === 0 ? true : sizesReady,
@@ -614,6 +652,8 @@ function computeUsageSnapshot(
     stagedSelectedDocs,
     appliedSelectedDocs,
     deselectedAppliedRootBytes,
+    liveSelectedDocs: Array.from(liveById.values()),
+    membershipKnown,
   };
 }
 
@@ -643,6 +683,7 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
   const [rootKeys, setRootKeys] = useState<string[]>([]);
   const [nodes, setNodes] = useState<Record<string, FolderTreeNode>>({});
   const [selected, setSelected] = useState<Record<string, SelectedFolder>>({});
+  const [folderContentsByRoot, setFolderContentsByRoot] = useState<Record<string, SupportedFolderFile[]>>({});
   // Mobile stacked layout: open files when selections already exist, otherwise providers.
   const [mobilePane, setMobilePane] = useState<MobileSyncPane>(() => (
     hasAnyFolderSelection(initialSelections) ? 'files' : 'providers'
@@ -1166,8 +1207,14 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
   }, [isDirty, onDirtyChange]);
 
   const usageSnapshot = useMemo(
-    () => computeUsageSnapshot(selectedRows, nodes, initialSelections),
-    [initialSelections, nodes, selectedRows]
+    () => computeUsageSnapshot(
+      selectedRows,
+      nodes,
+      initialSelections,
+      folderContentsByRoot,
+      reconnectPending
+    ),
+    [folderContentsByRoot, initialSelections, nodes, reconnectPending, selectedRows]
   );
   const usageSnapshotFingerprintRef = useRef('');
 
@@ -1182,6 +1229,8 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
       stagedSelectedDocs: usageSnapshot.stagedSelectedDocs,
       appliedSelectedDocs: usageSnapshot.appliedSelectedDocs,
       deselectedAppliedRootBytes: usageSnapshot.deselectedAppliedRootBytes,
+      liveSelectedDocs: usageSnapshot.liveSelectedDocs,
+      membershipKnown: usageSnapshot.membershipKnown,
     });
     if (fingerprint === usageSnapshotFingerprintRef.current) {
       return;
@@ -1608,6 +1657,23 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
     return rows;
   }, [nodes, rightExpandedKeyByParent, selectedRows]);
 
+  const selectedRootKeys = useMemo(() => new Set(selectedRows.map((row) => row.key)), [selectedRows]);
+  const selectedRootKeysRef = useRef(selectedRootKeys);
+  selectedRootKeysRef.current = selectedRootKeys;
+  useEffect(() => {
+    setFolderContentsByRoot((current) => {
+      const extra = Object.keys(current).filter((key) => !selectedRootKeys.has(key));
+      if (extra.length === 0) {
+        return current;
+      }
+      const next = { ...current };
+      for (const key of extra) {
+        delete next[key];
+      }
+      return next;
+    });
+  }, [selectedRootKeys]);
+
   // Eagerly size every selected root (and visible right-panel folders) so the plan bar can fill.
   useEffect(() => {
     const keysToSize = new Set<string>();
@@ -1620,7 +1686,14 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
 
     for (const nodeKey of keysToSize) {
       const node = nodesRef.current[nodeKey];
-      if (!node || node.kind !== 'folder' || node.sizeKnown) {
+      if (!node || node.kind !== 'folder') {
+        continue;
+      }
+
+      const isSelectedRoot = selectedRootKeys.has(nodeKey);
+      const needsInventory = isSelectedRoot && Boolean(reconnectPending?.[node.provider]);
+      const hasInventory = Object.prototype.hasOwnProperty.call(folderContentsByRoot, nodeKey);
+      if (node.sizeKnown && !(needsInventory && !hasInventory)) {
         continue;
       }
 
@@ -1635,7 +1708,8 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
 
       const readPromise = (async () => {
         try {
-          const computedSize = await computeSupportedFolderSizeForSession(session, node.id, node.driveId);
+          const contents = await listSupportedFolderContentsForSession(session, node.id, node.driveId);
+          const computedSize = Math.max(0, Math.floor(contents.totalBytes));
           updateNodes((current) => {
             const existing = current[nodeKey];
             if (!existing) {
@@ -1646,11 +1720,14 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
               ...current,
               [nodeKey]: {
                 ...existing,
-                sizeBytes: Math.max(0, Math.floor(computedSize)),
+                sizeBytes: computedSize,
                 sizeKnown: true,
               },
             };
           });
+          if (needsInventory && selectedRootKeysRef.current.has(nodeKey)) {
+            setFolderContentsByRoot((current) => ({ ...current, [nodeKey]: contents.files }));
+          }
         } catch {
           // Keep unknown size blank if compute fails.
         } finally {
@@ -1660,7 +1737,7 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
 
       inFlightFolderSizeReadsRef.current[nodeKey] = readPromise;
     }
-  }, [rightVisibleRows, selectedRows, sessions, updateNodes]);
+  }, [folderContentsByRoot, reconnectPending, rightVisibleRows, selectedRootKeys, selectedRows, sessions, updateNodes]);
 
   // Right-panel expansion outlives the node tree, which is rebuilt whenever sessions change.
   useEffect(() => {

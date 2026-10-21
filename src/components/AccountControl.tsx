@@ -515,6 +515,8 @@ const AccountControl: React.FC<AccountControlProps> = ({ subscriptions }) => {
     stagedSelectedDocs: [],
     appliedSelectedDocs: [],
     deselectedAppliedRootBytes: [],
+    liveSelectedDocs: [],
+    membershipKnown: false,
   });
   const [publicanCommitted, setPublicanCommitted] = useState<PublicanCommittedEntry[]>([]);
   const [publishedByDocumentId, setPublishedByDocumentId] = useState<Map<string, string>>(() => new Map());
@@ -1822,6 +1824,13 @@ const AccountControl: React.FC<AccountControlProps> = ({ subscriptions }) => {
       return Array.from(byId.values());
     };
 
+    const disconnectedAtByProvider = Object.fromEntries(
+      reconnectPendingProviders.flatMap((provider) => {
+        const disconnectedAt = cloudSyncStatus?.providers?.[provider]?.disconnectedAt;
+        return disconnectedAt ? [[provider, disconnectedAt]] : [];
+      })
+    ) as Partial<Record<FederatedProvider, string>>;
+
     return computeSyncPlanUsage({
       committed: publicanCommitted,
       publishedByDocumentId,
@@ -1829,8 +1838,17 @@ const AccountControl: React.FC<AccountControlProps> = ({ subscriptions }) => {
       appliedSelectedDocs: enrich(pickerUsageSnapshot.appliedSelectedDocs),
       deselectedAppliedRootBytes: pickerUsageSnapshot.deselectedAppliedRootBytes,
       selectedBytes: pickerUsageSnapshot.selectedBytes,
+      liveSelectedDocs: pickerUsageSnapshot.liveSelectedDocs,
+      membershipKnown: pickerUsageSnapshot.membershipKnown,
+      disconnectedAtByProvider,
     });
-  }, [pickerUsageSnapshot, publicanCommitted, publishedByDocumentId]);
+  }, [
+    cloudSyncStatus,
+    pickerUsageSnapshot,
+    publicanCommitted,
+    publishedByDocumentId,
+    reconnectPendingProviders,
+  ]);
 
   const requiredStoragePlan = useMemo(
     () => requiredPlanForBytes(planUsage.billableBytes),

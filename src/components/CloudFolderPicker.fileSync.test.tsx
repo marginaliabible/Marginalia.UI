@@ -6,6 +6,7 @@ import { listFolderChildrenForSession } from '../services/cloudConfigProviderSer
 jest.mock('../services/cloudConfigProviderService', () => ({
   listFolderChildrenForSession: jest.fn(async () => []),
   computeSupportedFolderSizeForSession: jest.fn(async () => 0),
+  listSupportedFolderContentsForSession: jest.fn(async () => ({ totalBytes: 0, files: [] })),
 }));
 
 const listFolderChildrenMock = listFolderChildrenForSession as jest.MockedFunction<typeof listFolderChildrenForSession>;

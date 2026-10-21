@@ -7,6 +7,7 @@ import { __resetToastsForTests, getToasts } from '../services/toastService';
 jest.mock('../services/cloudConfigProviderService', () => ({
   listFolderChildrenForSession: jest.fn(async () => []),
   computeSupportedFolderSizeForSession: jest.fn(async () => 0),
+  listSupportedFolderContentsForSession: jest.fn(async () => ({ totalBytes: 0, files: [] })),
 }));
 
 const PUBLISHER_URL = 'https://publisher.example/library.json';

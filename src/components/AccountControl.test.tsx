@@ -84,13 +84,20 @@ jest.mock('../services/publicanService', () => ({
   })),
 }));
 
-jest.mock('../services/cloudConfigProviderService', () => ({
-  listFolderChildrenForSession: jest.fn(),
-  mergeLinkedAccounts: jest.requireActual('../services/cloudConfigProviderService').mergeLinkedAccounts,
-  computeSupportedFolderSizeForSession: jest.fn(),
-  readCloudConfigForSession: jest.fn(),
-  writeCloudConfigForSession: jest.fn(),
-}));
+jest.mock('../services/cloudConfigProviderService', () => {
+  const computeSupportedFolderSizeForSession = jest.fn();
+  return {
+    listFolderChildrenForSession: jest.fn(),
+    mergeLinkedAccounts: jest.requireActual('../services/cloudConfigProviderService').mergeLinkedAccounts,
+    computeSupportedFolderSizeForSession,
+    listSupportedFolderContentsForSession: jest.fn(async (...args: unknown[]) => ({
+      totalBytes: Number(await (computeSupportedFolderSizeForSession as jest.Mock)(...args)) || 0,
+      files: [],
+    })),
+    readCloudConfigForSession: jest.fn(),
+    writeCloudConfigForSession: jest.fn(),
+  };
+});
 
 const mockUseAppDispatch = useAppDispatch as unknown as jest.Mock;
 const mockUseAppSelector = useAppSelector as unknown as jest.Mock;

@@ -13,6 +13,7 @@ jest.mock('../services/cloudConfigProviderService', () => ({
       : []
   )),
   computeSupportedFolderSizeForSession: jest.fn(async () => 0),
+  listSupportedFolderContentsForSession: jest.fn(async () => ({ totalBytes: 0, files: [] })),
 }));
 
 const googleSession = { provider: 'google', accessToken: 'token' } as unknown as FederatedSession;

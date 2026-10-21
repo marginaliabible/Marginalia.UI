@@ -82,11 +82,24 @@ export interface CloudFolderEntry {
   kind: 'file' | 'folder';
   sizeBytes: number;
   hasChildren: boolean;
+  /** Provider last-modified (Google `modifiedTime`, Graph `lastModifiedDateTime`). */
+  lastModified?: string;
   /**
    * Microsoft Graph drive id for shared/remote folders that must be listed via
    * `/drives/{driveId}/items/{id}/children` instead of `/me/drive/items/{id}/children`.
    */
   driveId?: string;
+}
+
+export interface SupportedFolderFile {
+  id: string;
+  lastModified?: string;
+  ancestorIds: string[];
+}
+
+export interface SupportedFolderContents {
+  totalBytes: number;
+  files: SupportedFolderFile[];
 }
 
 export interface CloudFolderLineageEntry {
@@ -395,7 +408,7 @@ async function listGoogleFolderChildren(
   do {
     const params = new URLSearchParams({
       q: `'${parentId}' in parents and trashed=false`,
-      fields: 'files(id,name,mimeType,quotaBytesUsed,size),nextPageToken',
+      fields: 'files(id,name,mimeType,quotaBytesUsed,size,modifiedTime),nextPageToken',
       pageSize: '200',
       supportsAllDrives: 'true',
       includeItemsFromAllDrives: 'true',
@@ -423,6 +436,7 @@ async function listGoogleFolderChildren(
         mimeType?: string;
         quotaBytesUsed?: string;
         size?: string;
+        modifiedTime?: string;
       }>;
       nextPageToken?: string;
     };
@@ -435,6 +449,9 @@ async function listGoogleFolderChildren(
 
       const isFolder = entry.mimeType === 'application/vnd.google-apps.folder';
 
+      const lastModified = typeof entry.modifiedTime === 'string' && entry.modifiedTime.trim()
+        ? entry.modifiedTime.trim()
+        : undefined;
       allFolders.push({
         id: entry.id,
         name: typeof entry.name === 'string' && entry.name.trim().length > 0 ? entry.name : 'Untitled',
@@ -443,6 +460,7 @@ async function listGoogleFolderChildren(
         // Drive v3 does not return child-count metadata in this listing shape.
         // Assume expandable initially; once loaded, downstream UI collapses empty folders.
         hasChildren: isFolder,
+        ...(lastModified ? { lastModified } : {}),
       });
     }
 
@@ -458,12 +476,14 @@ type MicrosoftDriveListItem = {
   id?: string;
   name?: string;
   size?: number;
+  lastModifiedDateTime?: string;
   folder?: { childCount?: number };
   file?: unknown;
   remoteItem?: {
     id?: string;
     name?: string;
     size?: number;
+    lastModifiedDateTime?: string;
     folder?: { childCount?: number };
     file?: unknown;
     parentReference?: {
@@ -497,12 +517,17 @@ function mapMicrosoftDriveListItem(item: MicrosoftDriveListItem): CloudFolderEnt
     return null;
   }
 
+  const lastModifiedRaw = item.lastModifiedDateTime ?? item.remoteItem?.lastModifiedDateTime;
+  const lastModified = typeof lastModifiedRaw === 'string' && lastModifiedRaw.trim()
+    ? lastModifiedRaw.trim()
+    : undefined;
   const entry: CloudFolderEntry = {
     id: itemId,
     name: typeof itemName === 'string' && itemName.trim().length > 0 ? itemName : 'Untitled',
     kind: folderFacet ? 'folder' : 'file',
     sizeBytes: typeof itemSize === 'number' && Number.isFinite(itemSize) ? itemSize : 0,
     hasChildren: folderFacet ? Number(folderFacet.childCount || 0) > 0 : false,
+    ...(lastModified ? { lastModified } : {}),
   };
 
   if (isRemoteOnlyFolder) {
@@ -596,7 +621,7 @@ async function listMicrosoftFolderChildren(
   parentId: string,
   driveId?: string
 ): Promise<CloudFolderEntry[]> {
-  const select = 'id,name,folder,file,size,remoteItem';
+  const select = 'id,name,folder,file,size,lastModifiedDateTime,remoteItem';
   const initial = await listMicrosoftFolderChildrenFromUrl(
     session,
     microsoftDriveChildrenUrl(parentId, select, driveId)
@@ -738,28 +763,38 @@ export async function listFolderChildrenForSession(
   return listMicrosoftFolderChildren(session, parentId, driveId);
 }
 
-export async function computeSupportedFolderSizeForSession(
+export async function listSupportedFolderContentsForSession(
   session: FederatedSession,
   folderId: string,
   driveId?: string
-): Promise<number> {
+): Promise<SupportedFolderContents> {
   const visitedFolderIds = new Set<string>([folderId]);
-  let currentLevel: Array<{ id: string; driveId?: string }> = [{ id: folderId, driveId }];
+  let currentLevel: Array<{ id: string; driveId?: string; ancestorIds: string[] }> = [
+    { id: folderId, driveId, ancestorIds: [folderId] },
+  ];
   let totalBytes = 0;
+  const files: SupportedFolderFile[] = [];
 
   // Fetch each BFS level concurrently instead of one folder at a time so large trees resolve quickly.
   while (currentLevel.length > 0) {
     const levelChildren = await Promise.all(
-      currentLevel.map((currentFolder) => listFolderChildrenForSession(session, currentFolder.id, currentFolder.driveId))
+      currentLevel.map(async (currentFolder) => ({
+        currentFolder,
+        children: await listFolderChildrenForSession(session, currentFolder.id, currentFolder.driveId),
+      }))
     );
 
-    const nextLevel: Array<{ id: string; driveId?: string }> = [];
-    for (const children of levelChildren) {
+    const nextLevel: Array<{ id: string; driveId?: string; ancestorIds: string[] }> = [];
+    for (const { currentFolder, children } of levelChildren) {
       for (const child of children) {
         if (child.kind === 'folder') {
           if (!visitedFolderIds.has(child.id)) {
             visitedFolderIds.add(child.id);
-            nextLevel.push({ id: child.id, driveId: child.driveId });
+            nextLevel.push({
+              id: child.id,
+              driveId: child.driveId,
+              ancestorIds: [...currentFolder.ancestorIds, child.id],
+            });
           }
 
           continue;
@@ -767,6 +802,11 @@ export async function computeSupportedFolderSizeForSession(
 
         if (isSupportedMarkupFileName(child.name)) {
           totalBytes += child.sizeBytes;
+          files.push({
+            id: child.id,
+            ancestorIds: currentFolder.ancestorIds,
+            ...(child.lastModified ? { lastModified: child.lastModified } : {}),
+          });
         }
       }
     }
@@ -774,6 +814,15 @@ export async function computeSupportedFolderSizeForSession(
     currentLevel = nextLevel;
   }
 
+  return { totalBytes, files };
+}
+
+export async function computeSupportedFolderSizeForSession(
+  session: FederatedSession,
+  folderId: string,
+  driveId?: string
+): Promise<number> {
+  const { totalBytes } = await listSupportedFolderContentsForSession(session, folderId, driveId);
   return totalBytes;
 }
 
