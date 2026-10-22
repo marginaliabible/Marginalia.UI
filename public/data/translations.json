@@ -1,5 +1,5 @@
 {
-  "modifiedOn": "2026-10-21T14:50:07.000Z",
+  "modifiedOn": "2026-10-22T21:32:49.383Z",
   "translations": [
     {
       "id": "CSlElizabeth",
@@ -50,6 +50,18 @@
       "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/Alb.json"
     },
     {
+      "id": "aleppo",
+      "label": "Aleppo Codex",
+      "language": "hbo",
+      "address": "https://raw.githubusercontent.com/grinn/Marginalia.Translations/main/licensed/GitBible/aleppo.json"
+    },
+    {
+      "id": "almeida",
+      "label": "Almeida Atualizada",
+      "language": "pt",
+      "address": "https://raw.githubusercontent.com/grinn/Marginalia.Translations/main/licensed/GitBible/almeida.json"
+    },
+    {
       "id": "AKJV",
       "label": "American King James Version",
       "language": "en",
@@ -66,6 +78,12 @@
       "label": "Baiboly Malagasy (1865)",
       "language": "mg",
       "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/Mg1865.json"
+    },
+    {
+      "id": "basque",
+      "label": "Basque Navarro-Labourdin NT",
+      "language": "eu",
+      "address": "https://raw.githubusercontent.com/grinn/Marginalia.Translations/main/licensed/GitBible/basque.json"
     },
     {
       "id": "BSB",
@@ -140,16 +158,40 @@
       "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/CebPinadayag.json"
     },
     {
+      "id": "chamorro",
+      "label": "Chamorro (Psalms, Gospels, Acts)",
+      "language": "ch",
+      "address": "https://raw.githubusercontent.com/grinn/Marginalia.Translations/main/licensed/GitBible/chamorro.json"
+    },
+    {
       "id": "Che1860",
       "label": "Cherokee New Testament (1860) with Sequoyah transliterated forms",
       "language": "chr",
       "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/Che1860.json"
     },
     {
+      "id": "cus",
+      "label": "Chinese Union Version (Simplified)",
+      "language": "zh-Hans",
+      "address": "https://raw.githubusercontent.com/grinn/Marginalia.Translations/main/licensed/GitBible/cus.json"
+    },
+    {
       "id": "VulgClementine",
       "label": "Clementine Vulgate",
       "language": "la",
       "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/VulgClementine.json"
+    },
+    {
+      "id": "coptic",
+      "label": "Coptic New Testament",
+      "language": "cop",
+      "address": "https://raw.githubusercontent.com/grinn/Marginalia.Translations/main/licensed/GitBible/coptic.json"
+    },
+    {
+      "id": "croatia",
+      "label": "Croatian Bible",
+      "language": "hr",
+      "address": "https://raw.githubusercontent.com/grinn/Marginalia.Translations/main/licensed/GitBible/croatia.json"
     },
     {
       "id": "CzeBKR",
@@ -164,10 +206,22 @@
       "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/CzeCSP.json"
     },
     {
+      "id": "danish1819",
+      "label": "Danish New Testament from 1819 with original orthography",
+      "language": "da",
+      "address": "https://raw.githubusercontent.com/grinn/Marginalia.Translations/main/licensed/GitBible/danish1819.json"
+    },
+    {
       "id": "DaOT1871NT1907",
       "label": "Danish OT1871 + NT1907 with original orthography",
       "language": "da",
       "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/DaOT1871NT1907.json"
+    },
+    {
+      "id": "danish",
+      "label": "Danish OT1931 + NT1907 with original orthography",
+      "language": "da",
+      "address": "https://raw.githubusercontent.com/grinn/Marginalia.Translations/main/licensed/GitBible/danish.json"
     },
     {
       "id": "Darby",
@@ -206,16 +260,34 @@
       "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/DRC.json"
     },
     {
+      "id": "statenvertaling",
+      "label": "Dutch Statenvertaling",
+      "language": "nl",
+      "address": "https://raw.githubusercontent.com/grinn/Marginalia.Translations/main/licensed/GitBible/statenvertaling.json"
+    },
+    {
       "id": "DutSVV",
       "label": "Dutch Statenvertaling Bijbel",
       "language": "nl",
       "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/DutSVV.json"
     },
     {
+      "id": "easternarmenian",
+      "label": "Eastern Armenian (Genesis, Exodus, Gospels)",
+      "language": "hy",
+      "address": "https://raw.githubusercontent.com/grinn/Marginalia.Translations/main/licensed/GitBible/easternarmenian.json"
+    },
+    {
       "id": "ArmEastern",
       "label": "Eastern Armenian Bible",
       "language": "hy",
       "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/ArmEastern.json"
+    },
+    {
+      "id": "calo",
+      "label": "El Evangelio segun S. Lucas, traducido al Romaní, ó dialecto de los Gitanos de España",
+      "language": "rmq",
+      "address": "https://raw.githubusercontent.com/grinn/Marginalia.Translations/main/licensed/GitBible/calo.json"
     },
     {
       "id": "Jubilee2000",
@@ -234,6 +306,12 @@
       "label": "Estonian Bible",
       "language": "et",
       "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/Est.json"
+    },
+    {
+      "id": "finnish1776",
+      "label": "Finnish Bible (1776)",
+      "language": "fi",
+      "address": "https://raw.githubusercontent.com/grinn/Marginalia.Translations/main/licensed/GitBible/finnish1776.json"
     },
     {
       "id": "FinBiblia",
@@ -284,6 +362,12 @@
       "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/GerTafel.json"
     },
     {
+      "id": "giovanni",
+      "label": "Giovanni Diodati Bible (1649)",
+      "language": "it",
+      "address": "https://raw.githubusercontent.com/grinn/Marginalia.Translations/main/licensed/GitBible/giovanni.json"
+    },
+    {
       "id": "LITV",
       "label": "Green's Literal Translation",
       "language": "en",
@@ -330,6 +414,12 @@
       "label": "Japanese Kougo-yaku 口語訳「聖書」(1954/1955年版)",
       "language": "ja",
       "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/JapKougo.json"
+    },
+    {
+      "id": "japraguet",
+      "label": "Japanese Raguet-yaku ラゲ訳「我主イエズスキリストの新約聖書」(1910年版)",
+      "language": "ja",
+      "address": "https://raw.githubusercontent.com/grinn/Marginalia.Translations/main/licensed/GitBible/japraguet.json"
     },
     {
       "id": "JPS",
@@ -404,6 +494,12 @@
       "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/LvGluck8.json"
     },
     {
+      "id": "latvian",
+      "label": "Latvian New Testament",
+      "language": "lv",
+      "address": "https://raw.githubusercontent.com/grinn/Marginalia.Translations/main/licensed/GitBible/latvian.json"
+    },
+    {
       "id": "FreGeneve1669",
       "label": "Le Nouveau Testament de la Bible de Genève de 1669",
       "language": "fr",
@@ -428,6 +524,18 @@
       "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/FreSynodale1921.json"
     },
     {
+      "id": "ls1910",
+      "label": "Louis Segond (1910)",
+      "language": "fr",
+      "address": "https://raw.githubusercontent.com/grinn/Marginalia.Translations/main/licensed/GitBible/ls1910.json"
+    },
+    {
+      "id": "luther1545",
+      "label": "Luther (1545)",
+      "language": "de",
+      "address": "https://raw.githubusercontent.com/grinn/Marginalia.Translations/main/licensed/GitBible/luther1545.json"
+    },
+    {
       "id": "ManxGaelic",
       "label": "Manx Gaelic Scripture Portions",
       "language": "gv",
@@ -450,6 +558,12 @@
       "label": "Modern Hebrew Bible",
       "language": "he",
       "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/HebModern.json"
+    },
+    {
+      "id": "ndebele",
+      "label": "Ndebele Bible",
+      "language": "nd",
+      "address": "https://raw.githubusercontent.com/grinn/Marginalia.Translations/main/licensed/GitBible/ndebele.json"
     },
     {
       "id": "GreVamvas",
@@ -480,6 +594,24 @@
       "label": "Novi testament in Psalmi Davidovi Josipa Stritarja (1882)",
       "language": "sl",
       "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/SloStritar.json"
+    },
+    {
+      "id": "textusreceptus",
+      "label": "NT Textus Receptus (1550 1894)",
+      "language": "grc",
+      "address": "https://raw.githubusercontent.com/grinn/Marginalia.Translations/main/licensed/GitBible/textusreceptus.json"
+    },
+    {
+      "id": "tischendorf",
+      "label": "NT Tischendorf 8th Ed",
+      "language": "grc",
+      "address": "https://raw.githubusercontent.com/grinn/Marginalia.Translations/main/licensed/GitBible/tischendorf.json"
+    },
+    {
+      "id": "westcotthort",
+      "label": "NT Westcott Hort UBS4 variants",
+      "language": "grc",
+      "address": "https://raw.githubusercontent.com/grinn/Marginalia.Translations/main/licensed/GitBible/westcotthort.json"
     },
     {
       "id": "GerOffBiSt",
@@ -524,6 +656,18 @@
       "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/PolGdanska.json"
     },
     {
+      "id": "potawatomi",
+      "label": "Potawatomi (Matthew Acts) (Lykins 1844)",
+      "language": "pot",
+      "address": "https://raw.githubusercontent.com/grinn/Marginalia.Translations/main/licensed/GitBible/potawatomi.json"
+    },
+    {
+      "id": "pyharaamattu1933",
+      "label": "Pyha Raamattu (1933 1938)",
+      "language": "fi",
+      "address": "https://raw.githubusercontent.com/grinn/Marginalia.Translations/main/licensed/GitBible/pyharaamattu1933.json"
+    },
+    {
       "id": "FinSTLK2017",
       "label": "Pyhä Raamattu (STLK 2017)",
       "language": "fi",
@@ -554,10 +698,22 @@
       "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/RWebster.json"
     },
     {
+      "id": "riveduta",
+      "label": "Riveduta Bible (1927)",
+      "language": "it",
+      "address": "https://raw.githubusercontent.com/grinn/Marginalia.Translations/main/licensed/GitBible/riveduta.json"
+    },
+    {
       "id": "CopSahBible2",
       "label": "Sahidic Bible 2",
       "language": "cop-sa",
       "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/CopSahBible2.json"
+    },
+    {
+      "id": "sahidic",
+      "label": "Sahidic Coptic NT",
+      "language": "cop",
+      "address": "https://raw.githubusercontent.com/grinn/Marginalia.Translations/main/licensed/GitBible/sahidic.json"
     },
     {
       "id": "SP",
@@ -578,6 +734,12 @@
       "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/GerSch.json"
     },
     {
+      "id": "gaelic",
+      "label": "Scots Gaelic (Gospel of Mark)",
+      "language": "gd",
+      "address": "https://raw.githubusercontent.com/grinn/Marginalia.Translations/main/licensed/GitBible/gaelic.json"
+    },
+    {
       "id": "SrKDEkavski",
       "label": "Serbian Bible Daničić-Karadžić Ekavski",
       "language": "sr",
@@ -590,10 +752,22 @@
       "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/SrKDIjekav.json"
     },
     {
+      "id": "shona",
+      "label": "Shona Bible",
+      "language": "sn",
+      "address": "https://raw.githubusercontent.com/grinn/Marginalia.Translations/main/licensed/GitBible/shona.json"
+    },
+    {
       "id": "SloKJV",
       "label": "Slovenian translation of Holy Bible King James Version (1769)",
       "language": "sl",
       "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/SloKJV.json"
+    },
+    {
+      "id": "arabicsv",
+      "label": "Smith and Van Dyck Arabic Bible (1865)",
+      "language": "ar",
+      "address": "https://raw.githubusercontent.com/grinn/Marginalia.Translations/main/licensed/GitBible/arabicsv.json"
     },
     {
       "id": "StatResGNT",
@@ -620,10 +794,22 @@
       "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/SweKarlXII1873.json"
     },
     {
+      "id": "swahili",
+      "label": "Swahili Bible",
+      "language": "sw",
+      "address": "https://raw.githubusercontent.com/grinn/Marginalia.Translations/main/licensed/GitBible/swahili.json"
+    },
+    {
       "id": "Swe1917",
       "label": "Swedish Bible (1917)",
       "language": "sv",
       "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/Swe1917.json"
+    },
+    {
+      "id": "swedish",
+      "label": "Swedish Bible (1917)",
+      "language": "sv",
+      "address": "https://raw.githubusercontent.com/grinn/Marginalia.Translations/main/licensed/GitBible/swedish.json"
     },
     {
       "id": "Peshitta",
@@ -704,6 +890,12 @@
       "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/Twenty.json"
     },
     {
+      "id": "ukranian",
+      "label": "Ukrainian NT (P. Kulish 1871)",
+      "language": "uk",
+      "address": "https://raw.githubusercontent.com/grinn/Marginalia.Translations/main/licensed/GitBible/ukranian.json"
+    },
+    {
       "id": "PolUGdanska",
       "label": "Updated Gdańsk Bible",
       "language": "pl",
@@ -734,16 +926,34 @@
       "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/Webster.json"
     },
     {
+      "id": "westernarmenian",
+      "label": "Western Armenian NT",
+      "language": "hy",
+      "address": "https://raw.githubusercontent.com/grinn/Marginalia.Translations/main/licensed/GitBible/westernarmenian.json"
+    },
+    {
       "id": "WLC",
       "label": "Westminster Leningrad Codex",
       "language": "hbo",
       "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/WLC.json"
     },
     {
+      "id": "weymouth",
+      "label": "Weymouth NT",
+      "language": "en",
+      "address": "https://raw.githubusercontent.com/grinn/Marginalia.Translations/main/licensed/GitBible/weymouth.json"
+    },
+    {
       "id": "Tyndale",
       "label": "William Tyndale Bible (1525/1530)",
       "language": "en",
       "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/Tyndale.json"
+    },
+    {
+      "id": "web",
+      "label": "World English Bible",
+      "language": "en",
+      "address": "https://raw.githubusercontent.com/grinn/Marginalia.Translations/main/licensed/GitBible/web.json"
     },
     {
       "id": "YLT",
@@ -810,8 +1020,16 @@
       "label": "Cebuano"
     },
     {
+      "code": "ch",
+      "label": "Chamorro"
+    },
+    {
       "code": "chr",
       "label": "Cherokee"
+    },
+    {
+      "code": "cop",
+      "label": "Coptic"
     },
     {
       "code": "cop-sa",
@@ -828,6 +1046,10 @@
     {
       "code": "eo",
       "label": "Esperanto"
+    },
+    {
+      "code": "gd",
+      "label": "Scottish Gaelic"
     },
     {
       "code": "got",
@@ -870,12 +1092,28 @@
       "label": "Minangkabau"
     },
     {
+      "code": "nd",
+      "label": "Northern Ndebele"
+    },
+    {
       "code": "pon",
       "label": "Pohnpeian"
     },
     {
+      "code": "pot",
+      "label": "Potawatomi"
+    },
+    {
+      "code": "rmq",
+      "label": "Caló"
+    },
+    {
       "code": "sml",
       "label": "Samali"
+    },
+    {
+      "code": "sn",
+      "label": "Shona"
     },
     {
       "code": "syr",

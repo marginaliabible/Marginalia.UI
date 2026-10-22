@@ -13,6 +13,7 @@
  *   node scripts/find-near-duplicate-translations.js
  *   node scripts/find-near-duplicate-translations.js --min-identical=0.92 --concurrency=4
  *   node scripts/find-near-duplicate-translations.js --language=en --limit=20
+ *   node scripts/find-near-duplicate-translations.js --extra-catalog=../Marginalia.Translations/licensed/translations.json
  */
 const fs = require('fs');
 const path = require('path');
@@ -81,12 +82,18 @@ const LANGUAGE_FILTER = args.language ? String(args.language) : null;
 const LIMIT = args.limit ? Number(args.limit) : null;
 const SAMPLE_DIFFS = Math.max(0, Number(args['sample-diffs'] ?? 25));
 const INCLUDE_BLOCKLISTED = Boolean(args['include-blocklisted']);
+const EXTRA_CATALOG = args['extra-catalog'] ? String(args['extra-catalog']) : null;
 
 async function main() {
   const blocklist = loadBlocklist();
   // Prefer a fresh remote listing so editions already dropped from translations.json
   // (e.g. Apocrypha) are still compared and can be suggested for the blocklist.
   let entries = await loadComparisonEntries();
+  if (EXTRA_CATALOG) {
+    const extra = loadExtraCatalog(EXTRA_CATALOG);
+    console.log(`Loaded ${extra.length} extra catalog entries from ${EXTRA_CATALOG}`);
+    entries = entries.concat(extra);
+  }
   if (!INCLUDE_BLOCKLISTED) {
     entries = entries.filter((entry) => !blocklist.has(entry.id));
   }
@@ -314,8 +321,23 @@ async function fetchText(url) {
   return res.text();
 }
 
+function loadExtraCatalog(catalogPath) {
+  const resolved = path.resolve(ROOT, catalogPath);
+  if (!fs.existsSync(resolved)) {
+    throw new Error(`Extra catalog not found: ${resolved}`);
+  }
+  const catalog = JSON.parse(fs.readFileSync(resolved, 'utf8'));
+  const baseDir = path.dirname(resolved);
+  return (catalog.translations ?? []).map((entry) => ({
+    ...entry,
+    cacheKey: `extra-${entry.id}`,
+    resolveBaseDir: baseDir
+  }));
+}
+
 async function loadBible(entry) {
-  const cachePath = path.join(CACHE_DIR, `${entry.id}.json`);
+  const cacheKey = entry.cacheKey || entry.id;
+  const cachePath = path.join(CACHE_DIR, `${cacheKey}.json`);
   if (fs.existsSync(cachePath)) {
     return JSON.parse(fs.readFileSync(cachePath, 'utf8'));
   }
@@ -329,7 +351,9 @@ async function loadBible(entry) {
     }
     raw = await res.text();
   } else {
-    const localPath = path.join(ROOT, 'public', 'data', address.replace(/^\//, ''));
+    const localPath = entry.resolveBaseDir
+      ? path.resolve(entry.resolveBaseDir, address)
+      : path.join(ROOT, 'public', 'data', address.replace(/^\//, ''));
     raw = fs.readFileSync(localPath, 'utf8');
   }
 
