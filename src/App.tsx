@@ -21,7 +21,7 @@ import {
   removeLoadedTranslations,
 } from './store/slices/bibleSlice';
 import { resolveSelectedVerseContext } from './utils/selectedVerseContext';
-import { formatVerseHtml, markupFlagsFromBible, stripVerseMarkers } from './utils/verseMarkup';
+import { CLIPBOARD_MUTED_COLOR, formatVerseHtml, markupFlagsFromBible, stripVerseMarkers } from './utils/verseMarkup';
 import { formatVerseReference } from './utils/scriptureReference';
 import {
   setSelectedTranslationId,
@@ -294,7 +294,7 @@ function App() {
       ? verseTexts[0].html
       : verseTexts
         .map((entry) => (
-          `<span style="color:#808080;">${entry.verseNumber}</span> ${entry.html}`
+          `<span style="color:${CLIPBOARD_MUTED_COLOR};">${entry.verseNumber}</span> ${entry.html}`
         ))
         .join('<br/>');
     const copyHtml = `<div style="font-family:Calibri, Arial, sans-serif; font-size:11pt;">${referenceHtml}${bodyHtml}</div>`;

@@ -72,7 +72,7 @@ describe('renderVerseMarkers', () => {
 describe('formatVerseHtml', () => {
   it('formats clipboard HTML with italics when enabled and never includes a pilcrow', () => {
     expect(formatVerseHtml('# And darkness [was] upon', optedIn, settingsOn)).toBe(
-      'And darkness <i>was</i> upon'
+      'And darkness <i style="color:#808080;">was</i> upon'
     );
     expect(formatVerseHtml('# And darkness [was] upon', optedIn, settingsOff)).toBe(
       'And darkness was upon'

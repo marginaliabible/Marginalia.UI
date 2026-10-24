@@ -13,6 +13,9 @@ export interface VerseMarkupSettings {
 const BRACKET_TOKEN = /(\[[^\]]+\])/;
 const BRACKET_CONTENTS = /^\[([^\]]+)\]$/;
 
+/** Muted grey used for verse numbers and translator italics in clipboard HTML. */
+export const CLIPBOARD_MUTED_COLOR = '#808080';
+
 /** Remove opted-in translator markers for plain-text consumers (search, clipboard). */
 export function stripVerseMarkers(text: string, flags: VerseMarkupFlags = {}): string {
   let result = text;
@@ -69,7 +72,9 @@ export function formatVerseHtml(
     const match = BRACKET_CONTENTS.exec(part);
     if (match) {
       const words = escapeHtml(match[1]);
-      html += settings.italics ? `<i>${words}</i>` : words;
+      html += settings.italics
+        ? `<i style="color:${CLIPBOARD_MUTED_COLOR};">${words}</i>`
+        : words;
       continue;
     }
 
