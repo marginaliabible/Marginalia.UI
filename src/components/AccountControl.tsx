@@ -679,6 +679,15 @@ const AccountControl: React.FC<AccountControlProps> = ({ subscriptions }) => {
     })),
     [cloudSyncStatus, fileSyncProviders]
   );
+  const failedDocumentsByProvider = useMemo<Partial<Record<FederatedProvider, ReadonlyMap<string, string>>>>(
+    () => Object.fromEntries(fileSyncProviders.flatMap((provider) => {
+      const failed = cloudSyncStatus?.providers?.[provider]?.failedDocuments ?? [];
+      return failed.length > 0
+        ? [[provider, new Map(failed.map((entry) => [entry.documentId, entry.error ?? '']))]]
+        : [];
+    })),
+    [cloudSyncStatus, fileSyncProviders]
+  );
 
   const startSyncWatch = useCallback((providers: FederatedProvider[]) => {
     setSyncWatch((current) => startOrExtendSyncWatch(current, providers, Date.now(), cloudSyncFetchIdRef.current));
@@ -1991,6 +2000,7 @@ const AccountControl: React.FC<AccountControlProps> = ({ subscriptions }) => {
                     onUsageSnapshotChange={setPickerUsageSnapshot}
                     reconnectPending={reconnectPendingByProvider}
                     rejectedDocumentIds={rejectedDocumentIdsByProvider}
+                    failedDocuments={failedDocumentsByProvider}
                     subscriptions={subscriptions}
                     ref={folderPickerRef}
                   />

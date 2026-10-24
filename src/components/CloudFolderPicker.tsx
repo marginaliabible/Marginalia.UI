@@ -24,6 +24,7 @@ import type { SubscriptionsBinding } from '../models/subscription';
 import { findStarredTranslationBlock, useSubscriptionStaging } from '../hooks/useSubscriptionStaging';
 import { showToast } from '../services/toastService';
 import { formatAccountSyncApplyToast, type FolderApplyResult } from '../utils/syncToastMessages';
+import { describeSyncFailure } from '../utils/syncFailureMessages';
 import type { SyncPlanDocumentRef, SyncPlanLiveFile } from '../utils/syncPlanUsage';
 
 const ROOT_LABEL: Record<FederatedProvider, string> = {
@@ -100,6 +101,8 @@ interface CloudFolderPickerProps {
   reconnectPending?: Partial<Record<FederatedProvider, boolean>>;
   // Selected file ids MarkupServer kept out of the library for averaging under one verse per page.
   rejectedDocumentIds?: Partial<Record<FederatedProvider, ReadonlySet<string>>>;
+  // Selected files that failed to convert and are not indexed, keyed by cloud item id → raw error.
+  failedDocuments?: Partial<Record<FederatedProvider, ReadonlyMap<string, string>>>;
   subscriptions?: SubscriptionsBinding;
   ref?: React.Ref<CloudFolderPickerHandle>;
 }
@@ -669,6 +672,7 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
   onUsageSnapshotChange,
   reconnectPending,
   rejectedDocumentIds,
+  failedDocuments,
   subscriptions,
   ref,
 }) => {
@@ -2014,11 +2018,29 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
                   && !isExcluded
                   && !isCoveredByExcludedAncestor
                   && Boolean(rejectedDocumentIds?.[node.provider]?.has(node.id));
+                const failedError = !isFolder
+                  && !visibleRow.isRootSelection
+                  && !isExcluded
+                  && !isCoveredByExcludedAncestor
+                  && !isRejected
+                  ? failedDocuments?.[node.provider]?.get(node.id)
+                  : undefined;
+                const isFailed = failedError !== undefined;
+                const unavailableMessage = isRejected
+                  ? describeLowVerseRatioRejection('This file')
+                  : isFailed
+                    ? describeSyncFailure(null, failedError)
+                    : null;
+                const unavailableAriaLabel = isRejected
+                  ? describeLowVerseRatioRejection(`'${node.name}'`)
+                  : isFailed
+                    ? describeSyncFailure(node.name, failedError)
+                    : null;
                 const displayLabel = (visibleRow.isRootSelection ? rootSelection.path : node.name).replace(/\//g, '/\u200B');
                 const canActivateName = visibleRow.isRootSelection && showChevron;
                 const isTaggable = visibleRow.isRootSelection
                   ? providerAvailable
-                  : !isExcluded && !isCoveredByExcludedAncestor && !isRejected && canToggleSync && providerAvailable;
+                  : !isExcluded && !isCoveredByExcludedAncestor && !isRejected && !isFailed && canToggleSync && providerAvailable;
                 const itemTagId = visibleRow.isRootSelection ? null : node.id;
                 const { effectiveTags: effectiveItemTags, ownTags: ownItemTags } = computeEffectiveTags(
                   visibleRow.key,
@@ -2170,16 +2192,18 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
                           >
                             <i className="fa-solid fa-arrows-rotate"></i>
                           </button>
-                        ) : isRejected ? (
+                        ) : isRejected || isFailed ? (
                           <button
                             type="button"
                             className="btn btn-link btn-sm p-0 cloud-folder-selected-rejected"
-                            title={describeLowVerseRatioRejection('This file')}
-                            aria-label={describeLowVerseRatioRejection(`'${node.name}'`)}
+                            title={unavailableMessage ?? undefined}
+                            aria-label={unavailableAriaLabel ?? undefined}
                             aria-disabled="true"
                             onClick={(event) => {
                               event.stopPropagation();
-                              showToast({ tone: 'info', message: describeLowVerseRatioRejection(`'${node.name}'`) });
+                              if (unavailableAriaLabel) {
+                                showToast({ tone: 'info', message: unavailableAriaLabel });
+                              }
                             }}
                           >
                             <i className="fa-solid fa-upload"></i>

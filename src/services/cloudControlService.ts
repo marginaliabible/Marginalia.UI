@@ -37,12 +37,21 @@ export interface CloudRejectedDocument {
   verseRatio?: number;
 }
 
+// A selected file that failed to convert and still has no published hash, so it is not viewable.
+export interface CloudFailedDocument {
+  documentId: string;
+  fileName: string;
+  /** Raw converter error; the SPA maps this to a friendly message. Admin shows it as-is. */
+  error?: string;
+}
+
 export interface CloudProviderSyncStatus {
   state: CloudSyncState;
   startsAt?: string;
   lastCompletedAt?: string;
   failedCount?: number;
   rejectedDocuments?: CloudRejectedDocument[];
+  failedDocuments?: CloudFailedDocument[];
   // Set (with state 'attention') while the provider was signed out and its restored selection
   // has not been applied since signing back in.
   disconnectedAt?: string;
