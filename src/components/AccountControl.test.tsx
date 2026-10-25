@@ -66,6 +66,14 @@ jest.mock('../services/cloudControlService', () => ({
   fetchCloudSyncStatus: jest.fn(async () => null),
   queueCloudFolderSelection: jest.fn(),
   reportSyncActivity: jest.fn(),
+  fetchDeveloperCapabilities: jest.fn(async () => null),
+  requestDocumentReprocess: jest.fn(),
+}));
+
+jest.mock('../services/developerToolsService', () => ({
+  isDeveloperToolsEnabled: () => false,
+  ensureDeveloperCapabilities: jest.fn(async () => false),
+  subscribeDeveloperTools: () => () => undefined,
 }));
 
 jest.mock('../services/storageAuthenticatedFetch', () => ({

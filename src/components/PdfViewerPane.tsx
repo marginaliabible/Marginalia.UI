@@ -23,6 +23,7 @@ import {
   placeOverlayOnPage,
   type MatchTextFolding,
 } from '../utils/documentTextMatch';
+import { findTopVisiblePageIndexInContainer } from '../utils/viewerTopPage';
 import { clampScale, stepScale } from '../utils/viewerZoom';
 import FileSyncExclusionButton from './FileSyncExclusionButton';
 import DocumentPopoutButton from './DocumentPopoutButton';
@@ -145,6 +146,7 @@ const PdfViewerPane: React.FC<PdfViewerPaneProps> = ({ onScriptureReferenceOpen 
   const highlightAttemptedRef = useRef(false);
   const highlightPageRef = useRef(0);
   const syncingPageFromViewerRef = useRef(false);
+  const allowViewportPageSyncRef = useRef(false);
   const scriptureLinkedPagesRef = useRef<Set<number>>(new Set());
   const openScriptureReferenceRef = useRef(openScriptureReference);
   openScriptureReferenceRef.current = openScriptureReference;
@@ -221,19 +223,38 @@ const PdfViewerPane: React.FC<PdfViewerPaneProps> = ({ onScriptureReferenceOpen 
     viewerRef.current = pdfViewerInstance;
     setViewerReady(true);
 
-    const onPageChanging = (evt: { pageNumber?: number }) => {
-      if (typeof evt.pageNumber !== 'number') {
-        return;
-      }
-      syncingPageFromViewerRef.current = true;
-      dispatch(setPdfViewerPage(evt.pageNumber));
-      queueMicrotask(() => {
-        syncingPageFromViewerRef.current = false;
-      });
+    const onPageChanging = () => {
       // Scroll may bring already-cached pages into view without a fresh textlayerrendered.
       void scanRenderedPagesForLinks();
     };
     eventBus.on('pagechanging', onPageChanging);
+
+    // pagechanging uses the most-visible page. The toolbar follows the page at the
+    // top of the viewport, ignoring that page's trailing band so a leftover strip
+    // does not keep the previous page number (and fit-to-width).
+    const onUpdateViewArea = () => {
+      if (!allowViewportPageSyncRef.current) {
+        return;
+      }
+      const frames: Array<{ offsetTop: number; clientTop: number; clientHeight: number }> = [];
+      for (let index = 0; index < pdfViewerInstance.pagesCount; index += 1) {
+        const pageRoot = (pdfViewerInstance.getPageView(index) as { div?: HTMLElement } | undefined)?.div;
+        if (!pageRoot) {
+          return;
+        }
+        frames.push(pageRoot);
+      }
+      if (frames.length === 0) {
+        return;
+      }
+      const pageNumber = findTopVisiblePageIndexInContainer(container, frames) + 1;
+      if (pageNumber === activePageRef.current) {
+        return;
+      }
+      syncingPageFromViewerRef.current = true;
+      dispatch(setPdfViewerPage(pageNumber));
+    };
+    eventBus.on('updateviewarea', onUpdateViewArea);
 
     // Keeps the toolbar percentage in sync when pdf.js resolves page-width.
     const onScaleChanging = (evt: { scale?: number }) => {
@@ -249,6 +270,7 @@ const PdfViewerPane: React.FC<PdfViewerPaneProps> = ({ onScriptureReferenceOpen 
         pdfViewerInstance.currentScaleValue = 'page-width';
       }
       pdfViewerInstance.currentPageNumber = activePageRef.current;
+      allowViewportPageSyncRef.current = true;
     };
     eventBus.on('pagesinit', onPagesInit);
 
@@ -340,6 +362,7 @@ const PdfViewerPane: React.FC<PdfViewerPaneProps> = ({ onScriptureReferenceOpen 
       eventBus.off('scalechanging', onScaleChanging);
       eventBus.off('pagesinit', onPagesInit);
       eventBus.off('pagechanging', onPageChanging);
+      eventBus.off('updateviewarea', onUpdateViewArea);
       eventBus.off('textlayerrendered', onTextLayerRendered);
       eventBus.off('pagerendered', onPageRendered);
       try {
@@ -352,6 +375,7 @@ const PdfViewerPane: React.FC<PdfViewerPaneProps> = ({ onScriptureReferenceOpen 
       eventBusRef.current = null;
       linkServiceRef.current = null;
       setViewerReady(false);
+      allowViewportPageSyncRef.current = false;
       pages.replaceChildren();
     };
   }, [pdfViewer.isOpen, pdfViewer.kind, dispatch]);
@@ -373,6 +397,7 @@ const PdfViewerPane: React.FC<PdfViewerPaneProps> = ({ onScriptureReferenceOpen 
     setError(null);
     setPageCount(0);
     highlightAttemptedRef.current = false;
+    allowViewportPageSyncRef.current = false;
     scriptureLinkedPagesRef.current.clear();
 
     const previousTask = loadingTaskRef.current;
@@ -426,7 +451,12 @@ const PdfViewerPane: React.FC<PdfViewerPaneProps> = ({ onScriptureReferenceOpen 
 
   useEffect(() => {
     const viewer = viewerRef.current;
-    if (!viewer || !viewer.pdfDocument || syncingPageFromViewerRef.current) {
+    if (!viewer || !viewer.pdfDocument) {
+      return;
+    }
+    if (syncingPageFromViewerRef.current) {
+      // Scroll-driven page updates must not reset the view to the top of that page.
+      syncingPageFromViewerRef.current = false;
       return;
     }
     // Always apply on focusNonce so re-clicking the same Resources page scrolls back.

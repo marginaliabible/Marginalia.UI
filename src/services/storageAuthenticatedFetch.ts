@@ -1,3 +1,4 @@
+import { noteCcsAuthFailure } from './brokerSessionPrompt';
 import { getAuthServiceUrl, getConfiguredStorageBaseUrl, getDocumentRenderEpochOverride } from './storageEnv';
 
 const DEFAULT_STORAGE_HOST = 'storage.marginaliabible.com';
@@ -85,7 +86,11 @@ export async function establishStorageSession(userId?: string): Promise<boolean>
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ userId: resolvedUserId }),
     });
-    return response.ok;
+    if (!response.ok) {
+      noteCcsAuthFailure(response.status, await response.text());
+      return false;
+    }
+    return true;
   } catch {
     return false;
   }

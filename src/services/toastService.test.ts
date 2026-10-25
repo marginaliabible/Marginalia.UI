@@ -3,6 +3,7 @@ import {
   TOAST_LIFETIME_MS,
   __resetToastsForTests,
   dismissToast,
+  dismissToastsByKey,
   getToasts,
   setToastExpiryPaused,
   showToast,
@@ -110,6 +111,13 @@ describe('toastService', () => {
     showToast({ message: 'Keep me' });
 
     dismissToast(id);
+    expect(getToasts().map((toast) => toast.message)).toEqual(['Keep me']);
+  });
+
+  it('dismisses every toast with a given key', () => {
+    showToast({ message: 'Reconnect OneDrive', key: 'reconnect-microsoft', tone: 'warning' });
+    showToast({ message: 'Keep me' });
+    dismissToastsByKey('reconnect-microsoft');
     expect(getToasts().map((toast) => toast.message)).toEqual(['Keep me']);
   });
 

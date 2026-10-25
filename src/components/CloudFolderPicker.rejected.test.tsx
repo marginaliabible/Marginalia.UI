@@ -4,6 +4,17 @@ import CloudFolderPicker, { type CloudFolderPickerHandle, type FolderSelectionTa
 import type { FederatedSession } from '../services/federatedAuthService';
 import { __resetToastsForTests, getToasts } from '../services/toastService';
 
+jest.mock('../services/cloudControlService', () => ({
+  requestDocumentReprocess: jest.fn(),
+  fetchDeveloperCapabilities: jest.fn(async () => null),
+}));
+
+jest.mock('../services/developerToolsService', () => ({
+  isDeveloperToolsEnabled: () => false,
+  ensureDeveloperCapabilities: jest.fn(async () => false),
+  subscribeDeveloperTools: () => () => undefined,
+}));
+
 jest.mock('../services/cloudConfigProviderService', () => ({
   listFolderChildrenForSession: jest.fn(async (_session: unknown, parentId: string) => (
     parentId === 'g-folder'

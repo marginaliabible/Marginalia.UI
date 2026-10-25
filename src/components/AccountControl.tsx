@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { useAppDispatch, useAppSelector } from '../store/hooks';
 import { addSourceUrl, removeSourceUrl, replaceUserId, restoreState, setUserId } from '../store/slices/uiSlice';
 import { loadTranslation, setCurrentBibleFromId } from '../store/slices/bibleSlice';
@@ -37,11 +37,17 @@ import {
   type SyncedConfigField,
   type SyncedFieldStamps,
 } from '../services/cloudConfigMerge';
+import {
+  clearBrokerSessionRequired,
+  isBrokerSessionRequired,
+  registerAccountSyncOpener,
+  subscribeBrokerSessionRequired,
+} from '../services/brokerSessionPrompt';
 import { queueCloudFolderSelection, reportSyncActivity, type CloudSyncStatus } from '../services/cloudControlService';
 import { useCloudSyncStatus } from '../hooks/useCloudSyncStatus';
 import { useResourceTagColorEntries } from '../hooks/useResourceTagColors';
 import { mergeIntoResourceTagColors, normalizeResourceTagColors } from '../utils/resourceTagColors';
-import { showToast } from '../services/toastService';
+import { dismissToastsByKey, showToast } from '../services/toastService';
 import { formatProviderList, formatSyncCompleteToast, type FolderApplyResult } from '../utils/syncToastMessages';
 import {
   publishFileSyncExclusionSnapshot,
@@ -499,6 +505,7 @@ const AccountControl: React.FC<AccountControlProps> = ({ subscriptions }) => {
   const resourceTagColors = useResourceTagColorEntries();
 
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const brokerSessionRequired = useSyncExternalStore(subscribeBrokerSessionRequired, isBrokerSessionRequired);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [syncState, setSyncState] = useState<SyncState>('idle');
   const [lastSyncedAt, setLastSyncedAt] = useState<number | null>(null);
@@ -618,6 +625,8 @@ const AccountControl: React.FC<AccountControlProps> = ({ subscriptions }) => {
     isModalOpenRef.current = isModalOpen;
   }, [isModalOpen]);
 
+  useEffect(() => registerAccountSyncOpener(() => setIsModalOpen(true)), []);
+
   useEffect(() => {
     for (const provider of missingProviderPrompts) {
       if (reconnectToastedRef.current.has(provider)) {
@@ -673,6 +682,13 @@ const AccountControl: React.FC<AccountControlProps> = ({ subscriptions }) => {
   const reconnectPendingByProvider = useMemo<Partial<Record<FederatedProvider, boolean>>>(
     () => Object.fromEntries(reconnectPendingProviders.map((provider) => [provider, true])),
     [reconnectPendingProviders]
+  );
+  const processedDocumentIdsByProvider = useMemo<Partial<Record<FederatedProvider, ReadonlySet<string>>>>(
+    () => {
+      const ids = new Set(publishedByDocumentId.keys());
+      return Object.fromEntries(fileSyncProviders.map((provider) => [provider, ids]));
+    },
+    [fileSyncProviders, publishedByDocumentId]
   );
   const rejectedDocumentIdsByProvider = useMemo<Partial<Record<FederatedProvider, ReadonlySet<string>>>>(
     () => Object.fromEntries(fileSyncProviders.flatMap((provider) => {
@@ -1206,6 +1222,9 @@ const AccountControl: React.FC<AccountControlProps> = ({ subscriptions }) => {
       setStorageSessionUserId(userId);
       void establishStorageSession(userId);
     }
+    clearBrokerSessionRequired();
+    reconnectToastedRef.current.delete(session.provider);
+    dismissToastsByKey(`reconnect-${session.provider}`);
 
     const persistedState = bibleService.readState() as MarginaliaState;
     const persistedLinked = normalizeLinkedAccounts(persistedState.cloudLinkedAccounts);
@@ -1990,7 +2009,14 @@ const AccountControl: React.FC<AccountControlProps> = ({ subscriptions }) => {
                     </div>
                   )}
 
-                  {missingProviderPrompts.length > 0 && (
+                  {brokerSessionRequired ? (
+                    <div className="alert alert-warning mb-0" role="alert">
+                      <div className="fw-semibold mb-1">Sign in again</div>
+                      <div className="small">
+                        This browser needs a new session. Sign in with Google Drive or OneDrive from Manage below.
+                      </div>
+                    </div>
+                  ) : missingProviderPrompts.length > 0 && (
                     <div className="alert alert-warning mb-0" role="alert">
                       <div className="fw-semibold mb-1">Reconnect required</div>
                       <div className="small">
@@ -2013,6 +2039,8 @@ const AccountControl: React.FC<AccountControlProps> = ({ subscriptions }) => {
                     rejectedDocumentIds={rejectedDocumentIdsByProvider}
                     skippedDocumentIds={skippedDocumentIdsByProvider}
                     failedDocuments={failedDocumentsByProvider}
+                    processedDocumentIds={processedDocumentIdsByProvider}
+                    userId={userId}
                     subscriptions={subscriptions}
                     ref={folderPickerRef}
                   />

@@ -1,4 +1,5 @@
 import type { FederatedProvider } from '../models/bible';
+import { noteCcsAuthFailure } from './brokerSessionPrompt';
 
 export interface CloudFolderSelectionRequest {
   userId: string;
@@ -84,6 +85,12 @@ function getCloudControlServiceUrl(): string {
   return (import.meta.env['VITE_AUTH_SERVICE_URL'] || '').trim().replace(/\/$/, '');
 }
 
+async function readCcsFailure(response: Response): Promise<string> {
+  const text = await response.text();
+  noteCcsAuthFailure(response.status, text);
+  return text;
+}
+
 export async function queueCloudFolderSelection(
   request: CloudFolderSelectionRequest
 ): Promise<CloudFolderSelectionResponse | null> {
@@ -104,7 +111,7 @@ export async function queueCloudFolderSelection(
   });
 
   if (!response.ok) {
-    const message = await response.text();
+    const message = await readCcsFailure(response);
     throw new Error(`CloudControlService folder selection failed (${response.status}): ${message}`);
   }
 
@@ -130,11 +137,71 @@ export async function fetchCloudSyncStatus(request: CloudSyncStatusRequest): Pro
   });
 
   if (!response.ok) {
-    const message = await response.text();
+    const message = await readCcsFailure(response);
     throw new Error(`CloudControlService sync status failed (${response.status}): ${message}`);
   }
 
   return (await response.json()) as CloudSyncStatus;
+}
+
+export interface DeveloperCapabilities {
+  ok: boolean;
+  isDeveloper: boolean;
+}
+
+export async function fetchDeveloperCapabilities(userId?: string | null): Promise<DeveloperCapabilities | null> {
+  const baseUrl = getCloudControlServiceUrl();
+  if (!baseUrl) {
+    return null;
+  }
+
+  const response = await fetch(`${baseUrl}/dev/capabilities`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(userId ? { userId } : {}),
+  });
+  if (!response.ok) {
+    await readCcsFailure(response);
+    return { ok: false, isDeveloper: false };
+  }
+  try {
+    const payload = (await response.json()) as DeveloperCapabilities;
+    return { ok: payload.ok !== false, isDeveloper: payload.isDeveloper === true };
+  } catch {
+    return { ok: false, isDeveloper: false };
+  }
+}
+
+export interface ReprocessDocumentRequest {
+  userId: string;
+  provider: FederatedProvider;
+  documentId: string;
+  fileName?: string;
+}
+
+export async function requestDocumentReprocess(request: ReprocessDocumentRequest): Promise<void> {
+  const baseUrl = getCloudControlServiceUrl();
+  if (!baseUrl) {
+    throw new Error('CloudControlService is not configured.');
+  }
+
+  const provider = request.provider === 'google' ? 'GoogleDrive' : 'OneDrive';
+  const response = await fetch(`${baseUrl}/sync/reprocess-document`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      userId: request.userId,
+      provider,
+      documentId: request.documentId,
+      ...(request.fileName ? { fileName: request.fileName } : {}),
+    }),
+  });
+  if (!response.ok) {
+    const message = await readCcsFailure(response);
+    throw new Error(`Couldn't blow away and reprocess this document (${response.status}): ${message}`);
+  }
 }
 
 /** Fire-and-forget presence ping so CCS can use the active (5m) File Sync debounce. */
@@ -146,12 +213,15 @@ export async function reportSyncActivity(request: SyncActivityRequest): Promise<
   }
 
   try {
-    await fetch(`${baseUrl}/sync/activity`, {
+    const response = await fetch(`${baseUrl}/sync/activity`, {
       method: 'POST',
       credentials: 'include',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ userId }),
     });
+    if (!response.ok) {
+      await readCcsFailure(response);
+    }
   } catch {
     // Presence is best-effort; never block the UI on network errors.
   }

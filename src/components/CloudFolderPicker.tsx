@@ -26,6 +26,7 @@ import { showToast } from '../services/toastService';
 import { formatAccountSyncApplyToast, type FolderApplyResult } from '../utils/syncToastMessages';
 import { describeSyncFailure } from '../utils/syncFailureMessages';
 import type { SyncPlanDocumentRef, SyncPlanLiveFile } from '../utils/syncPlanUsage';
+import DeveloperReprocessButton from './DeveloperReprocessButton';
 
 const ROOT_LABEL: Record<FederatedProvider, string> = {
   google: 'Google Drive',
@@ -107,6 +108,9 @@ interface CloudFolderPickerProps {
   skippedDocumentIds?: Partial<Record<FederatedProvider, ReadonlySet<string>>>;
   // Selected files that failed to convert and are not indexed, keyed by cloud item id → raw error.
   failedDocuments?: Partial<Record<FederatedProvider, ReadonlyMap<string, string>>>;
+  // Cloud item ids with a published hash in documents.json (conversion finished).
+  processedDocumentIds?: Partial<Record<FederatedProvider, ReadonlySet<string>>>;
+  userId?: string | null;
   subscriptions?: SubscriptionsBinding;
   ref?: React.Ref<CloudFolderPickerHandle>;
 }
@@ -705,6 +709,8 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
   rejectedDocumentIds,
   skippedDocumentIds,
   failedDocuments,
+  processedDocumentIds,
+  userId,
   subscriptions,
   ref,
 }) => {
@@ -2210,6 +2216,17 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
                       </span>
 
                       <span className="cloud-folder-selected-action">
+                        {!isFolder && fileIcon?.supported && (
+                          <DeveloperReprocessButton
+                            userId={userId}
+                            provider={node.provider}
+                            documentId={node.id}
+                            documentLabel={node.name}
+                            fileName={node.name}
+                            processed={Boolean(processedDocumentIds?.[node.provider]?.has(node.id))}
+                            variant="row"
+                          />
+                        )}
                         {visibleRow.isRootSelection && (!providerSyncFilesEnabled[node.provider] || !sessions[node.provider]) ? (
                           <button
                             type="button"

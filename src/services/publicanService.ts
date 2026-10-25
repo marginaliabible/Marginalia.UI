@@ -32,7 +32,9 @@ function storageBaseUrl(): string {
 }
 
 function encodeUserId(userId: string): string {
-  return encodeURIComponent(userId);
+  // Storage object keys use a literal `@` in the email. encodeURIComponent turns it into
+  // `%40`, and the gateway looks up that encoded key as a different object (404).
+  return encodeURIComponent(userId).replaceAll('%40', '@');
 }
 
 async function fetchJsonIfPresent(url: string): Promise<unknown | null> {

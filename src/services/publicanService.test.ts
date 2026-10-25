@@ -39,7 +39,7 @@ describe('publicanService', () => {
     expect(committed).toEqual([
       expect.objectContaining({ type: 'del', size: 50, documentId: 'doc-1', hash: 'abcd' }),
     ]);
-    expect(String(mockFetch.mock.calls[0][0])).toContain('/users/user%40example.com/publican.json');
+    expect(String(mockFetch.mock.calls[0][0])).toContain('/users/user@example.com/publican.json');
   });
 
   it('builds documentId → hash maps from provider documents.json', async () => {

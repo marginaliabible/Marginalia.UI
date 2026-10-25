@@ -313,7 +313,19 @@
 
 .cloud-folder-selected-action {
   display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
   justify-content: flex-end;
+}
+
+.btn.cloud-folder-selected-reprocess {
+  font-size: 0.78rem;
+  color: var(--bs-danger);
+}
+
+.btn.cloud-folder-selected-reprocess:disabled {
+  color: var(--bs-secondary-color);
+  opacity: 0.45;
 }
 
 .cloud-folder-selected-remove {

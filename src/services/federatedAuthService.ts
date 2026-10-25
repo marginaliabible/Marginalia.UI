@@ -1,5 +1,6 @@
 import type { FederatedProvider } from '../models/bible';
 import { bibleService } from './bibleService';
+import { clearBrokerSessionRequired, noteCcsAuthFailure } from './brokerSessionPrompt';
 
 const SESSIONS_STORAGE_KEY = 'marginalia:federated-auth:sessions';
 const PENDING_STORAGE_KEY = 'marginalia:federated-auth:pending';
@@ -670,6 +671,7 @@ async function refreshProviderToken(
   if (!response.ok) {
     const text = await response.text();
     const payload = tryParseOAuthErrorPayload(text);
+    noteCcsAuthFailure(response.status, text);
     throw new FederatedTokenRefreshError(provider, response.status, text, payload || undefined);
   }
 
@@ -806,6 +808,7 @@ export async function getFreshFederatedSessions(): Promise<StoredFederatedSessio
         scope: refreshed.scope || existing.scope,
       };
       changed = true;
+      clearBrokerSessionRequired();
     } catch (error) {
       if (shouldRemoveSessionAfterRefreshFailure(error)) {
         delete sessions[provider];
