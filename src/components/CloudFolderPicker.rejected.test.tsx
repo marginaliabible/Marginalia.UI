@@ -1,5 +1,6 @@
-import { fireEvent, render, waitFor, within } from '@testing-library/react';
-import CloudFolderPicker, { type FolderSelectionTarget } from './CloudFolderPicker';
+import { createRef } from 'react';
+import { act, fireEvent, render, waitFor, within } from '@testing-library/react';
+import CloudFolderPicker, { type CloudFolderPickerHandle, type FolderSelectionTarget } from './CloudFolderPicker';
 import type { FederatedSession } from '../services/federatedAuthService';
 import { __resetToastsForTests, getToasts } from '../services/toastService';
 
@@ -105,5 +106,50 @@ describe('CloudFolderPicker rejected files', () => {
     fireEvent.click(failedButton);
 
     expect(getToasts().map((toast) => toast.message)).toEqual([friendly]);
+  });
+
+  it('shows a page-limit skip as an unselected upload icon the user can click to opt in', async () => {
+    const onSelectionsChange = jest.fn().mockResolvedValue({ applied: true });
+    const pickerRef = createRef<CloudFolderPickerHandle>();
+    render(
+      <CloudFolderPicker
+        ref={pickerRef}
+        sessions={{ google: googleSession, microsoft: null }}
+        initialSelections={{
+          google: [{ ...selections.google[0], tags: ['Notes'] }],
+          microsoft: [],
+        }}
+        providerSyncFilesEnabled={{ google: true, microsoft: false }}
+        linkedProviders={{ google: true, microsoft: false }}
+        focusRequest={null}
+        onSelectionsChange={onSelectionsChange}
+        onConnectRequested={jest.fn()}
+        skippedDocumentIds={{ google: new Set(['g-thin']) }}
+      />
+    );
+
+    const rightPanel = within(document.querySelector('.cloud-folder-picker-right') as HTMLElement);
+    fireEvent.click(await rightPanel.findByLabelText('Expand Notes'));
+    await waitFor(() => {
+      expect(rightPanel.getByText('Thin.pdf')).toBeInTheDocument();
+    });
+
+    const skipButton = rightPanel.getByRole('button', { name: /Resume syncing / });
+    expect(skipButton).toHaveClass('cloud-folder-selected-restore');
+    expect(skipButton.querySelector('i')).toHaveClass('fa-upload');
+    expect(skipButton).not.toHaveAttribute('aria-disabled');
+    expect(rightPanel.queryByLabelText(/Thin\.pdf contains less than an average/)).toBeNull();
+
+    fireEvent.click(skipButton);
+    await act(async () => {
+      pickerRef.current?.apply();
+    });
+
+    await waitFor(() => {
+      expect(onSelectionsChange).toHaveBeenCalled();
+    });
+    const payload = onSelectionsChange.mock.calls[0][0] as Record<string, FolderSelectionTarget[]>;
+    expect(payload.google[0].includedItemIds).toEqual(['g-thin']);
+    expect(payload.google[0].excludedItemIds).toBeUndefined();
   });
 });

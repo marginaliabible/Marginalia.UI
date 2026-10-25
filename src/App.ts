@@ -93,6 +93,28 @@ export const detectPreferredLanguages = (): string[] => {
   return normalizeLanguageSelection([...normalized, ...defaults]);
 };
 
+/**
+ * Sets the location hash without the browser's native jump-to-top (or jump-to-id).
+ * `location.hash =` and `<a href="#…">` both scroll; chapter changes already use history instead.
+ */
+export const assignHashWithoutScroll = (hash: string): void => {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  const nextHash = hash.startsWith('#') ? hash : `#${hash}`;
+  if (window.location.hash === nextHash) {
+    return;
+  }
+
+  window.history.pushState(
+    window.history.state,
+    '',
+    `${window.location.pathname}${window.location.search}${nextHash}`
+  );
+  window.dispatchEvent(new HashChangeEvent('hashchange'));
+};
+
 export const verseDomId = (book: string, chapter: number, verse: number): string => {
   return `${book.replace(/\s+/g, '_')}-${chapter}-${verse}`;
 };

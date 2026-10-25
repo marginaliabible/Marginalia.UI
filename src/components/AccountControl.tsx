@@ -102,13 +102,14 @@ interface ProviderSyncPreferences {
 
 interface ProviderSyncTarget {
   id: string;
-  kind: 'folder';
+  kind: 'folder' | 'file';
   name?: string;
   path?: string;
   sizeBytes?: number;
   sizeKnown?: boolean;
   driveId?: string;
   excludedItemIds?: string[];
+  includedItemIds?: string[];
   tags?: string[];
   itemTags?: Record<string, string[]>;
   itemTagExclusions?: Record<string, string[]>;
@@ -136,7 +137,7 @@ function isProviderSyncTarget(value: unknown): value is ProviderSyncTarget {
 
   const candidate = value as Partial<ProviderSyncTarget>;
   return (
-    candidate.kind === 'folder'
+    (candidate.kind === 'folder' || candidate.kind === 'file')
     && typeof candidate.id === 'string'
     && candidate.id.trim().length > 0
     && (typeof candidate.name === 'undefined' || typeof candidate.name === 'string')
@@ -145,6 +146,7 @@ function isProviderSyncTarget(value: unknown): value is ProviderSyncTarget {
     && (typeof candidate.sizeKnown === 'undefined' || typeof candidate.sizeKnown === 'boolean')
     && (typeof candidate.driveId === 'undefined' || typeof candidate.driveId === 'string')
     && (typeof candidate.excludedItemIds === 'undefined' || Array.isArray(candidate.excludedItemIds))
+    && (typeof candidate.includedItemIds === 'undefined' || Array.isArray(candidate.includedItemIds))
     && (typeof candidate.tags === 'undefined' || Array.isArray(candidate.tags))
     && (typeof candidate.itemTags === 'undefined' || (typeof candidate.itemTags === 'object' && candidate.itemTags !== null))
     && (typeof candidate.itemTagExclusions === 'undefined' || (typeof candidate.itemTagExclusions === 'object' && candidate.itemTagExclusions !== null))
@@ -676,6 +678,13 @@ const AccountControl: React.FC<AccountControlProps> = ({ subscriptions }) => {
     () => Object.fromEntries(fileSyncProviders.flatMap((provider) => {
       const rejected = cloudSyncStatus?.providers?.[provider]?.rejectedDocuments ?? [];
       return rejected.length > 0 ? [[provider, new Set(rejected.map((entry) => entry.documentId))]] : [];
+    })),
+    [cloudSyncStatus, fileSyncProviders]
+  );
+  const skippedDocumentIdsByProvider = useMemo<Partial<Record<FederatedProvider, ReadonlySet<string>>>>(
+    () => Object.fromEntries(fileSyncProviders.flatMap((provider) => {
+      const skipped = cloudSyncStatus?.providers?.[provider]?.skippedDocuments ?? [];
+      return skipped.length > 0 ? [[provider, new Set(skipped.map((entry) => entry.documentId))]] : [];
     })),
     [cloudSyncStatus, fileSyncProviders]
   );
@@ -1568,26 +1577,28 @@ const AccountControl: React.FC<AccountControlProps> = ({ subscriptions }) => {
     const previousSelections = providerSyncPreferences;
     const nextGoogleTargets = nextSelections.google.map((target) => ({
       id: target.id,
-      kind: 'folder' as const,
+      kind: target.kind === 'file' ? 'file' as const : 'folder' as const,
       name: target.name,
       path: target.path,
       sizeBytes: target.sizeBytes,
       sizeKnown: target.sizeKnown,
       driveId: target.driveId,
       excludedItemIds: target.excludedItemIds,
+      includedItemIds: target.includedItemIds,
       tags: target.tags,
       itemTags: target.itemTags,
       itemTagExclusions: target.itemTagExclusions,
     }));
     const nextMicrosoftTargets = nextSelections.microsoft.map((target) => ({
       id: target.id,
-      kind: 'folder' as const,
+      kind: target.kind === 'file' ? 'file' as const : 'folder' as const,
       name: target.name,
       path: target.path,
       sizeBytes: target.sizeBytes,
       sizeKnown: target.sizeKnown,
       driveId: target.driveId,
       excludedItemIds: target.excludedItemIds,
+      includedItemIds: target.includedItemIds,
       tags: target.tags,
       itemTags: target.itemTags,
       itemTagExclusions: target.itemTagExclusions,
@@ -2000,6 +2011,7 @@ const AccountControl: React.FC<AccountControlProps> = ({ subscriptions }) => {
                     onUsageSnapshotChange={setPickerUsageSnapshot}
                     reconnectPending={reconnectPendingByProvider}
                     rejectedDocumentIds={rejectedDocumentIdsByProvider}
+                    skippedDocumentIds={skippedDocumentIdsByProvider}
                     failedDocuments={failedDocumentsByProvider}
                     subscriptions={subscriptions}
                     ref={folderPickerRef}

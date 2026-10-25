@@ -3,7 +3,7 @@ import type { PanelTab, VerseContext } from '../models/tab';
 import { useAppDispatch, useAppSelector } from '../store/hooks';
 import { setResourceHiddenTags, setResourceVerseMatchMode } from '../store/slices/uiSlice';
 import { bibleService, type VerseResourcesPayload } from '../services/bibleService';
-import { buildDocumentLinkRoute, REOPEN_DOCUMENT_LINK_EVENT } from '../App';
+import { assignHashWithoutScroll, buildDocumentLinkRoute, REOPEN_DOCUMENT_LINK_EVENT } from '../App';
 import { TAG_COLOR_PALETTE } from '../utils/resourceTagColors';
 import { useResourceTagColors } from '../hooks/useResourceTagColors';
 import { versesFromContext } from '../utils/selectedVerseContext';
@@ -199,12 +199,15 @@ const ResourcesPanel: React.FC<ResourcesPanelProps> = ({ tab, isActive, onBefore
       return;
     }
 
+    event.preventDefault();
     onBeforeNavigate?.();
 
     if (typeof window !== 'undefined' && window.location.hash === href) {
-      event.preventDefault();
       window.dispatchEvent(new Event(REOPEN_DOCUMENT_LINK_EVENT));
+      return;
     }
+
+    assignHashWithoutScroll(href);
   };
 
   if (!verseContext) {

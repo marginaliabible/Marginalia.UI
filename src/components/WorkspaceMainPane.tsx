@@ -21,6 +21,7 @@ import type { BibleChapter, BibleTranslationMeta, QuickJumpTarget } from '../mod
 import { markupFlagsFromBible } from '../utils/verseMarkup';
 import { useSourcePreferences } from '../hooks/useSourcePreferences';
 import { MAIN_PANE_ELEMENT_ID } from '../hooks/useDocumentPopout';
+import { usePreserveWindowScrollWhile } from '../hooks/usePreserveWindowScroll';
 import type { WorkspacePanelKey } from '../App';
 
 interface WorkspaceMainPaneProps {
@@ -371,6 +372,10 @@ const WorkspaceMainPane: React.FC<WorkspaceMainPaneProps> = ({
       return;
     }
 
+    if (pdfViewer.isOpen) {
+      return;
+    }
+
     if (!selectedVerseTranslationId || selectedVerses.length === 0) {
       return;
     }
@@ -471,6 +476,7 @@ const WorkspaceMainPane: React.FC<WorkspaceMainPaneProps> = ({
   }, [
     chaptersByTranslation,
     dispatch,
+    pdfViewer.isOpen,
     selectedBook,
     selectedChapter,
     selectedVerseTranslationId,
@@ -485,6 +491,7 @@ const WorkspaceMainPane: React.FC<WorkspaceMainPaneProps> = ({
   }, [handleArrowSelectionKey]);
 
   const shouldRenderDocumentViewer = pdfViewer.isOpen;
+  usePreserveWindowScrollWhile(shouldRenderDocumentViewer && Boolean(selectedBook) && !isDocumentWindow);
 
   if (!currentBible && !shouldRenderDocumentViewer && !isDocumentWindow) {
     return null;

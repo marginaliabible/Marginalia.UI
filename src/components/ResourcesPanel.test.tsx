@@ -182,13 +182,15 @@ describe('ResourcesPanel page links', () => {
     expect(pageLink.getAttribute('href')).toBe('#/Genesis/1/1?doc=abcd&page=7');
   });
 
-  it('leaves a plain click to the browser and does not dispatch anything', async () => {
+  it('opens a page link by assigning the hash without native hash scrolling', async () => {
     const { findAllByRole } = render(<ResourcesPanel tab={resourcesTab} isActive={true} />);
     const pageLinks = await findAllByRole('link', { name: /^\d+$/ });
+    const href = pageLinks[0]!.getAttribute('href');
 
     const notPrevented = fireEvent.click(pageLinks[0]!);
 
-    expect(notPrevented).toBe(true);
+    expect(notPrevented).toBe(false);
+    expect(window.location.hash).toBe(href);
     expect(dispatch).not.toHaveBeenCalled();
   });
 

@@ -70,7 +70,7 @@ function describeLowVerseRatioRejection(subject: string): string {
 
 export interface FolderSelectionTarget {
   id: string;
-  kind: 'folder';
+  kind: 'folder' | 'file';
   name?: string;
   path?: string;
   sizeBytes?: number;
@@ -79,6 +79,8 @@ export interface FolderSelectionTarget {
   driveId?: string;
   // Cloud item IDs (folders or files, any depth) explicitly excluded from sync within this selection.
   excludedItemIds?: string[];
+  // Nested files the user opted into after a folder-inherited skip (e.g. over 500 pages).
+  includedItemIds?: string[];
   // Tags assigned to this root selection item itself.
   tags?: string[];
   // Tags for nested items (any depth) within this selection, keyed by cloud item id.
@@ -101,6 +103,8 @@ interface CloudFolderPickerProps {
   reconnectPending?: Partial<Record<FederatedProvider, boolean>>;
   // Selected file ids MarkupServer kept out of the library for averaging under one verse per page.
   rejectedDocumentIds?: Partial<Record<FederatedProvider, ReadonlySet<string>>>;
+  // Folder-inherited files skipped for page count; shown as unselected, not rejected.
+  skippedDocumentIds?: Partial<Record<FederatedProvider, ReadonlySet<string>>>;
   // Selected files that failed to convert and are not indexed, keyed by cloud item id → raw error.
   failedDocuments?: Partial<Record<FederatedProvider, ReadonlyMap<string, string>>>;
   subscriptions?: SubscriptionsBinding;
@@ -139,6 +143,7 @@ interface SelectedFolder {
   path: string;
   driveId?: string;
   excludedItemIds: Set<string>;
+  includedItemIds: Set<string>;
   tags: string[];
   itemTags: Map<string, string[]>;
   itemTagExclusions: Map<string, string[]>;
@@ -225,13 +230,14 @@ function toSelectionPayload(
 
     next[row.provider].push({
       id: row.id,
-      kind: 'folder',
+      kind: node?.kind === 'file' ? 'file' : 'folder',
       name: row.name,
       path: row.path,
       sizeBytes: node?.sizeKnown ? node.sizeBytes : undefined,
       sizeKnown: node?.sizeKnown ?? false,
       driveId: row.driveId ?? node?.driveId,
       excludedItemIds: row.excludedItemIds.size > 0 ? Array.from(row.excludedItemIds).sort() : undefined,
+      includedItemIds: row.includedItemIds.size > 0 ? Array.from(row.includedItemIds).sort() : undefined,
       tags: row.tags.length > 0 ? [...row.tags].sort() : undefined,
       itemTags: itemTagsRecord.length > 0 ? Object.fromEntries(itemTagsRecord.map(([id, tags]) => [id, [...tags].sort()])) : undefined,
       itemTagExclusions: itemTagExclusionsRecord.length > 0
@@ -254,6 +260,7 @@ function normalizeSelectionPayload(
         name: target.name,
         path: target.path,
         excludedItemIds: [...(target.excludedItemIds || [])].sort(),
+        includedItemIds: [...(target.includedItemIds || [])].sort(),
         tags: [...(target.tags || [])].sort(),
         itemTags: Object.fromEntries(
           Object.entries(target.itemTags || {})
@@ -501,7 +508,7 @@ function buildSelectedMapFromPayload(
   for (const provider of ['google', 'microsoft'] as FederatedProvider[]) {
     const providerTargets = payload[provider] || [];
     for (const target of providerTargets) {
-      if (target.kind !== 'folder') {
+      if (target.kind !== 'folder' && target.kind !== 'file') {
         continue;
       }
 
@@ -514,6 +521,7 @@ function buildSelectedMapFromPayload(
         path: target.path || `${ROOT_LABEL[provider]}/${target.name || target.id}`,
         driveId: target.driveId,
         excludedItemIds: new Set(target.excludedItemIds || []),
+        includedItemIds: new Set(target.includedItemIds || []),
         tags: [...(target.tags || [])],
         itemTags: new Map(Object.entries(target.itemTags || {}).map(([id, tags]) => [id, [...tags]])),
         itemTagExclusions: new Map(Object.entries(target.itemTagExclusions || {}).map(([id, tags]) => [id, [...tags]])),
@@ -526,7 +534,8 @@ function buildSelectedMapFromPayload(
 
 function collectFileDocsUnderSelection(
   root: SelectedFolder,
-  nodes: Record<string, FolderTreeNode>
+  nodes: Record<string, FolderTreeNode>,
+  skippedIds?: ReadonlySet<string>
 ): SyncPlanDocumentRef[] {
   const docs: SyncPlanDocumentRef[] = [];
   const visit = (nodeKey: string) => {
@@ -536,6 +545,9 @@ function collectFileDocsUnderSelection(
     }
     if (nodeKey !== root.key) {
       if (root.excludedItemIds.has(node.id) || hasExcludedAncestor(nodeKey, root.key, root, nodes)) {
+        return;
+      }
+      if (!root.includedItemIds.has(node.id) && skippedIds?.has(node.id)) {
         return;
       }
     }
@@ -574,14 +586,19 @@ function resolveRootSizeBytes(
   return 0;
 }
 
-function isFileExcludedFromSelection(file: SupportedFolderFile, excludedItemIds: ReadonlySet<string>): boolean {
-  if (excludedItemIds.size === 0) {
-    return false;
-  }
-  if (excludedItemIds.has(file.id)) {
+function isFileExcludedFromSelection(
+  file: SupportedFolderFile,
+  excludedItemIds: ReadonlySet<string>,
+  includedItemIds: ReadonlySet<string> = new Set(),
+  skippedIds?: ReadonlySet<string>
+): boolean {
+  if (excludedItemIds.has(file.id) || file.ancestorIds.some((ancestorId) => excludedItemIds.has(ancestorId))) {
     return true;
   }
-  return file.ancestorIds.some((ancestorId) => excludedItemIds.has(ancestorId));
+  if (includedItemIds.has(file.id)) {
+    return false;
+  }
+  return Boolean(skippedIds?.has(file.id));
 }
 
 function computeUsageSnapshot(
@@ -589,7 +606,8 @@ function computeUsageSnapshot(
   nodes: Record<string, FolderTreeNode>,
   appliedPayload: Record<FederatedProvider, FolderSelectionTarget[]>,
   folderContentsByRoot: Record<string, SupportedFolderFile[]>,
-  reconnectPending?: Partial<Record<FederatedProvider, boolean>>
+  reconnectPending?: Partial<Record<FederatedProvider, boolean>>,
+  skippedDocumentIds?: Partial<Record<FederatedProvider, ReadonlySet<string>>>
 ): CloudFolderPickerUsageSnapshot {
   let selectedBytes = 0;
   let sizesReady = true;
@@ -605,6 +623,7 @@ function computeUsageSnapshot(
       sizesReady = false;
     }
     let rootBytes = node?.sizeKnown ? Math.max(0, node.sizeBytes) : 0;
+    const skippedIds = skippedDocumentIds?.[row.provider];
     for (const excludedId of row.excludedItemIds) {
       const excludedKey = makeNodeKey(row.provider, excludedId);
       const excludedNode = nodes[excludedKey];
@@ -612,10 +631,22 @@ function computeUsageSnapshot(
         rootBytes = Math.max(0, rootBytes - excludedNode.sizeBytes);
       }
     }
+    if (skippedIds) {
+      for (const skippedId of skippedIds) {
+        if (row.includedItemIds.has(skippedId) || row.excludedItemIds.has(skippedId)) {
+          continue;
+        }
+        const skippedKey = makeNodeKey(row.provider, skippedId);
+        const skippedNode = nodes[skippedKey];
+        if (skippedNode?.sizeKnown) {
+          rootBytes = Math.max(0, rootBytes - skippedNode.sizeBytes);
+        }
+      }
+    }
     selectedBytes += rootBytes;
-    stagedSelectedDocs.push(...collectFileDocsUnderSelection(row, nodes));
+    stagedSelectedDocs.push(...collectFileDocsUnderSelection(row, nodes, skippedIds));
     for (const file of folderContentsByRoot[row.key] ?? []) {
-      if (isFileExcludedFromSelection(file, row.excludedItemIds)) {
+      if (isFileExcludedFromSelection(file, row.excludedItemIds, row.includedItemIds, skippedIds)) {
         continue;
       }
       liveById.set(file.id, {
@@ -638,7 +669,7 @@ function computeUsageSnapshot(
       continue;
     }
     // Still staged: per-file exclusion preview from loaded tree children.
-    appliedSelectedDocs.push(...collectFileDocsUnderSelection(row, nodes));
+    appliedSelectedDocs.push(...collectFileDocsUnderSelection(row, nodes, skippedDocumentIds?.[row.provider]));
   }
 
   const reconnectRoots = selectedRows.filter((row) => reconnectPending?.[row.provider]);
@@ -672,6 +703,7 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
   onUsageSnapshotChange,
   reconnectPending,
   rejectedDocumentIds,
+  skippedDocumentIds,
   failedDocuments,
   subscriptions,
   ref,
@@ -977,12 +1009,12 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
           key: selection.key,
           provider: selection.provider,
           id: selection.id,
-          kind: 'folder',
+          kind: target?.kind === 'file' ? 'file' : 'folder',
           name: selection.name,
           path: selection.path,
           sizeBytes: persistedKnown ? Math.max(0, Math.floor(target!.sizeBytes!)) : 0,
           sizeKnown: persistedKnown,
-          hasChildren: true,
+          hasChildren: target?.kind !== 'file',
           driveId: selection.driveId,
           parentKey: null,
           childKeys: [],
@@ -1187,6 +1219,7 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
         path: node.path,
         driveId: node.driveId,
         excludedItemIds: new Set<string>(),
+        includedItemIds: new Set<string>(),
         tags: [],
         itemTags: new Map<string, string[]>(),
         itemTagExclusions: new Map<string, string[]>(),
@@ -1216,9 +1249,10 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
       nodes,
       initialSelections,
       folderContentsByRoot,
-      reconnectPending
+      reconnectPending,
+      skippedDocumentIds
     ),
-    [folderContentsByRoot, initialSelections, nodes, reconnectPending, selectedRows]
+    [folderContentsByRoot, initialSelections, nodes, reconnectPending, selectedRows, skippedDocumentIds]
   );
   const usageSnapshotFingerprintRef = useRef('');
 
@@ -1547,7 +1581,7 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
     }
   }, [loadChildren]);
 
-  const toggleExcluded = useCallback((rootSelectionKey: string, itemId: string) => {
+  const toggleExcluded = useCallback((rootSelectionKey: string, itemId: string, currentlyUnselected: boolean) => {
     setSelected((current) => {
       const existing = current[rootSelectionKey];
       if (!existing) {
@@ -1555,10 +1589,13 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
       }
 
       const nextExcluded = new Set(existing.excludedItemIds);
-      if (nextExcluded.has(itemId)) {
+      const nextIncluded = new Set(existing.includedItemIds);
+      if (currentlyUnselected) {
         nextExcluded.delete(itemId);
+        nextIncluded.add(itemId);
       } else {
         nextExcluded.add(itemId);
+        nextIncluded.delete(itemId);
       }
 
       return {
@@ -1566,6 +1603,7 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
         [rootSelectionKey]: {
           ...existing,
           excludedItemIds: nextExcluded,
+          includedItemIds: nextIncluded,
         },
       };
     });
@@ -2013,14 +2051,23 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
                 const isCoveredByExcludedAncestor = !visibleRow.isRootSelection
                   && hasExcludedAncestor(visibleRow.key, visibleRow.rootSelectionKey, rootSelection, nodes);
                 const canToggleSync = isFolder || Boolean(fileIcon?.supported);
+                const isSkipped = !isFolder
+                  && !visibleRow.isRootSelection
+                  && !isExcluded
+                  && !isCoveredByExcludedAncestor
+                  && !rootSelection.includedItemIds.has(node.id)
+                  && Boolean(skippedDocumentIds?.[node.provider]?.has(node.id));
+                const looksUnselected = isExcluded || isSkipped;
                 const isRejected = !isFolder
                   && !visibleRow.isRootSelection
                   && !isExcluded
+                  && !isSkipped
                   && !isCoveredByExcludedAncestor
                   && Boolean(rejectedDocumentIds?.[node.provider]?.has(node.id));
                 const failedError = !isFolder
                   && !visibleRow.isRootSelection
                   && !isExcluded
+                  && !isSkipped
                   && !isCoveredByExcludedAncestor
                   && !isRejected
                   ? failedDocuments?.[node.provider]?.get(node.id)
@@ -2040,7 +2087,7 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
                 const canActivateName = visibleRow.isRootSelection && showChevron;
                 const isTaggable = visibleRow.isRootSelection
                   ? providerAvailable
-                  : !isExcluded && !isCoveredByExcludedAncestor && !isRejected && !isFailed && canToggleSync && providerAvailable;
+                  : !looksUnselected && !isCoveredByExcludedAncestor && !isRejected && !isFailed && canToggleSync && providerAvailable;
                 const itemTagId = visibleRow.isRootSelection ? null : node.id;
                 const { effectiveTags: effectiveItemTags, ownTags: ownItemTags } = computeEffectiveTags(
                   visibleRow.key,
@@ -2211,19 +2258,19 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
                         ) : canToggleSync && providerAvailable ? (
                           <button
                             type="button"
-                            className={`btn btn-link btn-sm p-0 ${isExcluded ? 'cloud-folder-selected-restore text-warning' : 'cloud-folder-selected-remove text-info'}`}
+                            className={`btn btn-link btn-sm p-0 ${looksUnselected ? 'cloud-folder-selected-restore text-warning' : 'cloud-folder-selected-remove text-info'}`}
                             style={isCoveredByExcludedAncestor ? { visibility: 'hidden' } : undefined}
-                            title={isExcluded ? 'Sync disabled. Click to resume syncing' : 'Sync enabled. Click to exclude from syncing.'}
-                            aria-label={isExcluded ? `Resume syncing ${node.path}` : `Exclude ${node.path} from sync`}
+                            title={looksUnselected ? 'Sync disabled. Click to resume syncing' : 'Sync enabled. Click to exclude from syncing.'}
+                            aria-label={looksUnselected ? `Resume syncing ${node.path}` : `Exclude ${node.path} from sync`}
                             aria-hidden={isCoveredByExcludedAncestor}
                             disabled={isCoveredByExcludedAncestor}
                             tabIndex={isCoveredByExcludedAncestor ? -1 : undefined}
                             onClick={(event) => {
                               event.stopPropagation();
-                              toggleExcluded(visibleRow.rootSelectionKey, node.id);
+                              toggleExcluded(visibleRow.rootSelectionKey, node.id, looksUnselected);
                             }}
                           >
-                            <i className={`fa-solid ${isExcluded ? 'fa-upload' : 'fa-arrows-rotate'}`}></i>
+                            <i className={`fa-solid ${looksUnselected ? 'fa-upload' : 'fa-arrows-rotate'}`}></i>
                           </button>
                         ) : null}
                       </span>

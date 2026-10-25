@@ -8,6 +8,7 @@ import { useViewerZoomInputs } from '../hooks/useViewerZoomInputs';
 import { loadPageScriptureReferences } from '../utils/loadPageScriptureReferences';
 import { applyScriptureLinkOverlays, clearScriptureLinks } from '../utils/scriptureLinkOverlays';
 import { buildTextLayerHaystack, findAllMatchRanges, getMatchClientRects, placeOverlayOnPage } from '../utils/documentTextMatch';
+import { collapseRedundantTextLayerCopySpaces } from '../utils/textLayerCopySpaces';
 import { clampScale, FIT_WIDTH_GUTTER_PX, stepScale } from '../utils/viewerZoom';
 import FileSyncExclusionButton from './FileSyncExclusionButton';
 import DocumentPopoutButton from './DocumentPopoutButton';
@@ -269,7 +270,9 @@ async function materializePages(
 
   const pageReplacements = new Map<string, string>();
   for (const [pageUrl, rawHtml] of pageHtmlByUrl) {
-    const rewrittenPage = rewriteStorageAssetReferences(rawHtml, storageOrigin, assetBlobs);
+    const rewrittenPage = collapseRedundantTextLayerCopySpaces(
+      rewriteStorageAssetReferences(rawHtml, storageOrigin, assetBlobs)
+    );
     const blobUrl = URL.createObjectURL(new Blob([rewrittenPage], { type: 'text/html' }));
     blobUrls.push(blobUrl);
     pageReplacements.set(pageUrl, blobUrl);

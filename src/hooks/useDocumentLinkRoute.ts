@@ -13,6 +13,7 @@ import { buildMarkupDocumentShellUrl } from '../utils/resourceLibraryConfig';
 import { routeInteraction } from '../services/windowRouting';
 import type { OpenDocumentPayload } from '../models/windowMessages';
 import {
+  assignHashWithoutScroll,
   REOPEN_DOCUMENT_LINK_EVENT,
   parseDocumentLinkFromHash,
   parseHashRoute,
@@ -68,7 +69,7 @@ export function openDocumentLinkHere(hash: string): void {
   if (window.location.hash === hash) {
     window.dispatchEvent(new Event(REOPEN_DOCUMENT_LINK_EVENT));
   } else {
-    window.location.hash = hash;
+    assignHashWithoutScroll(hash);
   }
 }
 

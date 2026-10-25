@@ -37,6 +37,13 @@ export interface CloudRejectedDocument {
   verseRatio?: number;
 }
 
+/** Folder-inherited file skipped for exceeding the page limit; not rejected — the user can still select it. */
+export interface CloudSkippedDocument {
+  documentId: string;
+  fileName: string;
+  pages?: number;
+}
+
 // A selected file that failed to convert and still has no published hash, so it is not viewable.
 export interface CloudFailedDocument {
   documentId: string;
@@ -51,6 +58,7 @@ export interface CloudProviderSyncStatus {
   lastCompletedAt?: string;
   failedCount?: number;
   rejectedDocuments?: CloudRejectedDocument[];
+  skippedDocuments?: CloudSkippedDocument[];
   failedDocuments?: CloudFailedDocument[];
   // Set (with state 'attention') while the provider was signed out and its restored selection
   // has not been applied since signing back in.
