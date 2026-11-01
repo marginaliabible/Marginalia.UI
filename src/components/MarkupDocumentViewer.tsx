@@ -12,8 +12,9 @@ import { applyScriptureLinkOverlays, clearScriptureLinks } from '../utils/script
 import { buildTextLayerHaystack, findAllMatchRanges, getMatchClientRects, placeOverlayOnPage } from '../utils/documentTextMatch';
 import { collapseRedundantTextLayerCopySpaces } from '../utils/textLayerCopySpaces';
 import { clampScale, computeFitWidthScale, fitWidthPageIndex, stepScale } from '../utils/viewerZoom';
-import FileSyncExclusionButton from './FileSyncExclusionButton';
-import DeveloperReprocessButton from './DeveloperReprocessButton';
+import { sanctumPlugin } from '@marginalia/sanctum';
+
+const SanctumDocumentToolbarExtras = sanctumPlugin.DocumentToolbarExtras;
 import DocumentPopoutButton from './DocumentPopoutButton';
 import ViewerZoomControls from './ViewerZoomControls';
 
@@ -814,7 +815,7 @@ interface MarkupDocumentViewerProps {
 const MarkupDocumentViewer: React.FC<MarkupDocumentViewerProps> = ({ onScriptureReferenceOpen }) => {
   const dispatch = useAppDispatch();
   const backToVerses = useBackToVerses();
-  const { pdfViewer, userId } = useAppSelector((state) => state.ui);
+  const { pdfViewer } = useAppSelector((state) => state.ui);
   const currentBible = useAppSelector((state) => state.bible.currentBible);
   const openScriptureReference = useOpenDocumentScriptureReference(onScriptureReferenceOpen);
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
@@ -1343,14 +1344,9 @@ const MarkupDocumentViewer: React.FC<MarkupDocumentViewerProps> = ({ onScripture
         )}
 
         <div className="ms-auto d-flex align-items-center gap-2">
-          <FileSyncExclusionButton syncItem={pdfViewer.syncItem} documentLabel={title} />
-          <DeveloperReprocessButton
-            userId={userId}
-            provider={pdfViewer.syncItem?.provider ?? null}
-            documentId={pdfViewer.syncItem?.itemId ?? null}
-            documentLabel={title}
-            processed
-          />
+          {SanctumDocumentToolbarExtras && (
+            <SanctumDocumentToolbarExtras syncItem={pdfViewer.syncItem} documentLabel={title} />
+          )}
 
           <span className="small text-body-secondary">
             Page {pageCount > 0 ? activePage : '-'}{pageCount > 0 ? ` / ${pageCount}` : ''}

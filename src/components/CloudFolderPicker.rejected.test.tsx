@@ -1,33 +1,25 @@
 import { createRef } from 'react';
 import { act, fireEvent, render, waitFor, within } from '@testing-library/react';
-import CloudFolderPicker, { type CloudFolderPickerHandle, type FolderSelectionTarget } from './CloudFolderPicker';
-import type { FederatedSession } from '../services/federatedAuthService';
+import CloudFolderPicker, {
+  type CloudFolderPickerHandle,
+  type CloudFolderSyncApi,
+  type FolderSelectionTarget,
+} from './CloudFolderPicker';
+import type { FederatedSession } from '../models/bible';
 import { __resetToastsForTests, getToasts } from '../services/toastService';
 
-jest.mock('../services/cloudControlService', () => ({
-  requestDocumentReprocess: jest.fn(),
-  fetchDeveloperCapabilities: jest.fn(async () => null),
-}));
-
-jest.mock('../services/developerToolsService', () => ({
-  isDeveloperToolsEnabled: () => false,
-  ensureDeveloperCapabilities: jest.fn(async () => false),
-  subscribeDeveloperTools: () => () => undefined,
-}));
-
-jest.mock('../services/cloudConfigProviderService', () => ({
-  listFolderChildrenForSession: jest.fn(async (_session: unknown, parentId: string) => (
+const cloudSync: CloudFolderSyncApi = {
+  listFolderChildrenForSession: jest.fn(async (_session, parentId) => (
     parentId === 'g-folder'
       ? [
-        { id: 'g-thin', name: 'Thin.pdf', kind: 'file', sizeBytes: 100, hasChildren: false },
-        { id: 'g-rich', name: 'Rich.pdf', kind: 'file', sizeBytes: 100, hasChildren: false },
-        { id: 'g-protected', name: 'Protected.pdf', kind: 'file', sizeBytes: 100, hasChildren: false },
+        { id: 'g-thin', name: 'Thin.pdf', kind: 'file' as const, sizeBytes: 100, hasChildren: false },
+        { id: 'g-rich', name: 'Rich.pdf', kind: 'file' as const, sizeBytes: 100, hasChildren: false },
+        { id: 'g-protected', name: 'Protected.pdf', kind: 'file' as const, sizeBytes: 100, hasChildren: false },
       ]
       : []
   )),
-  computeSupportedFolderSizeForSession: jest.fn(async () => 0),
   listSupportedFolderContentsForSession: jest.fn(async () => ({ totalBytes: 0, files: [] })),
-}));
+};
 
 const googleSession = { provider: 'google', accessToken: 'token' } as unknown as FederatedSession;
 const selections: Record<'google' | 'microsoft', FolderSelectionTarget[]> = {
@@ -56,6 +48,7 @@ describe('CloudFolderPicker rejected files', () => {
         focusRequest={null}
         onSelectionsChange={jest.fn()}
         onConnectRequested={jest.fn()}
+        cloudSync={cloudSync}
         rejectedDocumentIds={{ google: new Set(['g-thin']) }}
       />
     );
@@ -96,6 +89,7 @@ describe('CloudFolderPicker rejected files', () => {
         focusRequest={null}
         onSelectionsChange={jest.fn()}
         onConnectRequested={jest.fn()}
+        cloudSync={cloudSync}
         failedDocuments={{ google: new Map([['g-protected', rawError]]) }}
       />
     );
@@ -135,6 +129,7 @@ describe('CloudFolderPicker rejected files', () => {
         focusRequest={null}
         onSelectionsChange={onSelectionsChange}
         onConnectRequested={jest.fn()}
+        cloudSync={cloudSync}
         skippedDocumentIds={{ google: new Set(['g-thin']) }}
       />
     );
@@ -160,7 +155,7 @@ describe('CloudFolderPicker rejected files', () => {
       expect(onSelectionsChange).toHaveBeenCalled();
     });
     const payload = onSelectionsChange.mock.calls[0][0] as Record<string, FolderSelectionTarget[]>;
-    expect(payload.google[0].includedItemIds).toEqual(['g-thin']);
-    expect(payload.google[0].excludedItemIds).toBeUndefined();
+    expect(payload['google'][0].includedItemIds).toEqual(['g-thin']);
+    expect(payload['google'][0].excludedItemIds).toBeUndefined();
   });
 });

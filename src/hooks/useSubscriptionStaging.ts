@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { TranslationRecord } from '../models/bible';
 import type { SubscriptionChanges, SubscriptionsBinding } from '../models/subscription';
 import type { SubscriptionLibrary } from '../services/subscriptionCatalogService';
-import { stableStringify } from '../services/cloudConfigMerge';
+import { stableStringify } from '../utils/stableStringify';
 import {
   normalizeDisabledSourceItems,
   normalizeResourceTagOverrides,

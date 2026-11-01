@@ -8,6 +8,10 @@ import LoadingStatus from './components/LoadingStatus';
 import SettingsModal from './components/SettingsModal';
 import GitHubAuthPromptModal from './components/GitHubAuthPromptModal';
 import AccountControl from './components/AccountControl';
+import { sanctumPlugin } from '@marginalia/sanctum';
+
+const SanctumAccountSync = sanctumPlugin.AccountSync;
+const SanctumSettingsFooter = sanctumPlugin.SettingsFooter;
 import ToastPanel from './components/ToastPanel';
 import { useCallback, useEffect, useMemo, useRef, useState, ChangeEvent } from 'react';
 import { useAppDispatch, useAppSelector } from './store/hooks';
@@ -983,7 +987,9 @@ function App() {
           <>
             <AppHeader
               onOpenSettings={openSettingsModal}
-              accountControl={<AccountControl subscriptions={subscriptionsBinding} />}
+              accountControl={SanctumAccountSync
+                ? <SanctumAccountSync subscriptions={subscriptionsBinding} />
+                : <AccountControl subscriptions={subscriptionsBinding} />}
             />
 
             <SearchBar
@@ -1089,7 +1095,7 @@ function App() {
           languageOptions={languageOptions}
           getLanguageDisplayName={getLoadedLanguageDisplayName}
           closeSettingsModal={closeSettingsModal}
-          userId={userId}
+          settingsFooter={SanctumSettingsFooter ? <SanctumSettingsFooter /> : null}
         />
 
         <GitHubAuthPromptModal

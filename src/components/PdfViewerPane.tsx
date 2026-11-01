@@ -25,7 +25,9 @@ import {
 } from '../utils/documentTextMatch';
 import { findTopVisiblePageIndexInContainer } from '../utils/viewerTopPage';
 import { clampScale, stepScale } from '../utils/viewerZoom';
-import FileSyncExclusionButton from './FileSyncExclusionButton';
+import { sanctumPlugin } from '@marginalia/sanctum';
+
+const SanctumDocumentToolbarExtras = sanctumPlugin.DocumentToolbarExtras;
 import DocumentPopoutButton from './DocumentPopoutButton';
 import ViewerZoomControls from './ViewerZoomControls';
 
@@ -641,7 +643,9 @@ const PdfViewerPane: React.FC<PdfViewerPaneProps> = ({ onScriptureReferenceOpen 
         <div className="pdf-viewer-title fw-semibold text-truncate" title={title}>{title}</div>
 
         <div className="ms-auto d-flex align-items-center gap-2">
-          <FileSyncExclusionButton syncItem={pdfViewer.syncItem} documentLabel={title} />
+          {SanctumDocumentToolbarExtras && (
+            <SanctumDocumentToolbarExtras syncItem={pdfViewer.syncItem} documentLabel={title} />
+          )}
 
           <span className="small text-body-secondary">
             Page {pageCount > 0 ? activePage : '-'}{pageCount > 0 ? ` / ${pageCount}` : ''}

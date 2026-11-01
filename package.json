@@ -4,10 +4,13 @@
   "scripts": {
     "dev": "vite",
     "start": "vite",
+    "start:sanctum": "node scripts/with-sanctum.mjs start",
     "build": "tsc && vite build",
+    "build:sanctum": "node scripts/with-sanctum.mjs build",
     "preview": "vite preview",
     "test": "jest",
     "test:watch": "jest --watch",
+    "test:sanctum": "npm --prefix ../Marginalia.UI.Sanctum test",
     "generate:scrollmapper": "node scripts/generate-scrollmapper.js",
     "find:near-duplicates": "node scripts/find-near-duplicate-translations.js"
   },

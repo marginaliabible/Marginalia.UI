@@ -1,5 +1,4 @@
-import { noteCcsAuthFailure } from './brokerSessionPrompt';
-import { getAuthServiceUrl, getConfiguredStorageBaseUrl, getDocumentRenderEpochOverride } from './storageEnv';
+import { getConfiguredStorageBaseUrl, getDocumentRenderEpochOverride } from './storageEnv';
 
 const DEFAULT_STORAGE_HOST = 'storage.marginaliabible.com';
 
@@ -66,53 +65,13 @@ export function isStorageGatewayUrl(url: string): boolean {
   }
 }
 
-/**
- * Establish (or refresh) the HttpOnly `marginalia_storage` cookie via CCS.
- * Requires Function URL CORS to allow credentials for this origin.
- */
-export async function establishStorageSession(userId?: string): Promise<boolean> {
-  const baseUrl = getAuthServiceUrl();
-  const resolvedUserId = String(userId ?? cachedStorageUserId).trim();
-  if (!baseUrl || !resolvedUserId) {
-    return false;
-  }
+type StorageSessionRefresher = (userId?: string) => Promise<boolean>;
 
-  cachedStorageUserId = resolvedUserId;
+let refreshStorageSession: StorageSessionRefresher = async () => false;
 
-  try {
-    const response = await fetch(`${baseUrl}/oauth/storage-session`, {
-      method: 'POST',
-      credentials: 'include',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ userId: resolvedUserId }),
-    });
-    if (!response.ok) {
-      noteCcsAuthFailure(response.status, await response.text());
-      return false;
-    }
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/** Ask CCS to clear the storage cookie (e.g. after disconnect). */
-export async function clearStorageSession(): Promise<void> {
-  const baseUrl = getAuthServiceUrl();
-  if (!baseUrl) {
-    return;
-  }
-
-  try {
-    await fetch(`${baseUrl}/oauth/storage-session`, {
-      method: 'POST',
-      credentials: 'include',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ userId: cachedStorageUserId || 'anonymous', clear: true }),
-    });
-  } catch {
-    // Best-effort.
-  }
+/** Sanctum registers CCS storage-session minting; the open-source build leaves this as a no-op. */
+export function setStorageSessionRefresher(refresher: StorageSessionRefresher | null): void {
+  refreshStorageSession = refresher ?? (async () => false);
 }
 
 type FetchInit = RequestInit & { cache?: RequestCache };
@@ -139,7 +98,7 @@ export async function fetchStorageAware(input: string, init: FetchInit = {}): Pr
     return response;
   }
 
-  const refreshed = await establishStorageSession();
+  const refreshed = await refreshStorageSession();
   if (!refreshed) {
     return response;
   }

@@ -1,28 +1,8 @@
 import { fireEvent, render, screen } from '@testing-library/react';
-import CloudFolderPicker, { type FolderSelectionTarget } from './CloudFolderPicker';
-import type { FederatedSession } from '../services/federatedAuthService';
-import { listFolderChildrenForSession } from '../services/cloudConfigProviderService';
+import CloudFolderPicker, { type CloudFolderSyncApi, type FolderSelectionTarget } from './CloudFolderPicker';
+import type { FederatedSession } from '../models/bible';
 
-jest.mock('../services/cloudControlService', () => ({
-  requestDocumentReprocess: jest.fn(),
-  fetchDeveloperCapabilities: jest.fn(async () => null),
-}));
-
-jest.mock('../services/developerToolsService', () => ({
-  isDeveloperToolsEnabled: () => false,
-  ensureDeveloperCapabilities: jest.fn(async () => false),
-  subscribeDeveloperTools: () => () => undefined,
-}));
-
-jest.mock('../services/cloudConfigProviderService', () => ({
-  listFolderChildrenForSession: jest.fn(async () => []),
-  computeSupportedFolderSizeForSession: jest.fn(async () => 0),
-  listSupportedFolderContentsForSession: jest.fn(async () => ({ totalBytes: 0, files: [] })),
-}));
-
-const listFolderChildrenMock = listFolderChildrenForSession as jest.MockedFunction<typeof listFolderChildrenForSession>;
-
-const CHILDREN_BY_FOLDER_ID: Record<string, Awaited<ReturnType<typeof listFolderChildrenForSession>>> = {
+const CHILDREN_BY_FOLDER_ID: Record<string, Awaited<ReturnType<CloudFolderSyncApi['listFolderChildrenForSession']>>> = {
   projects: [
     { id: 'sub', name: 'Sub', kind: 'folder', sizeBytes: 0, hasChildren: true },
     { id: 'notes', name: 'Notes.md', kind: 'file', sizeBytes: 10, hasChildren: false },
@@ -30,6 +10,15 @@ const CHILDREN_BY_FOLDER_ID: Record<string, Awaited<ReturnType<typeof listFolder
   sub: [
     { id: 'deep', name: 'Deep.md', kind: 'file', sizeBytes: 10, hasChildren: false },
   ],
+};
+
+const listFolderChildrenForSession: CloudFolderSyncApi['listFolderChildrenForSession'] = jest.fn(
+  async (_session, parentId) => CHILDREN_BY_FOLDER_ID[parentId] ?? []
+);
+
+const cloudSync: CloudFolderSyncApi = {
+  listFolderChildrenForSession,
+  listSupportedFolderContentsForSession: jest.fn(async () => ({ totalBytes: 0, files: [] })),
 };
 
 function makeSession(accessToken: string): FederatedSession {
@@ -82,6 +71,7 @@ function renderPicker(
       focusRequest={null}
       onSelectionsChange={jest.fn()}
       onConnectRequested={jest.fn()}
+      cloudSync={cloudSync}
     />
   );
 }
@@ -89,7 +79,9 @@ function renderPicker(
 describe('CloudFolderPicker file sync panel', () => {
   beforeEach(() => {
     mockMatchMedia(true);
-    listFolderChildrenMock.mockImplementation(async (_session, parentId) => CHILDREN_BY_FOLDER_ID[parentId] ?? []);
+    (listFolderChildrenForSession as jest.Mock).mockImplementation(
+      async (_session, parentId) => CHILDREN_BY_FOLDER_ID[parentId] ?? []
+    );
   });
 
   it('keeps expanded right-panel folders showing their children after sessions refresh', async () => {
@@ -121,45 +113,31 @@ describe('CloudFolderPicker file sync panel', () => {
       mockMatchMedia(false);
     });
 
-    it('defaults to files pane when selections exist and hides the sync header row', async () => {
+    it('starts on the files pane when folders are already selected', async () => {
       render(renderPicker(makeSession('token-1')));
 
-      const providersToggle = await screen.findByRole('button', { name: 'Select Cloud Providers' });
-      const filesToggle = screen.getByRole('button', { name: 'Select Files & Folders' });
-      expect(providersToggle).toHaveAttribute('aria-expanded', 'false');
-      expect(filesToggle).toHaveAttribute('aria-expanded', 'true');
-      expect(screen.queryByText('Selected Files & Folders')).toBeNull();
-      expect(screen.queryByText('Synchronization')).toBeNull();
-      expect(await screen.findByRole('button', { name: 'Expand Projects' })).toBeTruthy();
-      expect(document.querySelector('.cloud-folder-picker-layout')?.classList.contains('is-mobile-stacked')).toBe(true);
+      expect(await screen.findByRole('button', { name: 'Select Files & Folders' })).toHaveAttribute('aria-expanded', 'true');
+      expect(screen.getByRole('button', { name: 'Select Cloud Providers' })).toHaveAttribute('aria-expanded', 'false');
+      expect(screen.getByRole('button', { name: 'Expand Projects' })).toBeTruthy();
     });
 
-    it('defaults to providers pane when nothing is selected', async () => {
+    it('starts on the providers pane when nothing is selected', async () => {
       render(renderPicker(makeSession('token-1'), emptySelections));
 
-      const providersToggle = await screen.findByRole('button', { name: 'Select Cloud Providers' });
-      const filesToggle = screen.getByRole('button', { name: 'Select Files & Folders' });
-      expect(providersToggle).toHaveAttribute('aria-expanded', 'true');
-      expect(filesToggle).toHaveAttribute('aria-expanded', 'false');
-      expect(screen.queryByText('No folders selected yet.')).toBeNull();
+      expect(await screen.findByRole('button', { name: 'Select Cloud Providers' })).toHaveAttribute('aria-expanded', 'true');
+      expect(screen.getByRole('button', { name: 'Select Files & Folders' })).toHaveAttribute('aria-expanded', 'false');
     });
 
-    it('opens only one mobile accordion at a time', async () => {
+    it('opens only one pane at a time', async () => {
       render(renderPicker(makeSession('token-1')));
 
-      const providersToggle = await screen.findByRole('button', { name: 'Select Cloud Providers' });
-      const filesToggle = screen.getByRole('button', { name: 'Select Files & Folders' });
-      expect(filesToggle).toHaveAttribute('aria-expanded', 'true');
+      fireEvent.click(await screen.findByRole('button', { name: 'Select Cloud Providers' }));
+      expect(screen.getByRole('button', { name: 'Select Cloud Providers' })).toHaveAttribute('aria-expanded', 'true');
+      expect(screen.getByRole('button', { name: 'Select Files & Folders' })).toHaveAttribute('aria-expanded', 'false');
 
-      fireEvent.click(providersToggle);
-      expect(providersToggle).toHaveAttribute('aria-expanded', 'true');
-      expect(filesToggle).toHaveAttribute('aria-expanded', 'false');
-      expect(screen.queryByRole('button', { name: 'Expand Projects' })).toBeNull();
-
-      fireEvent.click(filesToggle);
-      expect(providersToggle).toHaveAttribute('aria-expanded', 'false');
-      expect(filesToggle).toHaveAttribute('aria-expanded', 'true');
-      expect(await screen.findByRole('button', { name: 'Expand Projects' })).toBeTruthy();
+      fireEvent.click(screen.getByRole('button', { name: 'Select Files & Folders' }));
+      expect(screen.getByRole('button', { name: 'Select Files & Folders' })).toHaveAttribute('aria-expanded', 'true');
+      expect(screen.getByRole('button', { name: 'Select Cloud Providers' })).toHaveAttribute('aria-expanded', 'false');
     });
   });
 });

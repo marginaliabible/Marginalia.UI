@@ -1,11 +1,5 @@
-import { useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
-import type { FederatedProvider } from '../models/bible';
-import type { FederatedSession } from '../services/federatedAuthService';
-import {
-  listFolderChildrenForSession,
-  listSupportedFolderContentsForSession,
-  type SupportedFolderFile,
-} from '../services/cloudConfigProviderService';
+import { useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type ComponentType } from 'react';
+import type { FederatedProvider, FederatedSession } from '../models/bible';
 import { getMarkupFileIcon, isSupportedMarkupFileName } from '../utils/supportedMarkupFileTypes';
 import { useHorizontalSplit } from '../hooks/useHorizontalSplit';
 import { useDesktopLayout } from '../hooks/useDesktopLayout';
@@ -25,13 +19,65 @@ import { findStarredTranslationBlock, useSubscriptionStaging } from '../hooks/us
 import { showToast } from '../services/toastService';
 import { formatAccountSyncApplyToast, type FolderApplyResult } from '../utils/syncToastMessages';
 import { describeSyncFailure } from '../utils/syncFailureMessages';
-import type { SyncPlanDocumentRef, SyncPlanLiveFile } from '../utils/syncPlanUsage';
-import DeveloperReprocessButton from './DeveloperReprocessButton';
 
 const ROOT_LABEL: Record<FederatedProvider, string> = {
   google: 'Google Drive',
   microsoft: 'OneDrive',
 };
+
+export interface SupportedFolderFile {
+  id: string;
+  lastModified?: string;
+  ancestorIds: string[];
+}
+
+export interface SyncPlanDocumentRef {
+  documentId: string;
+  hash: string;
+  sizeBytes?: number;
+  provider: FederatedProvider;
+}
+
+export interface SyncPlanLiveFile {
+  documentId: string;
+  lastModified?: string;
+  provider: FederatedProvider;
+}
+
+export interface CloudFolderChild {
+  id: string;
+  name: string;
+  kind: 'file' | 'folder';
+  sizeBytes: number;
+  hasChildren: boolean;
+  lastModified?: string;
+  driveId?: string;
+}
+
+export interface CloudFolderReprocessButtonProps {
+  userId: string | null | undefined;
+  provider: FederatedProvider | null;
+  documentId: string | null;
+  documentLabel: string;
+  fileName?: string;
+  processed: boolean;
+  variant?: 'toolbar' | 'row';
+}
+
+/** Drive/OneDrive listing and developer tools injected by Sanctum. Omitted in the open-source build. */
+export interface CloudFolderSyncApi {
+  listFolderChildrenForSession: (
+    session: FederatedSession,
+    folderId: string,
+    driveId?: string
+  ) => Promise<CloudFolderChild[]>;
+  listSupportedFolderContentsForSession: (
+    session: FederatedSession,
+    folderId: string,
+    driveId?: string
+  ) => Promise<{ totalBytes: number; files: SupportedFolderFile[] }>;
+  DeveloperReprocessButton?: ComponentType<CloudFolderReprocessButtonProps>;
+}
 
 /** Live selection snapshot for the Account Sync plan usage bar. */
 export interface CloudFolderPickerUsageSnapshot {
@@ -112,6 +158,7 @@ interface CloudFolderPickerProps {
   processedDocumentIds?: Partial<Record<FederatedProvider, ReadonlySet<string>>>;
   userId?: string | null;
   subscriptions?: SubscriptionsBinding;
+  cloudSync?: CloudFolderSyncApi;
   ref?: React.Ref<CloudFolderPickerHandle>;
 }
 
@@ -712,8 +759,11 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
   processedDocumentIds,
   userId,
   subscriptions,
+  cloudSync,
   ref,
 }) => {
+  const cloudProvidersEnabled = Boolean(cloudSync);
+  const ReprocessButton = cloudSync?.DeveloperReprocessButton;
   const isDesktopLayout = useDesktopLayout();
   const [loadingRoots, setLoadingRoots] = useState(true);
   const [isSubscriptionsExpanded, setIsSubscriptionsExpanded] = useState(false);
@@ -844,7 +894,7 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
     }
 
     const session = sessions[node.provider];
-    if (!session) {
+    if (!session || !cloudSync) {
       setErrorMessage(`Connect ${ROOT_LABEL[node.provider]} to browse folders.`);
       return [];
     }
@@ -859,7 +909,7 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
 
     const loadPromise = (async () => {
       try {
-        const children = await listFolderChildrenForSession(session, node.id, node.driveId);
+        const children = await cloudSync.listFolderChildrenForSession(session, node.id, node.driveId);
         // Subfolders are listed before files within a folder.
         const sortedChildren = [...children].sort((left, right) => {
           if (left.kind === right.kind) {
@@ -940,7 +990,7 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
 
     inFlightLoadsRef.current[nodeKey] = loadPromise;
     return loadPromise;
-  }, [sessions, updateNodes]);
+  }, [cloudSync, sessions, updateNodes]);
 
   useEffect(() => {
     let cancelled = false;
@@ -950,7 +1000,7 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
       setLoadingRoots(true);
       setErrorMessage(null);
 
-      const allProviders: FederatedProvider[] = ['google', 'microsoft'];
+      const allProviders: FederatedProvider[] = cloudProvidersEnabled ? ['google', 'microsoft'] : [];
 
       const rootEntries = allProviders.map((provider) => {
         const key = makeNodeKey(provider, 'root');
@@ -1055,7 +1105,7 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
       pendingSubfolderCheckKeysRef.current.clear();
       checkedSubfolderKeysRef.current.clear();
     };
-  }, [sessions]);
+  }, [cloudProvidersEnabled, sessions]);
 
   const visibleNodes = useMemo<VisibleNode[]>(() => {
     const result: VisibleNode[] = [];
@@ -1104,7 +1154,9 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
       activeSubfolderChecksRef.current += 1;
       void (async () => {
         try {
-          const children = await listFolderChildrenForSession(request.session, node.id, node.driveId);
+          const children = cloudSync
+            ? await cloudSync.listFolderChildrenForSession(request.session, node.id, node.driveId)
+            : [];
           if (request.generation !== subfolderCheckGenerationRef.current) {
             return;
           }
@@ -1750,13 +1802,13 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
       }
 
       const session = sessions[node.provider];
-      if (!session) {
+      if (!session || !cloudSync) {
         continue;
       }
 
       const readPromise = (async () => {
         try {
-          const contents = await listSupportedFolderContentsForSession(session, node.id, node.driveId);
+          const contents = await cloudSync.listSupportedFolderContentsForSession(session, node.id, node.driveId);
           const computedSize = Math.max(0, Math.floor(contents.totalBytes));
           updateNodes((current) => {
             const existing = current[nodeKey];
@@ -1785,7 +1837,7 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
 
       inFlightFolderSizeReadsRef.current[nodeKey] = readPromise;
     }
-  }, [folderContentsByRoot, reconnectPending, rightVisibleRows, selectedRootKeys, selectedRows, sessions, updateNodes]);
+  }, [cloudSync, folderContentsByRoot, reconnectPending, rightVisibleRows, selectedRootKeys, selectedRows, sessions, updateNodes]);
 
   // Right-panel expansion outlives the node tree, which is rebuilt whenever sessions change.
   useEffect(() => {
@@ -1842,7 +1894,7 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
               aria-controls="cloud-folder-providers-pane"
               onClick={() => toggleMobilePane('providers')}
             >
-              <span>Select Cloud Providers</span>
+              <span>{cloudProvidersEnabled ? 'Select Cloud Providers' : 'Subscriptions'}</span>
               <i className={`fa-solid ${showProvidersPane ? 'fa-chevron-down' : 'fa-chevron-right'}`} aria-hidden="true"></i>
             </button>
           )}
@@ -1856,7 +1908,7 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
             >
               {loadingRoots && <p className="small text-body-secondary mb-0">Loading folder roots...</p>}
 
-              {!loadingRoots && rootKeys.length === 0 && (
+              {!loadingRoots && cloudProvidersEnabled && rootKeys.length === 0 && (
                 <p className="small text-body-secondary mb-0">No connected folder providers found.</p>
               )}
 
@@ -2216,8 +2268,8 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
                       </span>
 
                       <span className="cloud-folder-selected-action">
-                        {!isFolder && fileIcon?.supported && (
-                          <DeveloperReprocessButton
+                        {!isFolder && fileIcon?.supported && ReprocessButton && (
+                          <ReprocessButton
                             userId={userId}
                             provider={node.provider}
                             documentId={node.id}

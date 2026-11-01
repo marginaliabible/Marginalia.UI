@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import LanguageTagSelector from './LanguageTagSelector';
 
 interface SettingsModalProps {
@@ -12,7 +13,7 @@ interface SettingsModalProps {
   languageOptions: { code: string; count: number }[];
   getLanguageDisplayName: (code: string) => string;
   closeSettingsModal: () => void;
-  userId?: string | null;
+  settingsFooter?: ReactNode;
 }
 
 const SettingsModal: React.FC<SettingsModalProps> = ({
@@ -27,7 +28,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
   languageOptions,
   getLanguageDisplayName,
   closeSettingsModal,
-  userId,
+  settingsFooter,
 }) => {
   return (
     <div
@@ -172,17 +173,13 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
                 </span>
               </div>
               <p className="text-body-secondary small mb-0">
-                Libraries, translations, and resources are now managed under
-                {' '}<span className="fw-semibold">Account Sync &gt; Subscriptions</span>.
+                Libraries, translations, and resources are managed under
+                {' '}<span className="fw-semibold">File Sync &gt; Subscriptions</span>.
               </p>
             </section>
           </div>
           <div className="modal-footer d-flex align-items-center">
-            {userId && (
-              <span className="text-body-secondary small font-monospace me-auto" title="Internal reference ID; share with support if asked.">
-                User ID: {userId}
-              </span>
-            )}
+            {settingsFooter}
             <button
               type="button"
               className="btn btn-secondary"

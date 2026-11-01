@@ -1,30 +1,33 @@
 import { fireEvent, render, waitFor, within } from '@testing-library/react';
-import CloudFolderPicker, { type FolderSelectionTarget } from './CloudFolderPicker';
-import type { FederatedSession } from '../services/federatedAuthService';
+import CloudFolderPicker, { type CloudFolderSyncApi, type FolderSelectionTarget } from './CloudFolderPicker';
+import type { FederatedSession } from '../models/bible';
 
-jest.mock('../services/cloudConfigProviderService', () => ({
-  listFolderChildrenForSession: jest.fn(async (_session: unknown, parentId: string) => (
+function MockReprocessButton({
+  documentLabel,
+  processed,
+}: {
+  documentLabel: string;
+  processed: boolean;
+}) {
+  return (
+    <button type="button" disabled={!processed} aria-label={`Blow away and reprocess ${documentLabel}`}>
+      <i className="fa-bomb" />
+    </button>
+  );
+}
+
+const cloudSync: CloudFolderSyncApi = {
+  listFolderChildrenForSession: jest.fn(async (_session, parentId) => (
     parentId === 'g-folder'
       ? [
-        { id: 'g-rich', name: 'Rich.pdf', kind: 'file', sizeBytes: 100, hasChildren: false },
-        { id: 'g-pending', name: 'Pending.pdf', kind: 'file', sizeBytes: 100, hasChildren: false },
+        { id: 'g-rich', name: 'Rich.pdf', kind: 'file' as const, sizeBytes: 100, hasChildren: false },
+        { id: 'g-pending', name: 'Pending.pdf', kind: 'file' as const, sizeBytes: 100, hasChildren: false },
       ]
       : []
   )),
-  computeSupportedFolderSizeForSession: jest.fn(async () => 0),
   listSupportedFolderContentsForSession: jest.fn(async () => ({ totalBytes: 0, files: [] })),
-}));
-
-jest.mock('../services/cloudControlService', () => ({
-  requestDocumentReprocess: jest.fn(async () => undefined),
-  fetchDeveloperCapabilities: jest.fn(async () => ({ ok: true, isDeveloper: true })),
-}));
-
-jest.mock('../services/developerToolsService', () => ({
-  isDeveloperToolsEnabled: () => true,
-  ensureDeveloperCapabilities: jest.fn(async () => true),
-  subscribeDeveloperTools: () => () => undefined,
-}));
+  DeveloperReprocessButton: MockReprocessButton,
+};
 
 const googleSession = { provider: 'google', accessToken: 'token' } as unknown as FederatedSession;
 const selections: Record<'google' | 'microsoft', FolderSelectionTarget[]> = {
@@ -45,6 +48,7 @@ describe('CloudFolderPicker developer reprocess', () => {
         onConnectRequested={jest.fn()}
         processedDocumentIds={{ google: new Set(['g-rich']) }}
         userId="dev@example.com"
+        cloudSync={cloudSync}
       />
     );
 

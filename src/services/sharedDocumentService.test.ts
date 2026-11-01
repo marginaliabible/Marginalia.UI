@@ -8,6 +8,7 @@ import {
   resolveSharedDocumentStorageBaseUrl,
   resolveSharedDocumentTitle,
 } from './sharedDocumentService';
+import { DOCUMENT_RENDER_EPOCH } from './storageAuthenticatedFetch';
 
 jest.mock('./storageEnv', () => ({
   getAuthServiceUrl: () => '',
@@ -87,7 +88,7 @@ describe('sharedDocumentService', () => {
         packageUrl: PACKAGE_URL,
         shellHtml: '<html><head><title></title></head><body></body></html>',
       });
-      expect(fetchMock).toHaveBeenCalledWith(`${PACKAGE_URL}pages/index.html?r=1`, expect.objectContaining({ credentials: 'include' }));
+      expect(fetchMock).toHaveBeenCalledWith(`${PACKAGE_URL}pages/index.html?r=${DOCUMENT_RENDER_EPOCH}`, expect.objectContaining({ credentials: 'include' }));
     });
 
     it('falls back to the generic title when the resolver fails', async () => {

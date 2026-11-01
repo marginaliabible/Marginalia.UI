@@ -4,7 +4,7 @@ import SettingsModal from './SettingsModal';
 jest.mock('./LanguageTagSelector', () => () => null);
 
 describe('SettingsModal', () => {
-  it('points to Account Sync > Subscriptions instead of managing sources inline', () => {
+  it('points to File Sync > Subscriptions instead of managing sources inline', () => {
     render(
       <SettingsModal
         theme="light"
@@ -21,7 +21,7 @@ describe('SettingsModal', () => {
       />
     );
 
-    expect(screen.getByText('Account Sync > Subscriptions')).toBeTruthy();
+    expect(screen.getByText('File Sync > Subscriptions')).toBeTruthy();
     expect(screen.queryByLabelText('Source URL')).toBeNull();
   });
 });

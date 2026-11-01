@@ -4,23 +4,6 @@ import CloudFolderPicker, { type CloudFolderPickerHandle, type FolderSelectionTa
 import type { SubscriptionsBinding } from '../models/subscription';
 import { __resetToastsForTests, getToasts } from '../services/toastService';
 
-jest.mock('../services/cloudControlService', () => ({
-  requestDocumentReprocess: jest.fn(),
-  fetchDeveloperCapabilities: jest.fn(async () => null),
-}));
-
-jest.mock('../services/developerToolsService', () => ({
-  isDeveloperToolsEnabled: () => false,
-  ensureDeveloperCapabilities: jest.fn(async () => false),
-  subscribeDeveloperTools: () => () => undefined,
-}));
-
-jest.mock('../services/cloudConfigProviderService', () => ({
-  listFolderChildrenForSession: jest.fn(async () => []),
-  computeSupportedFolderSizeForSession: jest.fn(async () => 0),
-  listSupportedFolderContentsForSession: jest.fn(async () => ({ totalBytes: 0, files: [] })),
-}));
-
 const PUBLISHER_URL = 'https://publisher.example/library.json';
 
 const sessions = { google: null, microsoft: null };

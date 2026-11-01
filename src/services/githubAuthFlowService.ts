@@ -1,4 +1,4 @@
-const GITHUB_CLIENT_ID = "Ov23liiVOv0EIp9hJAAZ";
+const GITHUB_CLIENT_ID = (import.meta.env.VITE_GITHUB_CLIENT_ID || "").trim();
 const STATE_STORAGE_KEY = "marginalia:github-oauth-state";
 const TOKEN_STORAGE_KEY = "marginalia:github-auth";
 const AUTH_BRIDGE_STORAGE_KEY = "marginalia:github-auth-bridge";
@@ -136,6 +136,9 @@ export function initializeGitHubAuthFlow(): () => void {
 
 export function beginGitHubAuthorization(callbackBase: string): { ok: boolean; message?: string } {
   const trimmed = callbackBase.trim();
+  if (!GITHUB_CLIENT_ID) {
+    return { ok: false, message: "Set VITE_GITHUB_CLIENT_ID before connecting." };
+  }
   if (!trimmed) {
     return { ok: false, message: "Set VITE_AUTH_SERVICE_URL before connecting." };
   }
