@@ -1,4 +1,5 @@
-import type { ReactNode } from 'react';
+import { useCallback, useState, type ReactNode } from 'react';
+import { getAppGitSha, getAppVersion } from '../services/appBuildIdentity';
 import LanguageTagSelector from './LanguageTagSelector';
 
 interface SettingsModalProps {
@@ -30,6 +31,25 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
   closeSettingsModal,
   settingsFooter,
 }) => {
+  const appVersion = getAppVersion();
+  const appGitSha = getAppGitSha();
+  const [versionCopied, setVersionCopied] = useState(false);
+
+  const copyVersionIdentity = useCallback(async () => {
+    const text = appGitSha || appVersion;
+    try {
+      if (typeof navigator.clipboard?.writeText === 'function') {
+        await navigator.clipboard.writeText(text);
+      } else {
+        throw new Error('clipboard unavailable');
+      }
+      setVersionCopied(true);
+      window.setTimeout(() => setVersionCopied(false), 1500);
+    } catch {
+      setVersionCopied(false);
+    }
+  }, [appGitSha, appVersion]);
+
   return (
     <div
       className="modal fade"
@@ -178,8 +198,27 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
               </p>
             </section>
           </div>
-          <div className="modal-footer d-flex align-items-center">
-            {settingsFooter}
+          <div className="modal-footer d-flex align-items-center gap-2">
+            <div className="me-auto d-flex align-items-center gap-3 flex-wrap">
+              {settingsFooter}
+              <span
+                className="text-body-secondary small font-monospace d-inline-flex align-items-center gap-1"
+                title={appGitSha || appVersion}
+              >
+                {appVersion}
+                <button
+                  type="button"
+                  className="btn btn-link btn-sm p-0 text-body-secondary"
+                  onClick={() => {
+                    void copyVersionIdentity();
+                  }}
+                  aria-label={versionCopied ? 'Copied build identity' : 'Copy build identity'}
+                  title={versionCopied ? 'Copied' : 'Copy full commit SHA'}
+                >
+                  <i className={`bi ${versionCopied ? 'bi-check2' : 'bi-clipboard'}`} aria-hidden="true"></i>
+                </button>
+              </span>
+            </div>
             <button
               type="button"
               className="btn btn-secondary"

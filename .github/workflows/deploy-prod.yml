@@ -1,0 +1,51 @@
+name: Deploy production
+
+on:
+  release:
+    types: [published]
+
+concurrency:
+  group: deploy-prod
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: startsWith(github.event.release.tag_name, 'v')
+    runs-on: ubuntu-latest
+    environment: hosted
+    permissions:
+      contents: read
+    env:
+      VITE_SANCTUM: '0'
+      VITE_AUTH_SERVICE_URL: https://cloudcontrol.marginaliabible.com/
+      VITE_APP_VERSION: ${{ github.event.release.tag_name }}
+      VITE_APP_GIT_SHA: ${{ github.sha }}
+      # Optional for forks that use private GitHub library OAuth:
+      # VITE_GITHUB_CLIENT_ID: ${{ vars.VITE_GITHUB_CLIENT_ID }}
+
+    steps:
+      - name: Checkout Marginalia.UI
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Test
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+      - name: Deploy to Cloudflare Pages
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy dist --project-name=marginalia-ui --branch=main

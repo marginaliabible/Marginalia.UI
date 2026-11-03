@@ -1,0 +1,75 @@
+name: Deploy beta
+
+on:
+  push:
+    branches: [main]
+
+concurrency:
+  group: deploy-beta
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: hosted
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: Marginalia.UI
+    env:
+      VITE_AUTH_SERVICE_URL: https://cloudcontrol.marginaliabible.com/
+      VITE_GOOGLE_CLIENT_ID: ${{ vars.VITE_GOOGLE_CLIENT_ID }}
+      VITE_MICROSOFT_CLIENT_ID: ${{ vars.VITE_MICROSOFT_CLIENT_ID }}
+      VITE_APP_GIT_SHA: ${{ github.sha }}
+      # Optional for forks that use private GitHub library OAuth:
+      # VITE_GITHUB_CLIENT_ID: ${{ vars.VITE_GITHUB_CLIENT_ID }}
+
+    steps:
+      - name: Checkout Marginalia.UI
+        uses: actions/checkout@v4
+        with:
+          path: Marginalia.UI
+          fetch-tags: true
+          fetch-depth: 0
+
+      - name: Checkout Marginalia.UI.Sanctum
+        uses: actions/checkout@v4
+        with:
+          repository: marginaliabible/Marginalia.UI.Sanctum
+          token: ${{ secrets.SANCTUM_CHECKOUT_TOKEN }}
+          path: Marginalia.UI.Sanctum
+
+      - name: Set app version
+        working-directory: Marginalia.UI
+        run: |
+          sha7="${GITHUB_SHA:0:7}"
+          latest="$(git tag -l 'v*' --sort=-v:refname | head -n 1)"
+          if [ -z "$latest" ]; then
+            latest="v0.0.0"
+          fi
+          echo "VITE_APP_VERSION=${latest}-${sha7}" >> "$GITHUB_ENV"
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: Marginalia.UI/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Test
+        run: npm test
+
+      - name: Build (Sanctum)
+        run: npm run build:sanctum
+
+      - name: Deploy to Cloudflare Pages
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: Marginalia.UI
+          command: pages deploy dist --project-name=marginalia-ui-beta --branch=main

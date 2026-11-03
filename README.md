@@ -63,6 +63,30 @@ Markup libraries (including hosted document packages) open in the built-in marku
 - Unit tests: `npm test`
 - Watch tests: `npm run test:watch`
 
+## Hosting and CI/CD
+
+The SPA is hosted on **Cloudflare Pages** via GitHub Actions (direct upload with Wrangler), not the Pages native Git integration.
+
+| Channel | Domain | Trigger | Build |
+|---------|--------|---------|-------|
+| Beta | `beta.marginaliabible.com` | Push to `main` | Sanctum overlay (`npm run build:sanctum`) → Pages project `marginalia-ui-beta` |
+| Production | `marginaliabible.com` | GitHub Release tag `v*` | Public UI (`VITE_SANCTUM=0`) → Pages project `marginalia-ui` |
+
+Workflows: [`.github/workflows/deploy-beta.yml`](.github/workflows/deploy-beta.yml), [`.github/workflows/deploy-prod.yml`](.github/workflows/deploy-prod.yml).
+
+Build identity appears in **Settings** (`VITE_APP_VERSION` / `VITE_APP_GIT_SHA`). Prod shows the release tag; beta shows `{latest-v-tag}-{sha7}` (for example `v1.2.3-a1b2c3d`).
+
+### One-time Cloudflare / GitHub setup
+
+1. Create Pages projects `marginalia-ui` and `marginalia-ui-beta` (or let the first `wrangler pages deploy` create them).
+2. Attach custom domains: apex (+ `www` → apex) on prod; `beta.marginaliabible.com` on beta.
+3. Create a GitHub Environment named **`hosted`**:
+   - Deployment branches/tags: allow `main` **and** `v*` tags (prod runs on the release tag ref).
+   - **Secrets:** `CLOUDFLARE_API_TOKEN`, `SANCTUM_CHECKOUT_TOKEN` (Contents: Read on `marginaliabible/Marginalia.UI.Sanctum`).
+   - **Variables:** `CLOUDFLARE_ACCOUNT_ID`, `VITE_GOOGLE_CLIENT_ID`, `VITE_MICROSOFT_CLIENT_ID`.
+4. `VITE_AUTH_SERVICE_URL` is hardcoded in the workflows to `https://cloudcontrol.marginaliabible.com/`. Do not set `VITE_STORAGE_PUBLIC_BASE_URL` (defaults to shared `https://storage.marginaliabible.com`). Hosted Marginalia does not set `VITE_GITHUB_CLIENT_ID` (private GitHub library OAuth); forks can uncomment it in the deploy workflows if needed.
+5. Allowlist `https://beta.marginaliabible.com` on the storage gateway Worker and in CCS Lambda `OAUTH_ALLOWED_RETURN_ORIGINS`, then redeploy the Worker / update Lambda env.
+
 ## License
 
 MIT. Each translation retains the license defined by its source.
