@@ -72,7 +72,9 @@ The SPA is hosted on **Cloudflare Pages** via GitHub Actions (direct upload with
 | Beta | `beta.marginaliabible.com` | Push to `main` | Sanctum overlay (`npm run build:sanctum`) → Pages project `marginalia-ui-beta` |
 | Production | `marginaliabible.com` | GitHub Release tag `v*` | Public UI (`VITE_SANCTUM=0`) → Pages project `marginalia-ui` |
 
-Workflows: [`.github/workflows/deploy-beta.yml`](.github/workflows/deploy-beta.yml), [`.github/workflows/deploy-prod.yml`](.github/workflows/deploy-prod.yml), [`.github/workflows/create-release.yml`](.github/workflows/create-release.yml).
+Workflows: [`.github/workflows/ci.yml`](.github/workflows/ci.yml) (PR tests), [`.github/workflows/deploy-beta.yml`](.github/workflows/deploy-beta.yml), [`.github/workflows/deploy-prod.yml`](.github/workflows/deploy-prod.yml), [`.github/workflows/create-release.yml`](.github/workflows/create-release.yml).
+
+Pull requests to `main` run `npm test`. In GitHub **Settings → Branches → Branch protection** for `main`, require the status check **`test`** so merges are blocked until CI is green.
 
 To cut a production release: run **Actions → Create release** on `main` (manual). It tags `vYYYY.MM.PP` from the UTC calendar month (`v2026.11.00`, then `v2026.11.01`, …) and publishes a GitHub Release, which triggers the prod deploy.
 
