@@ -5,6 +5,7 @@ on:
 
 permissions:
   contents: write
+  actions: write
 
 jobs:
   release:
@@ -41,7 +42,17 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          # Releases created with GITHUB_TOKEN do not fire release:published for
+          # other workflows, so we dispatch Deploy production explicitly below.
           gh release create "${{ steps.version.outputs.tag }}" \
             --target "${{ github.sha }}" \
             --generate-notes \
             --title "${{ steps.version.outputs.tag }}"
+
+      - name: Trigger production deploy
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh workflow run "Deploy production" \
+            --ref main \
+            -f tag="${{ steps.version.outputs.tag }}"

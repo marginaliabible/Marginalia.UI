@@ -76,7 +76,7 @@ Workflows: [`.github/workflows/ci.yml`](.github/workflows/ci.yml) (PR tests), [`
 
 Pull requests to `main` run `npm test`. In GitHub **Settings → Branches → Branch protection** for `main`, require the status check **`test`** so merges are blocked until CI is green.
 
-To cut a production release: run **Actions → Create release** on `main` (manual). It tags `vYYYY.MM.PP` from the UTC calendar month (`v2026.11.00`, then `v2026.11.01`, …) and publishes a GitHub Release, which triggers the prod deploy.
+To cut a production release: run **Actions → Create release** on `main` (manual). It tags `vYYYY.MM.PP` from the UTC calendar month (`v2026.11.00`, then `v2026.11.01`, …), publishes a GitHub Release, and dispatches **Deploy production** (GITHUB_TOKEN-created releases do not cascade `release: published` events). You can also run **Deploy production** manually with a tag input.
 
 Build identity appears in **Settings** (`VITE_APP_VERSION` / `VITE_APP_GIT_SHA`). Prod shows the release tag; beta shows `{latest-v-tag}-{sha7}` (for example `v2026.11.00-a1b2c3d`).
 

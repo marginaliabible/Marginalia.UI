@@ -3,6 +3,12 @@ name: Deploy production
 on:
   release:
     types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to deploy (e.g. v2026.11.00)
+        required: true
+        type: string
 
 concurrency:
   group: deploy-prod
@@ -10,7 +16,9 @@ concurrency:
 
 jobs:
   deploy:
-    if: startsWith(github.event.release.tag_name, 'v')
+    if: >
+      (github.event_name == 'release' && startsWith(github.event.release.tag_name, 'v')) ||
+      (github.event_name == 'workflow_dispatch' && startsWith(inputs.tag, 'v'))
     runs-on: ubuntu-latest
     environment: hosted
     permissions:
@@ -18,14 +26,20 @@ jobs:
     env:
       VITE_SANCTUM: '0'
       VITE_AUTH_SERVICE_URL: https://cloudcontrol.marginaliabible.com/
-      VITE_APP_VERSION: ${{ github.event.release.tag_name }}
-      VITE_APP_GIT_SHA: ${{ github.sha }}
       # Optional for forks that use private GitHub library OAuth:
       # VITE_GITHUB_CLIENT_ID: ${{ vars.VITE_GITHUB_CLIENT_ID }}
 
     steps:
       - name: Checkout Marginalia.UI
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'release' && github.event.release.tag_name || inputs.tag }}
+
+      - name: Set build identity
+        run: |
+          tag="${{ github.event_name == 'release' && github.event.release.tag_name || inputs.tag }}"
+          echo "VITE_APP_VERSION=${tag}" >> "$GITHUB_ENV"
+          echo "VITE_APP_GIT_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
