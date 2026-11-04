@@ -1,5 +1,6 @@
 import { useCallback, useState, type ReactNode } from 'react';
 import { getAppGitSha, getAppVersion } from '../services/appBuildIdentity';
+import { getReleaseTagUrl, isBetaAppVersion } from '../services/appBuildIdentityFormat';
 import LanguageTagSelector from './LanguageTagSelector';
 
 interface SettingsModalProps {
@@ -33,6 +34,8 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
 }) => {
   const appVersion = getAppVersion();
   const appGitSha = getAppGitSha();
+  const releaseTagUrl = getReleaseTagUrl(appVersion);
+  const showCopySha = isBetaAppVersion(appVersion);
   const [versionCopied, setVersionCopied] = useState(false);
 
   const copyVersionIdentity = useCallback(async () => {
@@ -201,22 +204,33 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
           <div className="modal-footer d-flex align-items-center gap-2">
             <div className="me-auto d-flex align-items-center gap-3 flex-wrap">
               {settingsFooter}
-              <span
-                className="text-body-secondary small font-monospace d-inline-flex align-items-center gap-1"
-                title={appGitSha || appVersion}
-              >
-                {appVersion}
-                <button
-                  type="button"
-                  className="btn btn-link btn-sm p-0 text-body-secondary"
-                  onClick={() => {
-                    void copyVersionIdentity();
-                  }}
-                  aria-label={versionCopied ? 'Copied build identity' : 'Copy build identity'}
-                  title={versionCopied ? 'Copied' : 'Copy full commit SHA'}
-                >
-                  <i className={`bi ${versionCopied ? 'bi-check2' : 'bi-clipboard'}`} aria-hidden="true"></i>
-                </button>
+              <span className="text-body-secondary small font-monospace d-inline-flex align-items-center gap-1">
+                {releaseTagUrl ? (
+                  <a
+                    href={releaseTagUrl}
+                    className="text-body-secondary"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    title={appGitSha || appVersion}
+                  >
+                    {appVersion}
+                  </a>
+                ) : (
+                  <span title={appGitSha || appVersion}>{appVersion}</span>
+                )}
+                {showCopySha ? (
+                  <button
+                    type="button"
+                    className="btn btn-link btn-sm p-0 text-body-secondary"
+                    onClick={() => {
+                      void copyVersionIdentity();
+                    }}
+                    aria-label={versionCopied ? 'Copied commit SHA' : 'Copy commit SHA'}
+                    title={versionCopied ? 'Copied' : 'Copy full commit SHA'}
+                  >
+                    <i className={`bi ${versionCopied ? 'bi-check2' : 'bi-clipboard'}`} aria-hidden="true"></i>
+                  </button>
+                ) : null}
               </span>
             </div>
             <button

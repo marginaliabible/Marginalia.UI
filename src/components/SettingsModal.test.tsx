@@ -3,9 +3,12 @@ import SettingsModal from './SettingsModal';
 
 jest.mock('./LanguageTagSelector', () => () => null);
 
+const mockGetAppVersion = jest.fn(() => 'v2026.11.00-a1b2c3d');
+const mockGetAppGitSha = jest.fn(() => 'a1b2c3d4e5f67890');
+
 jest.mock('../services/appBuildIdentity', () => ({
-  getAppVersion: () => 'v1.2.3-a1b2c3d',
-  getAppGitSha: () => 'a1b2c3d4e5f67890',
+  getAppVersion: () => mockGetAppVersion(),
+  getAppGitSha: () => mockGetAppGitSha(),
 }));
 
 const defaultProps = {
@@ -23,6 +26,11 @@ const defaultProps = {
 };
 
 describe('SettingsModal', () => {
+  beforeEach(() => {
+    mockGetAppVersion.mockReturnValue('v2026.11.00-a1b2c3d');
+    mockGetAppGitSha.mockReturnValue('a1b2c3d4e5f67890');
+  });
+
   it('points to File Sync > Subscriptions instead of managing sources inline', () => {
     render(<SettingsModal {...defaultProps} />);
 
@@ -30,7 +38,7 @@ describe('SettingsModal', () => {
     expect(screen.queryByLabelText('Source URL')).toBeNull();
   });
 
-  it('shows the build version and copies the full git sha from the footer', async () => {
+  it('links beta versions to the release tag and copies the full git sha', async () => {
     const writeText = jest.fn().mockResolvedValue(undefined);
     Object.defineProperty(navigator, 'clipboard', {
       configurable: true,
@@ -38,8 +46,25 @@ describe('SettingsModal', () => {
     });
 
     render(<SettingsModal {...defaultProps} />);
-    expect(screen.getByText('v1.2.3-a1b2c3d')).toBeTruthy();
-    fireEvent.click(screen.getByLabelText('Copy build identity'));
+
+    const versionLink = screen.getByRole('link', { name: 'v2026.11.00-a1b2c3d', hidden: true });
+    expect(versionLink.getAttribute('href')).toBe(
+      'https://github.com/marginaliabible/Marginalia.UI/releases/tag/v2026.11.00'
+    );
+    fireEvent.click(screen.getByLabelText('Copy commit SHA', { hidden: true }));
     await waitFor(() => expect(writeText).toHaveBeenCalledWith('a1b2c3d4e5f67890'));
+  });
+
+  it('links prod versions without a copy button', () => {
+    mockGetAppVersion.mockReturnValue('v2026.11.00');
+    mockGetAppGitSha.mockReturnValue('a1b2c3d4e5f67890');
+
+    render(<SettingsModal {...defaultProps} />);
+
+    const versionLink = screen.getByRole('link', { name: 'v2026.11.00', hidden: true });
+    expect(versionLink.getAttribute('href')).toBe(
+      'https://github.com/marginaliabible/Marginalia.UI/releases/tag/v2026.11.00'
+    );
+    expect(screen.queryByLabelText('Copy commit SHA', { hidden: true })).toBeNull();
   });
 });
