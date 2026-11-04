@@ -72,7 +72,7 @@ The SPA is hosted on **Cloudflare Pages** via GitHub Actions (direct upload with
 | Beta | `beta.marginaliabible.com` | Push to `main` | Sanctum overlay (`npm run build:sanctum`) → Pages project `marginalia-ui-beta` |
 | Production | `marginaliabible.com` | GitHub Release tag `v*` | Public UI (`VITE_SANCTUM=0`) → Pages project `marginalia-ui` |
 
-Workflows: [`.github/workflows/ci.yml`](.github/workflows/ci.yml) (PR tests), [`.github/workflows/deploy-beta.yml`](.github/workflows/deploy-beta.yml), [`.github/workflows/deploy-prod.yml`](.github/workflows/deploy-prod.yml), [`.github/workflows/create-release.yml`](.github/workflows/create-release.yml).
+Workflows: [`.github/workflows/ci.yml`](.github/workflows/ci.yml) (PR tests), [`.github/workflows/deploy-beta.yml`](.github/workflows/deploy-beta.yml), [`.github/workflows/deploy-prod.yml`](.github/workflows/deploy-prod.yml), [`.github/workflows/create-release.yml`](.github/workflows/create-release.yml), [`.github/workflows/cleanup-merged-branches.yml`](.github/workflows/cleanup-merged-branches.yml) (deletes `main`-merged PR branches after 90 days).
 
 Pull requests to `main` run `npm test`. In GitHub **Settings → Branches → Branch protection** for `main`, require the status check **`test`** so merges are blocked until CI is green.
 
