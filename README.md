@@ -72,9 +72,11 @@ The SPA is hosted on **Cloudflare Pages** via GitHub Actions (direct upload with
 | Beta | `beta.marginaliabible.com` | Push to `main` | Sanctum overlay (`npm run build:sanctum`) → Pages project `marginalia-ui-beta` |
 | Production | `marginaliabible.com` | GitHub Release tag `v*` | Public UI (`VITE_SANCTUM=0`) → Pages project `marginalia-ui` |
 
-Workflows: [`.github/workflows/deploy-beta.yml`](.github/workflows/deploy-beta.yml), [`.github/workflows/deploy-prod.yml`](.github/workflows/deploy-prod.yml).
+Workflows: [`.github/workflows/deploy-beta.yml`](.github/workflows/deploy-beta.yml), [`.github/workflows/deploy-prod.yml`](.github/workflows/deploy-prod.yml), [`.github/workflows/create-release.yml`](.github/workflows/create-release.yml).
 
-Build identity appears in **Settings** (`VITE_APP_VERSION` / `VITE_APP_GIT_SHA`). Prod shows the release tag; beta shows `{latest-v-tag}-{sha7}` (for example `v1.2.3-a1b2c3d`).
+To cut a production release: run **Actions → Create release** on `main` (manual). It tags `vYYYY.MM.PP` from the UTC calendar month (`v2026.11.00`, then `v2026.11.01`, …) and publishes a GitHub Release, which triggers the prod deploy.
+
+Build identity appears in **Settings** (`VITE_APP_VERSION` / `VITE_APP_GIT_SHA`). Prod shows the release tag; beta shows `{latest-v-tag}-{sha7}` (for example `v2026.11.00-a1b2c3d`).
 
 ### One-time Cloudflare / GitHub setup
 

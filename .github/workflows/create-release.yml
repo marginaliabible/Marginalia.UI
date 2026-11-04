@@ -1,0 +1,47 @@
+name: Create release
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Compute next version
+        id: version
+        run: |
+          set -euo pipefail
+          year="$(date -u +%Y)"
+          month="$(date -u +%m)"
+          prefix="v${year}.${month}."
+
+          last="$(git tag -l "${prefix}*" --sort=-v:refname | head -n 1 || true)"
+          if [ -z "$last" ]; then
+            patch=0
+          else
+            patch_str="${last##*.}"
+            patch=$((10#${patch_str} + 1))
+          fi
+
+          tag="$(printf '%s%02d' "$prefix" "$patch")"
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+          echo "Next release tag: ${tag} (previous this month: ${last:-none})"
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ steps.version.outputs.tag }}" \
+            --target "${{ github.sha }}" \
+            --generate-notes \
+            --title "${{ steps.version.outputs.tag }}"
