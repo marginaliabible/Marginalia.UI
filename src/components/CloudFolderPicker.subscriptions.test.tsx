@@ -4,11 +4,6 @@ import CloudFolderPicker, { type CloudFolderPickerHandle, type FolderSelectionTa
 import type { SubscriptionsBinding } from '../models/subscription';
 import { __resetToastsForTests, getToasts } from '../services/toastService';
 
-jest.mock('../services/cloudConfigProviderService', () => ({
-  listFolderChildrenForSession: jest.fn(async () => []),
-  computeSupportedFolderSizeForSession: jest.fn(async () => 0),
-}));
-
 const PUBLISHER_URL = 'https://publisher.example/library.json';
 
 const sessions = { google: null, microsoft: null };

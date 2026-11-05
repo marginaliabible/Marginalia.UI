@@ -1,0 +1,20 @@
+{
+  "blocklisted": {
+    "KJVA": "King James Version (1769), including Apocrypha",
+    "KJVPCE": "King James Version: Pure Cambridge Edition",
+    "OEBcth": "Open English Bible (Commonwealth Spelling)",
+    "VulgConte": "Vulgata Clementina, Conte editore",
+    "SpaRVG": "Spanish Reina Valera Gómez (1995)",
+    "GerLeoNA28": "German Leonberger Bibel, NA28 edition",
+    "MKJV": "Green's Modern King James Version"
+  },
+  "reasons": {
+    "KJVA": "Apocrypha edition of KJV/KJVPCE; Marginalia does not support Apocrypha. See scripts/near-duplicate-report.json (excluded from generate:scrollmapper output).",
+    "KJVPCE": "Not a meaningful variant of KJV, a 98.5% match.",
+    "OEBcth": "A 98.5% match to OEB. Same translation project (Open English Bible), two spelling locales. Diffs are almost entirely American vs Commonwealth orthography (fulfillment/fulfilment, neighbor/neighbour, splendor/splendour). Neither is more “authoritative”; US-spelling OEB is the default most digital catalogs surface first, and Marginalia’s UI/docs lean US English.",
+    "VulgConte": "A 98.1% match to VulgHetzenauer. Both are Clementine Vulgate printings, not different translations. Michael Hetzenauer’s early-20th-century edition is a well-known scholarly reconstruction of the Clementine text (1592/93/98). Conte’s is a later public-domain digital update that says it is based primarily on Hetzenauer — so Conte is the derivative, Hetzenauer is the source lineage. Diffs look like spacing/compounding (quam ob rem vs quamobrem, id est vs idest), not content. Same pattern as “specialized reprint of the main text.”",
+    "SpaRVG": "Licensing: Explicitly forbids reproduction for profit; CrossWire lists CC BY-NC-ND. Free church printing is allowed; a commercial SaaS is not.",
+    "GerLeoNA28": "Licensing: CC BY-NC-ND 4.0 (verlag causa mundi). NC blocks commercial use.",
+    "MKJV": "Licensing: Not worth the hassle to maintain license."
+  }
+}

@@ -54,6 +54,7 @@ export const toOpenDocumentPayload = (viewer: RootState['ui']['pdfViewer']): Ope
       matchRaws: viewer.matchRaws,
       kind: viewer.kind,
       syncItem: viewer.syncItem,
+      ...(viewer.shared ? { shared: true } : {}),
     }
     : null
 );

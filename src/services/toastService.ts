@@ -174,6 +174,13 @@ export function dismissToast(id: string): void {
   emit();
 }
 
+export function dismissToastsByKey(key: string): void {
+  const ids = getToasts().filter((toast) => toast.key === key).map((toast) => toast.id);
+  for (const id of ids) {
+    dismissToast(id);
+  }
+}
+
 export function setToastExpiryPaused(nextPaused: boolean): void {
   if (paused === nextPaused) {
     return;

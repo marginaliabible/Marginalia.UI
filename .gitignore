@@ -31,6 +31,9 @@ yarn-error.log
 # Miscellaneous
 /.angular/cache
 .sass-cache/
+/scripts/.bible-cache/
+/scripts/near-duplicate-report.json
+
 /connect.lock
 /coverage
 /libpeerconnection.log

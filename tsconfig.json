@@ -20,7 +20,11 @@
     "allowSyntheticDefaultImports": true,
     "forceConsistentCasingInFileNames": true,
     "noUnusedLocals": true,
-    "noUnusedParameters": true
+    "noUnusedParameters": true,
+    "paths": {
+      "@marginalia/sanctum": ["./src/sanctum/stub.ts"],
+      "@marginalia/host/*": ["./src/*"]
+    }
   },
   "include": ["src"]
 }

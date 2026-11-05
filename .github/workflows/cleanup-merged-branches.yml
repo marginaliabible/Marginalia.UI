@@ -1,0 +1,69 @@
+name: Cleanup merged branches
+
+on:
+  schedule:
+    # Weekly Monday 12:00 UTC
+    - cron: '0 12 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: read
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete branches merged 90+ days ago
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          cutoff_date="$(date -u -d '90 days ago' +%Y-%m-%d)"
+          echo "Looking for PRs merged into main before ${cutoff_date}"
+
+          mapfile -t rows < <(
+            gh pr list \
+              --repo "$GH_REPO" \
+              --base main \
+              --state merged \
+              --search "merged:<${cutoff_date}" \
+              --limit 1000 \
+              --json number,headRefName,mergedAt \
+              --jq '.[] | select(.headRefName != "main" and .headRefName != "master") | "\(.number)\t\(.headRefName)\t\(.mergedAt)"'
+          )
+
+          if [ "${#rows[@]}" -eq 0 ]; then
+            echo "No merged PR branches older than 90 days."
+            exit 0
+          fi
+
+          deleted=0
+          skipped=0
+          for row in "${rows[@]}"; do
+            number="${row%%$'\t'*}"
+            rest="${row#*$'\t'}"
+            ref="${rest%%$'\t'*}"
+            merged="${rest#*$'\t'}"
+
+            # Branch names may contain slashes; encode for the branches API.
+            encoded_ref="$(printf '%s' "$ref" | jq -sRr @uri)"
+            if ! gh api --silent "repos/${GH_REPO}/branches/${encoded_ref}" 2>/dev/null; then
+              echo "Skip ${ref} (PR #${number}) — branch already gone"
+              skipped=$((skipped + 1))
+              continue
+            fi
+
+            # git/refs path keeps slashes (heads/feature/foo)
+            if gh api --method DELETE "repos/${GH_REPO}/git/refs/heads/${ref}"; then
+              echo "Deleted ${ref} (PR #${number}, merged ${merged})"
+              deleted=$((deleted + 1))
+            else
+              echo "Failed to delete ${ref} (PR #${number})"
+              skipped=$((skipped + 1))
+            fi
+          done
+
+          echo "Done. deleted=${deleted} skipped=${skipped}"

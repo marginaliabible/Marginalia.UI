@@ -70,6 +70,24 @@ export interface TranslationRecord {
 
 export type FederatedProvider = 'google' | 'microsoft';
 
+export interface FederatedAccountProfile {
+  providerAccountId: string;
+  displayName?: string;
+  email?: string;
+  avatarUrl?: string;
+}
+
+export interface FederatedSession {
+  provider: FederatedProvider;
+  accessToken: string;
+  refreshToken?: string;
+  expiresAt: number;
+  grantedAt: number;
+  scope?: string;
+  profile: FederatedAccountProfile;
+  userId?: string;
+}
+
 export interface LinkedCloudAccount {
   provider: FederatedProvider;
   providerAccountId: string;

@@ -1,26 +1,28 @@
 # Marginalia
 
-Marginalia is a browser-only React application for exploring and searching Scripture. The default King James Version is bundled locally and additional translations are fetched directly from the [scrollmapper/bible_databases](https://github.com/scrollmapper/bible_databases/tree/master/formats/json) repository on demand. Translations are cached in IndexedDB for offline reuse, and your last location, search term, and theme preference are stored in `localStorage`.
+Marginalia is a browser-only React application for exploring and searching Scripture. The default King James Version is bundled locally and additional translations are fetched on demand. Translations are cached in IndexedDB for offline reuse, and your last location, search term, and theme preference are stored in `localStorage`.
 
 ## Features
 
 - Quick verse jump using natural references such as `Gen 1`, `John 3:16`, or `1Th 4:13`
 - Full-text search with the top 100 matches surfaced instantly
 - Translation selector with remote downloads cached locally for subsequent sessions
+- File Sync for **Subscriptions**: connect a `library.json` URL (public GitHub, a church library, or hosted markup packages)
+- PDF.js and markup (pdf2htmlEX) document viewers
 - Mobile-first layout with responsive book/chapter selectors
 - Light and dark themes with a single-toggle switch
-- State management with Redux Toolkit
-- Built with Vite for fast development and optimized production builds
+
+Cloud Drive/OneDrive sync, account billing, and Cloud Control Service are a separate private overlay (`Marginalia.UI.Sanctum`), not part of this repository.
 
 ## Tech Stack
 
-- **React 18** - Modern React with hooks
-- **TypeScript** - Type-safe development
-- **Redux Toolkit** - Simplified Redux state management
-- **Vite** - Next-generation frontend tooling
-- **SCSS** - Enhanced styling with Bootstrap 5
-- **IndexedDB** - Offline-first data persistence via idb
-- **Jest & React Testing Library** - Unit testing
+- **React 19** — hooks
+- **TypeScript** — type-safe development
+- **Redux Toolkit** — state management
+- **Vite** — development server and production builds
+- **SCSS** — Bootstrap 5
+- **IndexedDB** — offline-first data via idb
+- **Jest & React Testing Library** — unit testing
 
 ## Getting Started
 
@@ -36,61 +38,15 @@ Marginalia is a browser-only React application for exploring and searching Scrip
 	npm start
 	```
 
-	The app runs at [http://localhost:3000](http://localhost:3000) with hot module replacement.
+	The app runs at [http://localhost:3000](http://localhost:3000).
 
-## AWS Integration
+Optional environment variables are documented in `.env.example`. Copy that file to `.env.local` if you need GitHub OAuth for private library URLs.
 
-Marginalia uses one AWS Lambda URL for GitHub OAuth callback handling, PDF proxying, and federated token exchange (Google + Microsoft).
+## Subscriptions
 
-Set this in your local environment file:
+Open **File Sync** in the header and use **Subscriptions → Connect** to paste a `library.json` URL. Public catalogs work with no account. Private GitHub libraries need `VITE_GITHUB_CLIENT_ID` and a callback service URL (`VITE_AUTH_SERVICE_URL`).
 
-```dotenv
-VITE_AUTH_SERVICE_URL=https://your-lambda-function-url.lambda-url.us-east-1.on.aws/
-```
-
-Notes:
-
-- This single URL is used when starting GitHub authorization.
-- The PDF viewer also builds its proxy URL from the same base.
-- Google and Microsoft sign-in token exchange is always brokered through this Lambda.
-- If you change the Lambda URL, update this value and restart Vite.
-
-## Account Sync Configuration
-
-Marginalia supports federated account login for configuration sync with Google and Microsoft.
-
-Permission behavior:
-
-- Sync my settings requests only configuration-sync scopes for the selected provider.
-- Sync my files requests file-access scopes for the selected provider.
-	- Microsoft requests Files.Read.Selected.
-	- Google requests drive.file.
-- When connected, the Modify action beside Sync my files lets users update the allowed files/folders for that specific provider.
-- Provider checkbox selections are persisted and reused on reconnect unless changed by the user.
-
-Add provider client IDs to your local frontend environment file:
-
-```dotenv
-VITE_GOOGLE_CLIENT_ID=your-google-oauth-client-id
-VITE_MICROSOFT_CLIENT_ID=your-microsoft-oauth-client-id
-```
-
-Notes:
-
-- These IDs are required for the header account icon sign-in flow.
-- Client secrets are not stored in the browser app.
-- The Lambda service must be configured with provider secrets/server credentials.
-
-Lambda environment variables required for brokered exchange:
-
-```dotenv
-GOOGLE_CLIENT_ID=your-google-oauth-client-id
-GOOGLE_CLIENT_SECRET=your-google-oauth-client-secret
-MICROSOFT_CLIENT_ID=your-microsoft-app-client-id
-MICROSOFT_CLIENT_SECRET=your-microsoft-app-client-secret
-MICROSOFT_TENANT=common
-```
-- Configuration sync currently targets Google and Microsoft only.
+Markup libraries (including hosted document packages) open in the built-in markup viewer. Conversion of Office/PDF files to that format is not part of this repository.
 
 ## Usage Tips
 
@@ -98,25 +54,6 @@ MICROSOFT_TENANT=common
 - When the query is not a reference, pressing **Go** performs a full-text search within the active translation.
 - Translation downloads are stored in IndexedDB for 30 days. You can force a fresh copy by clearing browser storage or using devtools to delete the `marginalia-db` database.
 - Theme preference, last translation, and the most recent verse location persist across browser sessions.
-
-## Performance Monitoring
-
-Marginalia includes built-in cache diagnostics for development and tuning:
-
-**View Cache Statistics:**
-Open your browser DevTools console and run:
-```javascript
-__MARGINALIA_CACHE_STATS__()
-```
-
-This returns an object with:
-- `chapterHits` / `chapterMisses` - Chapter cache access patterns
-- `verseHits` / `verseMisses` - Verse cache access patterns
-- `translationHits` / `translationMisses` - Full translation cache access patterns
-- `chapterEvictions` / `verseEvictions` - LRU eviction counts (indicates cache churn)
-- `chapterCacheSize` / `verseCacheSize` / `translationCacheSize` - Current in-memory usage
-
-Use this to monitor cache efficiency while navigating, searching, and jumping between verses. High eviction counts suggest cache sizes may be too small; low hit ratios suggest the cache isn't being effectively reused.
 
 ## Build and Test
 
@@ -126,35 +63,34 @@ Use this to monitor cache efficiency while navigating, searching, and jumping be
 - Unit tests: `npm test`
 - Watch tests: `npm run test:watch`
 
-## Project Structure
+## Hosting and CI/CD
 
-```
-src/
-├── App.tsx              # Main application component
-├── App.scss             # Component-specific styles
-├── main.tsx             # Application entry point
-├── styles.scss          # Global styles and Bootstrap imports
-├── models/              # TypeScript interfaces and types
-│   └── bible.ts
-├── services/            # Business logic services
-│   └── bibleService.ts
-├── store/               # Redux store configuration
-│   ├── store.ts         # Store setup
-│   ├── hooks.ts         # Typed Redux hooks
-│   └── slices/          # Redux slices
-│       ├── bibleSlice.ts
-│       └── uiSlice.ts
-└── utils/               # Utility functions
-    ├── reference-parser.ts
-    └── book-aliases.ts
-```
+The SPA is hosted on **Cloudflare Pages** via GitHub Actions (direct upload with Wrangler), not the Pages native Git integration.
 
-## Adding New Data Sources
+| Channel | Domain | Trigger | Build |
+|---------|--------|---------|-------|
+| Beta | `beta.marginaliabible.com` | Push to `main` | Sanctum overlay (`npm run build:sanctum`) → Pages project `marginalia-ui-beta` |
+| Production | `marginaliabible.com` | GitHub Release tag `v*` | Public UI (`VITE_SANCTUM=0`) → Pages project `marginalia-ui` |
 
-- Place additional bundled translations in `public/data/bibles/` to ship them with the app.
-- Remote translations must be accessible via raw JSON URLs. Add them to the Marginalia dropdown by uploading to GitHub (or any CORS-enabled host) following the same structure as the Scrollmapper data set.
-- Update `public/data/library.json` and `public/data/translations.json` to register built-in sources. `public/data/bibles/KJV.json` remains a local Bible payload file referenced from `public/data/translations.json`.
+Workflows: [`.github/workflows/ci.yml`](.github/workflows/ci.yml) (PR tests), [`.github/workflows/deploy-beta.yml`](.github/workflows/deploy-beta.yml), [`.github/workflows/deploy-prod.yml`](.github/workflows/deploy-prod.yml), [`.github/workflows/create-release.yml`](.github/workflows/create-release.yml), [`.github/workflows/cleanup-merged-branches.yml`](.github/workflows/cleanup-merged-branches.yml) (deletes `main`-merged PR branches after 90 days).
 
-## License Notes
+Pull requests to `main` run `npm test`. In GitHub **Settings → Branches → Branch protection** for `main`, require the status check **`test`** so merges are blocked until CI is green.
 
-Each translation retains the license defined by its source. Review the metadata in the Scrollmapper repository before distributing additional texts.
+To cut a production release: run **Actions → Create release** on `main` (manual). It tags `vYYYY.MM.PP` from the UTC calendar month (`v2026.11.00`, then `v2026.11.01`, …), publishes a GitHub Release, and dispatches **Deploy production** (GITHUB_TOKEN-created releases do not cascade `release: published` events). You can also run **Deploy production** manually with a tag input.
+
+Build identity appears in **Settings** (`VITE_APP_VERSION` / `VITE_APP_GIT_SHA`). Prod shows the release tag; beta shows `{latest-v-tag}-{sha7}` (for example `v2026.11.00-a1b2c3d`).
+
+### One-time Cloudflare / GitHub setup
+
+1. Create Pages projects `marginalia-ui` and `marginalia-ui-beta` (or let the first `wrangler pages deploy` create them).
+2. Attach custom domains: apex (+ `www` → apex) on prod; `beta.marginaliabible.com` on beta.
+3. Create a GitHub Environment named **`hosted`**:
+   - Deployment branches/tags: allow `main` **and** `v*` tags (prod runs on the release tag ref).
+   - **Secrets:** `CLOUDFLARE_API_TOKEN`, `SANCTUM_CHECKOUT_TOKEN` (Contents: Read on `marginaliabible/Marginalia.UI.Sanctum`).
+   - **Variables:** `CLOUDFLARE_ACCOUNT_ID`, `VITE_GOOGLE_CLIENT_ID`, `VITE_MICROSOFT_CLIENT_ID`.
+4. `VITE_AUTH_SERVICE_URL` is hardcoded in the workflows to `https://cloudcontrol.marginaliabible.com/`. Do not set `VITE_STORAGE_PUBLIC_BASE_URL` (defaults to shared `https://storage.marginaliabible.com`). Hosted Marginalia does not set `VITE_GITHUB_CLIENT_ID` (private GitHub library OAuth); forks can uncomment it in the deploy workflows if needed.
+5. Allowlist `https://beta.marginaliabible.com` on the storage gateway Worker and in CCS Lambda `OAUTH_ALLOWED_RETURN_ORIGINS`, then redeploy the Worker / update Lambda env.
+
+## License
+
+MIT. Each translation retains the license defined by its source.

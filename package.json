@@ -4,10 +4,15 @@
   "scripts": {
     "dev": "vite",
     "start": "vite",
+    "start:sanctum": "node scripts/with-sanctum.mjs start",
     "build": "tsc && vite build",
+    "build:sanctum": "node scripts/with-sanctum.mjs build",
     "preview": "vite preview",
     "test": "jest",
-    "test:watch": "jest --watch"
+    "test:watch": "jest --watch",
+    "test:sanctum": "npm --prefix ../Marginalia.UI.Sanctum test",
+    "generate:scrollmapper": "node scripts/generate-scrollmapper.js",
+    "find:near-duplicates": "node scripts/find-near-duplicate-translations.js"
   },
   "prettier": {
     "printWidth": 100,
@@ -51,7 +56,7 @@
     "sass": "^1.100.0",
     "ts-jest": "^29.4.11",
     "typescript": "~5.9.3",
-    "vite": "^8.0.16",
+    "vite": "^8.3.5",
     "vite-plugin-svgr": "^5.2.0"
   }
 }

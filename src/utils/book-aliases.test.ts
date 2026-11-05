@@ -1,5 +1,6 @@
 import {
   compareBibleReferences,
+  getCanonicalBookName,
   isNewTestamentBook,
 } from './book-aliases';
 
@@ -27,5 +28,12 @@ describe('isNewTestamentBook', () => {
   it('classifies canonical names and aliases by Testament', () => {
     expect(isNewTestamentBook('Malachi')).toBe(false);
     expect(isNewTestamentBook('Matt')).toBe(true);
+  });
+});
+
+describe('getCanonicalBookName', () => {
+  it('maps scrollmapper Revelation titles to Revelation', () => {
+    expect(getCanonicalBookName('Revelation of John')).toBe('Revelation');
+    expect(getCanonicalBookName('Apocalypse of John')).toBe('Revelation');
   });
 });

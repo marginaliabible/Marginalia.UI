@@ -1,4 +1,5 @@
 import {
+  assignHashWithoutScroll,
   buildDocumentLinkRoute,
   parseDocumentLinkFromHash,
   parseHashRoute,
@@ -45,5 +46,23 @@ describe('document link routes', () => {
     expect(parseSearchFromHash(stripDocumentLinkFromHash('#/John/3/16?q=god+so&doc=abc&page=2'))).toBe('god so');
     expect(stripDocumentLinkFromHash('#/John/3/16?doc=abc&page=2')).toBe('#/John/3/16');
     expect(stripDocumentLinkFromHash('#/John/3/16')).toBe('#/John/3/16');
+  });
+
+  it('assigns a hash through history so the page does not jump to the top', () => {
+    window.history.replaceState(null, '', '/#/Romans/8/28');
+    const hashChange = jest.fn();
+    window.addEventListener('hashchange', hashChange);
+    const pushState = jest.spyOn(window.history, 'pushState');
+
+    try {
+      assignHashWithoutScroll('#/Romans/8/28?doc=abc&page=12');
+
+      expect(window.location.hash).toBe('#/Romans/8/28?doc=abc&page=12');
+      expect(pushState).toHaveBeenCalled();
+      expect(hashChange).toHaveBeenCalledTimes(1);
+    } finally {
+      window.removeEventListener('hashchange', hashChange);
+      pushState.mockRestore();
+    }
   });
 });

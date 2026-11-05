@@ -1,6 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { useAppSelector } from '../store/hooks';
+import { useAppDispatch, useAppSelector } from '../store/hooks';
+import { setPdfViewerPage } from '../store/slices/uiSlice';
 import { buildMarkupDocumentShellUrl } from '../utils/resourceLibraryConfig';
+import { findTopVisiblePageIndexInContainer } from '../utils/viewerTopPage';
 import { fetchStorageAware } from '../services/storageAuthenticatedFetch';
 import { useOpenDocumentScriptureReference } from '../hooks/useDocumentScriptureNavigation';
 import { useBackToVerses } from '../hooks/useDocumentPopout';
@@ -8,8 +10,11 @@ import { useViewerZoomInputs } from '../hooks/useViewerZoomInputs';
 import { loadPageScriptureReferences } from '../utils/loadPageScriptureReferences';
 import { applyScriptureLinkOverlays, clearScriptureLinks } from '../utils/scriptureLinkOverlays';
 import { buildTextLayerHaystack, findAllMatchRanges, getMatchClientRects, placeOverlayOnPage } from '../utils/documentTextMatch';
-import { clampScale, FIT_WIDTH_GUTTER_PX, stepScale } from '../utils/viewerZoom';
-import FileSyncExclusionButton from './FileSyncExclusionButton';
+import { collapseRedundantTextLayerCopySpaces } from '../utils/textLayerCopySpaces';
+import { clampScale, computeFitWidthScale, fitWidthPageIndex, stepScale } from '../utils/viewerZoom';
+import { sanctumPlugin } from '@marginalia/sanctum';
+
+const SanctumDocumentToolbarExtras = sanctumPlugin.DocumentToolbarExtras;
 import DocumentPopoutButton from './DocumentPopoutButton';
 import ViewerZoomControls from './ViewerZoomControls';
 
@@ -43,24 +48,22 @@ interface Pdf2HtmlExViewer {
   pages?: Array<{ loaded?: boolean; page?: HTMLElement | null }>;
 }
 
-/** Scale at which the current page fills the iframe's page container width, or null if not measurable yet. */
-function computeMarkupFitWidthScale(frame: HTMLIFrameElement | null): number | null {
+/** Scale at which toolbar page `pageNumber` fills the iframe's page container width, or null if not measurable yet. */
+function computeMarkupFitWidthScale(frame: HTMLIFrameElement | null, pageNumber: number): number | null {
   const viewer = frame?.contentWindow?.pdf2htmlEX?.defaultViewer;
   const container = frame?.contentDocument?.getElementById('page-container');
   if (!viewer || !container) {
     return null;
   }
   const pages = viewer.pages ?? [];
-  const page = pages[viewer.cur_page_idx ?? 0]?.page ?? pages[0]?.page;
-  const currentScale = viewer.scale || 1;
-  if (!page || page.offsetWidth === 0) {
+  const frames = Array.from(container.querySelectorAll<HTMLElement>('.pf'));
+  const pageCount = Math.max(pages.length, frames.length);
+  const pageIndex = fitWidthPageIndex(pageNumber, pageCount);
+  const page = pages[pageIndex]?.page ?? frames[pageIndex] ?? null;
+  if (!page) {
     return null;
   }
-  const available = container.clientWidth - FIT_WIDTH_GUTTER_PX;
-  if (available <= 0) {
-    return null;
-  }
-  return available / (page.offsetWidth / currentScale);
+  return computeFitWidthScale(container.clientWidth, page.offsetWidth, viewer.scale || 1);
 }
 
 function normalizeMatchText(value: string | null | undefined): string {
@@ -269,7 +272,9 @@ async function materializePages(
 
   const pageReplacements = new Map<string, string>();
   for (const [pageUrl, rawHtml] of pageHtmlByUrl) {
-    const rewrittenPage = rewriteStorageAssetReferences(rawHtml, storageOrigin, assetBlobs);
+    const rewrittenPage = collapseRedundantTextLayerCopySpaces(
+      rewriteStorageAssetReferences(rawHtml, storageOrigin, assetBlobs)
+    );
     const blobUrl = URL.createObjectURL(new Blob([rewrittenPage], { type: 'text/html' }));
     blobUrls.push(blobUrl);
     pageReplacements.set(pageUrl, blobUrl);
@@ -609,8 +614,10 @@ ${options.bodyHtml}
 
         // Free-scrolling shows pages without going through toolbar prev/next. Notify the
         // parent when the viewport moves or pdf2htmlEX marks a page .opened so scripture
-        // links can attach to newly visible pages.
+        // links can attach to newly visible pages. Page-number updates ride a rAF so the
+        // toolbar tracks the page at the top of the viewer while scrolling.
         var viewportNotifyTimer = null;
+        var pageChangedRaf = null;
         function notifyViewportChanged() {
           if (viewportNotifyTimer) {
             clearTimeout(viewportNotifyTimer);
@@ -619,9 +626,21 @@ ${options.bodyHtml}
             window.parent.postMessage({ type: 'markup-viewport-changed' }, '*');
           }, 100);
         }
+        function notifyPageChanged() {
+          if (pageChangedRaf) {
+            return;
+          }
+          pageChangedRaf = requestAnimationFrame(function () {
+            pageChangedRaf = null;
+            window.parent.postMessage({ type: 'markup-page-changed' }, '*');
+          });
+        }
         var pageContainer = document.getElementById('page-container');
         if (pageContainer) {
-          pageContainer.addEventListener('scroll', notifyViewportChanged, { passive: true });
+          pageContainer.addEventListener('scroll', function () {
+            notifyPageChanged();
+            notifyViewportChanged();
+          }, { passive: true });
           try {
             var openedObserver = new MutationObserver(function (mutations) {
               for (var m = 0; m < mutations.length; m += 1) {
@@ -794,6 +813,7 @@ interface MarkupDocumentViewerProps {
 }
 
 const MarkupDocumentViewer: React.FC<MarkupDocumentViewerProps> = ({ onScriptureReferenceOpen }) => {
+  const dispatch = useAppDispatch();
   const backToVerses = useBackToVerses();
   const { pdfViewer } = useAppSelector((state) => state.ui);
   const currentBible = useAppSelector((state) => state.bible.currentBible);
@@ -812,16 +832,24 @@ const MarkupDocumentViewer: React.FC<MarkupDocumentViewerProps> = ({ onScripture
   const [pageCount, setPageCount] = useState(0);
   const [scale, setScale] = useState(1);
   const [fitWidth, setFitWidth] = useState(true);
+  const [fitWidthEpoch, setFitWidthEpoch] = useState(0);
+  const fitWidthRef = useRef(fitWidth);
+  fitWidthRef.current = fitWidth;
   const [srcDoc, setSrcDoc] = useState<string | null>(null);
   const [highlightEpoch, setHighlightEpoch] = useState(0);
   const [scriptureLinkEpoch, setScriptureLinkEpoch] = useState(0);
   const highlightAttemptedRef = useRef(false);
+  const highlightPageRef = useRef(1);
   const scriptureLinkedPagesRef = useRef<Set<number>>(new Set());
   const openScriptureReferenceRef = useRef(openScriptureReference);
   openScriptureReferenceRef.current = openScriptureReference;
+  const syncingPageFromViewerRef = useRef(false);
+  const allowViewportPageSyncRef = useRef(false);
 
   const activeSourceUrl = pdfViewer.sourceUrl;
   const activePage = Math.max(1, pdfViewer.page);
+  const activePageRef = useRef(activePage);
+  activePageRef.current = activePage;
   const matchRaws = pdfViewer.matchRaws;
   const focusNonce = pdfViewer.focusNonce || 0;
 
@@ -840,6 +868,11 @@ const MarkupDocumentViewer: React.FC<MarkupDocumentViewerProps> = ({ onScripture
   const zoomTo = (next: number) => {
     setFitWidth(false);
     setScale(clampScale(next));
+  };
+
+  const requestFitWidth = () => {
+    setFitWidth(true);
+    setFitWidthEpoch((value) => value + 1);
   };
 
   const applyPageBlobsToIframe = (pageBlobs: Map<string, string>) => {
@@ -902,6 +935,26 @@ const MarkupDocumentViewer: React.FC<MarkupDocumentViewerProps> = ({ onScripture
     }
   };
 
+  const syncPageFromMarkupViewport = () => {
+    if (!allowViewportPageSyncRef.current) {
+      return;
+    }
+    const container = iframeRef.current?.contentDocument?.getElementById('page-container');
+    if (!container) {
+      return;
+    }
+    const frames = Array.from(container.querySelectorAll<HTMLElement>('.pf'));
+    if (frames.length === 0) {
+      return;
+    }
+    const pageNumber = findTopVisiblePageIndexInContainer(container, frames) + 1;
+    if (pageNumber === activePageRef.current) {
+      return;
+    }
+    syncingPageFromViewerRef.current = true;
+    dispatch(setPdfViewerPage(pageNumber));
+  };
+
   useEffect(() => {
     if (!pdfViewer.isOpen || pdfViewer.kind !== 'markup' || !activeSourceUrl) {
       return;
@@ -918,6 +971,7 @@ const MarkupDocumentViewer: React.FC<MarkupDocumentViewerProps> = ({ onScripture
     setSrcDoc(null);
     setPageCount(0);
     highlightAttemptedRef.current = false;
+    allowViewportPageSyncRef.current = false;
     for (const url of pageBlobUrlsRef.current) {
       URL.revokeObjectURL(url);
     }
@@ -1018,15 +1072,24 @@ const MarkupDocumentViewer: React.FC<MarkupDocumentViewerProps> = ({ onScripture
         // Page DOM may have been freshly materialized; allow re-linking.
         scriptureLinkedPagesRef.current.delete(data.pageIndex + 1);
         setScriptureLinkEpoch((value) => value + 1);
-        if (data.pageIndex === Math.max(0, activePage - 1)) {
+        if (data.pageIndex === Math.max(0, highlightPageRef.current - 1)) {
           highlightAttemptedRef.current = false;
           setHighlightEpoch((value) => value + 1);
         }
+        if (fitWidthRef.current && data.pageIndex === Math.max(0, activePageRef.current - 1)) {
+          setFitWidthEpoch((value) => value + 1);
+        }
+        syncPageFromMarkupViewport();
+        return;
+      }
+      if (data.type === 'markup-page-changed') {
+        syncPageFromMarkupViewport();
         return;
       }
       if (data.type === 'markup-viewport-changed') {
         // Free-scroll showed additional .opened pages; scan without clearing linked ones.
         setScriptureLinkEpoch((value) => value + 1);
+        syncPageFromMarkupViewport();
         return;
       }
       if (data.type === 'markup-need-page' && typeof data.pageIndex === 'number') {
@@ -1038,7 +1101,7 @@ const MarkupDocumentViewer: React.FC<MarkupDocumentViewerProps> = ({ onScripture
 
     window.addEventListener('message', onMessage);
     return () => window.removeEventListener('message', onMessage);
-  }, [activePage]);
+  }, [dispatch]);
 
   // Prefetch around the toolbar page when the user navigates.
   useEffect(() => {
@@ -1055,9 +1118,15 @@ const MarkupDocumentViewer: React.FC<MarkupDocumentViewerProps> = ({ onScripture
     if (isLoading || !srcDoc) {
       return;
     }
+    if (syncingPageFromViewerRef.current) {
+      syncingPageFromViewerRef.current = false;
+      return;
+    }
 
     let cancelled = false;
     const pageIndex = Math.max(0, activePage - 1);
+    highlightPageRef.current = activePage;
+    highlightAttemptedRef.current = false;
 
     void (async () => {
       try {
@@ -1068,11 +1137,11 @@ const MarkupDocumentViewer: React.FC<MarkupDocumentViewerProps> = ({ onScripture
       if (cancelled) {
         return;
       }
+      allowViewportPageSyncRef.current = true;
       iframeRef.current?.contentWindow?.postMessage({
         type: 'markup-scroll-to',
         pageIndex,
       }, '*');
-      highlightAttemptedRef.current = false;
     })();
 
     return () => {
@@ -1097,9 +1166,9 @@ const MarkupDocumentViewer: React.FC<MarkupDocumentViewerProps> = ({ onScripture
     let attempts = 0;
     const applyFit = () => {
       window.clearTimeout(retryTimer);
-      const next = computeMarkupFitWidthScale(iframeRef.current);
+      const next = computeMarkupFitWidthScale(iframeRef.current, activePage);
       if (next !== null) {
-        setScale(next);
+        setScale((current) => (Math.abs(next - current) < 0.001 ? current : next));
       } else if (attempts < 20) {
         attempts += 1;
         retryTimer = window.setTimeout(applyFit, 100);
@@ -1114,7 +1183,7 @@ const MarkupDocumentViewer: React.FC<MarkupDocumentViewerProps> = ({ onScripture
       window.clearTimeout(retryTimer);
       observer?.disconnect();
     };
-  }, [fitWidth, isLoading, srcDoc]);
+  }, [fitWidth, fitWidthEpoch, isLoading, srcDoc, activePage]);
 
   useEffect(() => {
     if (matchRaws.length === 0 || isLoading || highlightAttemptedRef.current) {
@@ -1134,7 +1203,8 @@ const MarkupDocumentViewer: React.FC<MarkupDocumentViewerProps> = ({ onScripture
         return;
       }
       attempts += 1;
-      const pageElement = doc.querySelector<HTMLElement>(`#pf${activePage}, [data-page-no="${activePage.toString(16)}"], [data-page-no="${activePage}"]`);
+      const highlightPage = highlightPageRef.current;
+      const pageElement = doc.querySelector<HTMLElement>(`#pf${highlightPage}, [data-page-no="${highlightPage.toString(16)}"], [data-page-no="${highlightPage}"]`);
       if (!pageElement) {
         if (attempts < 50) {
           window.setTimeout(tryHighlight, 120);
@@ -1160,7 +1230,7 @@ const MarkupDocumentViewer: React.FC<MarkupDocumentViewerProps> = ({ onScripture
     return () => {
       cancelled = true;
     };
-  }, [matchRaws, activePage, focusNonce, highlightEpoch, isLoading, srcDoc]);
+  }, [matchRaws, focusNonce, highlightEpoch, isLoading, srcDoc]);
 
   useEffect(() => {
     // Overlays are page-relative, so only a document change invalidates them.
@@ -1243,7 +1313,7 @@ const MarkupDocumentViewer: React.FC<MarkupDocumentViewerProps> = ({ onScripture
     frameKey: srcDoc && !error ? srcDoc : null,
     scale,
     onZoomStep: adjustScale,
-    onZoomReset: () => setFitWidth(true),
+    onZoomReset: requestFitWidth,
     onZoomTo: zoomTo,
   });
 
@@ -1264,9 +1334,19 @@ const MarkupDocumentViewer: React.FC<MarkupDocumentViewerProps> = ({ onScripture
         </button>
 
         <div className="pdf-viewer-title fw-semibold text-truncate" title={title}>{title}</div>
+        {pdfViewer.shared && (
+          <span
+            className="badge rounded-pill text-bg-secondary"
+            title="Opened from a shared link. This document isn't in your libraries."
+          >
+            Shared
+          </span>
+        )}
 
         <div className="ms-auto d-flex align-items-center gap-2">
-          <FileSyncExclusionButton syncItem={pdfViewer.syncItem} documentLabel={title} />
+          {SanctumDocumentToolbarExtras && (
+            <SanctumDocumentToolbarExtras syncItem={pdfViewer.syncItem} documentLabel={title} />
+          )}
 
           <span className="small text-body-secondary">
             Page {pageCount > 0 ? activePage : '-'}{pageCount > 0 ? ` / ${pageCount}` : ''}
@@ -1276,7 +1356,7 @@ const MarkupDocumentViewer: React.FC<MarkupDocumentViewerProps> = ({ onScripture
             scale={scale}
             fitWidth={fitWidth}
             onZoomStep={adjustScale}
-            onFitWidth={() => setFitWidth(true)}
+            onFitWidth={requestFitWidth}
           />
 
           <DocumentPopoutButton />

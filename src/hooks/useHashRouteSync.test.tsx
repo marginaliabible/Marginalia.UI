@@ -61,4 +61,25 @@ describe('useHashRouteSync', () => {
 
     expect(window.location.hash).toBe('#/Romans/8/29');
   });
+
+  it('leaves a document link without a verse route in place on load', async () => {
+    window.history.replaceState(null, '', '/#/?doc=abc&page=1');
+
+    const store = renderWithSavedReference();
+
+    await waitFor(() => expect(store.getState().ui.selectedBook).toBe('John'));
+    expect(window.location.hash).toBe('#/?doc=abc&page=1');
+  });
+
+  it('follows selection changes after a document link without a verse route', async () => {
+    window.history.replaceState(null, '', '/#/?doc=abc&page=1');
+    const store = renderWithSavedReference();
+    await waitFor(() => expect(store.getState().ui.selectedBook).toBe('John'));
+
+    act(() => {
+      store.dispatch(setVerseSelection({ translationId: 'KJV', verses: [1] }));
+    });
+
+    expect(window.location.hash).toBe('#/John/10/1');
+  });
 });
