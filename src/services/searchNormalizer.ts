@@ -1,39 +1,118 @@
 import { stemmer } from 'stemmer';
 
 /**
- * Maps common archaic English forms to their modern equivalents.
- * Covers KJV-era pronouns, auxiliary verbs, and common irregular forms.
- * Applied before stemming so the stemmer works on recognizable roots.
+ * Modern English → archaic / Early Modern English forms found in older
+ * translations such as the KJV. Used to build the archaic→modern lookup so
+ * indexing and querying collapse to the same stems.
  */
-const ARCHAIC_EN_MAP: Record<string, string> = {
-  // Pronouns
-  thou: 'you',
-  thee: 'you',
-  thy: 'your',
-  thine: 'your',
-  ye: 'you',
-  // Archaic auxiliary/copula verbs
+const MODERN_TO_ARCHAIC: Record<string, readonly string[]> = {
+  asked: ['askedst'],
+  astonished: ['astonied'],
+  became: ['becamest'],
+  before: ['afore', 'beforetime'],
+  begged: ['besought'],
+  believe: ['believest'],
+  believes: ['believeth'],
+  belly: ['bowels'],
+  between: ['betwixt'],
+  branch: ['bough'],
+  carried: ['carriedst'],
+  cattle: ['beeves'],
+  chest: ['coffer'],
+  clothes: ['raiment', 'apparel', 'clothe'],
+  clothing: ['raiment', 'vesture'],
+  comes: ['cometh'],
+  could: ['couldest', 'couldst'],
+  cough: ['phthisis', 'consumption'],
+  did: ['didst'],
+  dies: ['dieth'],
+  does: ['doeth', 'doth'],
+  eats: ['eateth'],
+  elders: ['ancients'],
+  enough: ['enow'],
+  falsehood: ['leasing'],
+  famine: ['dearth'],
+  food: ['victuals', 'meat'],
+  forgot: ['forgat'],
+  gave: ['gavest'],
+  gives: ['giveth', 'givest'],
+  go: ['goeth', 'goest', 'goethest'],
+  has: ['hath'],
+  have: ['hast'],
+  hears: ['heareth'],
+  heard: ['heardest', 'heardst'],
+  helps: ['helpeth'],
+  helped: ['holpen'],
+  immediately: ['straightway', 'anon', 'forthwith'],
+  joined: ['joyned'],
+  knows: ['knoweth', 'knowest'],
+  known: ['knowen'],
+  listen: ['hearken'],
+  listens: ['hearkeneth'],
+  lives: ['liveth', 'livedst'],
+  look: ['behold', 'lo'],
+  love: ['charity'],
+  makes: ['maketh', 'makest'],
+  might: ['mightest', 'mightst'],
+  moreover: ['furthermore'],
+  near: ['nigh'],
+  news: ['tidings'],
+  no: ['nay'],
+  only: ['onely'],
+  perhaps: ['peradventure', 'perchance'],
+  plaster: ['plaister'],
+  plentiful: ['plenteous'],
+  postpone: ['defer'],
+  prevent: ['let'],
+  remember: ['rememberest'],
+  said: ['saidst'],
+  saw: ['sawest'],
+  says: ['sayeth', 'saith'],
+  sees: ['seeth'],
+  shall: ['shalt'],
+  should: ['shouldest', 'shouldst'],
+  show: ['shew'],
+  showed: ['shewed'],
+  shown: ['shewn'],
+  shows: ['sheweth'],
+  speaks: ['speaketh', 'speakest'],
+  spoke: ['spake', 'spokest'],
+  sponge: ['spunge'],
+  stands: ['standeth'],
+  stay: ['tarry', 'abide'],
+  stayed: ['tarried'],
+  stop: ['refrain'],
+  struck: ['smote', 'stricken'],
+  takes: ['taketh'],
+  thoroughly: ['throughly'],
+  thought: ['thoughtest'],
+  took: ['tookest'],
+  touches: ['toucheth'],
+  troubles: ['troubleth'],
+  walks: ['walketh'],
+  went: ['wentest'],
+  were: ['wert'],
+  wherever: ['whithersoever'],
+  will: ['wilt'],
+  work: ['worketh'],
+  would: ['wouldest', 'wouldst'],
+  you: ['thou', 'thee', 'ye'],
+  your: ['thy', 'thine'],
+  yourself: ['thyself'],
+};
+
+/**
+ * Extra archaic forms not covered by MODERN_TO_ARCHAIC (mostly auxiliary
+ * verbs and alternate spellings).
+ */
+const EXTRA_ARCHAIC_EN_MAP: Record<string, string> = {
   art: 'are',
-  hath: 'have',
-  hast: 'have',
   hadst: 'have',
-  doth: 'does',
   doest: 'do',
   dost: 'do',
-  shalt: 'shall',
-  wilt: 'will',
-  wouldst: 'would',
-  couldst: 'could',
-  shouldst: 'should',
   canst: 'can',
   mayst: 'may',
-  mightest: 'might',
-  didst: 'did',
   wast: 'was',
-  wert: 'were',
-  saith: 'say',
-  saidst: 'said',
-  spake: 'spoke',
   spakest: 'spoke',
 };
 
@@ -47,6 +126,28 @@ const EN_STOPWORDS = new Set([
   'in', 'on', 'at', 'to', 'of', 'for', 'by', 'as', 'up',
   'is', 'it', 'be', 'so', 'if', 'no',
 ]);
+
+/**
+ * Builds archaic→modern lookup from MODERN_TO_ARCHAIC.
+ * Skips targets that are stopwords (e.g. nay→no) so those archaic tokens
+ * remain searchable as themselves rather than being dropped.
+ */
+function buildArchaicEnMap(): Record<string, string> {
+  const map: Record<string, string> = { ...EXTRA_ARCHAIC_EN_MAP };
+
+  for (const [modern, archaicForms] of Object.entries(MODERN_TO_ARCHAIC)) {
+    if (EN_STOPWORDS.has(modern)) {
+      continue;
+    }
+    for (const archaic of archaicForms) {
+      map[archaic] = modern;
+    }
+  }
+
+  return map;
+}
+
+const ARCHAIC_EN_MAP: Record<string, string> = buildArchaicEnMap();
 
 /**
  * Words whose root coincidentally ends in the letters "est" or "eth" and
@@ -76,7 +177,7 @@ function stripArchaicSuffix(word: string): string {
 /**
  * Normalizes a single English (or Middle English / enm) term:
  * 1. Lowercase
- * 2. Apply archaic pronoun/verb map
+ * 2. Apply archaic pronoun/verb/lexicon map
  * 3. Strip archaic verb suffixes (-eth, -est)
  * 4. Apply Porter stemmer for modern morphology
  * 5. Filter stopwords
