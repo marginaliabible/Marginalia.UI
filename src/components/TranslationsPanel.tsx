@@ -158,7 +158,7 @@ const TranslationsPanel: React.FC<TranslationsPanelProps> = ({
         </div>
 
         <div className="translations-panel-layout">
-          <div className="translations-panel-verse-column">
+          <div className="translations-panel-verse-column" data-help="translations-selected">
             <div className="translations-verse-grid">
               {translationRecords.length === 0 ? (
                 <div className="translations-verse-grid-empty">
@@ -193,12 +193,17 @@ const TranslationsPanel: React.FC<TranslationsPanelProps> = ({
                           onDragEnd={handleDragEnd}
                         >
                           <div className="d-flex align-items-center gap-2 flex-grow-1">
-                            <span className="text-muted translation-drag-handle" title="Drag to reorder">
+                            <span
+                              className="text-muted translation-drag-handle"
+                              title="Drag to reorder"
+                              data-help="translations-drag-handle"
+                            >
                               ⋮
                             </span>
                             <button
                               type="button"
                               className={`btn btn-sm btn-link p-0 ${record.starred ? 'text-warning' : 'text-muted'}`}
+                              data-help={`translations-${record.starred ? 'star' : 'unstar'}`}
                               onClick={() => {
                                 if (!isLastStarred) {
                                   onToggleStar(record.id);
@@ -273,7 +278,7 @@ const TranslationsPanel: React.FC<TranslationsPanelProps> = ({
             </div>
           </div>
 
-          <div className="translations-panel-add-column">
+          <div className="translations-panel-add-column" data-help="translations-more">
             <label htmlFor="moreTranslationsFilter" className="form-label text-uppercase small fw-semibold mb-1">
               More Translations
             </label>
@@ -283,6 +288,7 @@ const TranslationsPanel: React.FC<TranslationsPanelProps> = ({
                 type="search"
                 className="form-control form-control-sm"
                 placeholder="Filter"
+                data-help="translations-filter"
                 value={translationFilter}
                 onChange={(event) => setTranslationFilter(event.target.value)}
               />
@@ -292,7 +298,7 @@ const TranslationsPanel: React.FC<TranslationsPanelProps> = ({
             ) : filteredAddableTranslations.length === 0 ? (
               <p className="text-body-secondary small mb-0">No matching translations.</p>
             ) : (
-              <div className="d-flex flex-column gap-1">
+              <div className="d-flex flex-column gap-1" data-help="translations-add-list">
                 {filteredAddableTranslations.map((translation) => (
                   <a
                     key={translation.id}

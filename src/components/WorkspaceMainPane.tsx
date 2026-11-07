@@ -397,11 +397,16 @@ const WorkspaceMainPane: React.FC<WorkspaceMainPaneProps> = ({
     const direction = isArrowUp ? -1 : 1;
 
     if (event.ctrlKey && !event.shiftKey && !event.altKey && !event.metaKey) {
-      if (currentSelection.length !== 1 || !selectedBook) {
+      if (!selectedBook) {
         return;
       }
 
-      const currentVerse = currentSelection[0];
+      // Collapse multi-select to the initially selected verse, then move from there.
+      const currentVerse = (
+        selectionAnchorVerse != null && availableVerseSet.has(selectionAnchorVerse)
+          ? selectionAnchorVerse
+          : currentSelection[0]
+      );
       const currentIndex = availableVerses.indexOf(currentVerse);
       if (currentIndex < 0) {
         return;

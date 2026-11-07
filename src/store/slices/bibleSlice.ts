@@ -504,6 +504,26 @@ const bibleSlice = createSlice({
     clearVerseTabContexts: (state) => {
       applyVerseContextToVerseTabs(state, null);
     },
+    openHelpTab: (state) => {
+      const now = Date.now();
+      const existing = state.tabs.find((tab) => tab.type === 'help');
+      if (existing) {
+        existing.updatedAt = now;
+        state.activeTabId = existing.id;
+        return;
+      }
+
+      const created: PanelTab = {
+        id: `tab-help-${now}`,
+        type: 'help',
+        title: 'Help',
+        iconClass: 'fa-regular fa-circle-question',
+        createdAt: now,
+        updatedAt: now,
+      };
+      state.tabs.push(created);
+      state.activeTabId = created.id;
+    },
     openVerseTabs: (state, action: PayloadAction<{
       book: string;
       chapter: number;
@@ -631,6 +651,7 @@ export const {
   clearSearch,
   updateActiveVerseTabContext,
   clearVerseTabContexts,
+  openHelpTab,
   openVerseTabs
 } = bibleSlice.actions;
 

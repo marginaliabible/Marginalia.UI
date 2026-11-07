@@ -1,5 +1,6 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import SettingsModal from './SettingsModal';
+import { HelpTourProvider } from '../help/HelpTourContext';
 
 jest.mock('./LanguageTagSelector', () => () => null);
 
@@ -26,13 +27,22 @@ const defaultProps = {
 };
 
 describe('SettingsModal', () => {
+  const startTour = jest.fn();
+
+  const renderModal = (props: Partial<typeof defaultProps> = {}) => render(
+    <HelpTourProvider startTour={startTour} startTourAtTarget={jest.fn()}>
+      <SettingsModal {...defaultProps} {...props} />
+    </HelpTourProvider>
+  );
+
   beforeEach(() => {
+    jest.clearAllMocks();
     mockGetAppVersion.mockReturnValue('v2026.11.00-a1b2c3d');
     mockGetAppGitSha.mockReturnValue('a1b2c3d4e5f67890');
   });
 
   it('points to File Sync > Subscriptions instead of managing sources inline', () => {
-    render(<SettingsModal {...defaultProps} />);
+    renderModal();
 
     expect(screen.getByText('File Sync > Subscriptions')).toBeTruthy();
     expect(screen.queryByLabelText('Source URL')).toBeNull();
@@ -45,7 +55,7 @@ describe('SettingsModal', () => {
       value: { writeText },
     });
 
-    render(<SettingsModal {...defaultProps} />);
+    renderModal();
 
     const versionLink = screen.getByRole('link', { name: 'v2026.11.00-a1b2c3d', hidden: true });
     expect(versionLink.getAttribute('href')).toBe(
@@ -59,12 +69,19 @@ describe('SettingsModal', () => {
     mockGetAppVersion.mockReturnValue('v2026.11.00');
     mockGetAppGitSha.mockReturnValue('a1b2c3d4e5f67890');
 
-    render(<SettingsModal {...defaultProps} />);
+    renderModal();
 
     const versionLink = screen.getByRole('link', { name: 'v2026.11.00', hidden: true });
     expect(versionLink.getAttribute('href')).toBe(
       'https://github.com/marginaliabible/Marginalia.UI/releases/tag/v2026.11.00'
     );
     expect(screen.queryByLabelText('Copy commit SHA', { hidden: true })).toBeNull();
+  });
+
+  it('starts the settings tour from the header help button', () => {
+    renderModal();
+
+    fireEvent.click(screen.getByLabelText('Show me how: Settings', { hidden: true }));
+    expect(startTour).toHaveBeenCalledWith('open-settings');
   });
 });

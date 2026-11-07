@@ -4,6 +4,7 @@ import SearchResults from './SearchResults';
 import TranslationsPanel from './TranslationsPanel';
 import ResourcesPanel from './ResourcesPanel';
 import LinksPanel from './LinksPanel';
+import HelpPanel from './HelpPanel';
 import { useAppDispatch, useAppSelector } from '../store/hooks';
 import { loadTranslations, runSearchInTab, setActiveTab } from '../store/slices/bibleSlice';
 import type { QuickJumpTarget, BibleTranslationMeta, TranslationRecord } from '../models/bible';
@@ -150,6 +151,11 @@ const SidePanelContent: React.FC<SidePanelContentProps> = ({
                 tab={tab}
                 isActive={tab.id === activeTabId}
                 onBeforeNavigate={collapseMobilePanel}
+              />
+            ) : tab.type === 'help' ? (
+              <HelpPanel
+                tab={tab}
+                isActive={tab.id === activeTabId}
               />
             ) : null}
             <div className="pb-4" aria-hidden="true"></div>

@@ -69,6 +69,7 @@ const SearchBar: React.FC<SearchBarProps> = ({
                     className="form-control"
                     autoComplete="off"
                     placeholder="Search or jump (e.g. Gen 1:3)"
+                    data-help="search-input"
                     value={searchTerm}
                     onChange={(e) => handleSearchInput(e.target.value)}
                     onKeyDown={handleSearchInputKeyDown}

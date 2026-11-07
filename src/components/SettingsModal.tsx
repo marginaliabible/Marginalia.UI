@@ -1,6 +1,7 @@
 import { useCallback, useState, type ReactNode } from 'react';
 import { getAppGitSha, getAppVersion } from '../services/appBuildIdentity';
 import { getReleaseTagUrl, isBetaAppVersion } from '../services/appBuildIdentityFormat';
+import { useHelpTour } from '../help/HelpTourContext';
 import LanguageTagSelector from './LanguageTagSelector';
 
 interface SettingsModalProps {
@@ -32,6 +33,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
   closeSettingsModal,
   settingsFooter,
 }) => {
+  const { startTour } = useHelpTour();
   const appVersion = getAppVersion();
   const appGitSha = getAppGitSha();
   const releaseTagUrl = getReleaseTagUrl(appVersion);
@@ -71,13 +73,27 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
               <i className="bi bi-gear" aria-hidden="true"></i>
               Settings
             </h2>
-            <button
-              type="button"
-              className="btn-close"
-              data-bs-dismiss="modal"
-              aria-label="Close"
-              onClick={closeSettingsModal}
-            ></button>
+            <div className="d-flex align-items-center gap-1 ms-auto">
+              <button
+                type="button"
+                className="btn btn-link text-body-secondary p-1 lh-1"
+                aria-label="Show me how: Settings"
+                data-help="settings-help"
+                title="Show me how"
+                onClick={() => {
+                  void startTour('open-settings');
+                }}
+              >
+                <i className="bi bi-question-circle" aria-hidden="true"></i>
+              </button>
+              <button
+                type="button"
+                className="btn-close"
+                data-bs-dismiss="modal"
+                aria-label="Close"
+                onClick={closeSettingsModal}
+              ></button>
+            </div>
           </div>
           <div className="modal-body d-flex flex-column gap-4">
             <section className="d-flex flex-column gap-3">
@@ -87,7 +103,10 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
                 </span>
               </div>
 
-              <div className="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-3">
+              <div
+                className="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-3"
+                data-help="settings-theme"
+              >
                 <div className="d-flex flex-column">
                   <span className="fw-semibold">Theme</span>
                   <span className="text-body-secondary small">
@@ -111,7 +130,10 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
                 </div>
               </div>
 
-              <div className="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-3">
+              <div
+                className="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-3"
+                data-help="settings-translator-italics"
+              >
                 <div className="d-flex flex-column">
                   <span className="fw-semibold">Italicize words added by the translator</span>
                   <span className="text-body-secondary small">
@@ -135,7 +157,10 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
                 </div>
               </div>
 
-              <div className="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-3">
+              <div
+                className="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-3"
+                data-help="settings-translator-paragraphs"
+              >
                 <div className="d-flex flex-column">
                   <span className="fw-semibold">Show paragraph marks added by the translator</span>
                   <span className="text-body-secondary small">
@@ -160,7 +185,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
               </div>
             </section>
 
-            <section>
+            <section data-help="settings-languages">
               <div className="d-flex align-items-baseline gap-3 mb-2">
                 <div className="d-flex flex-column">
                   <span className="text-body-secondary small text-uppercase fw-semibold">
@@ -189,7 +214,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
               </p>
             </section>
 
-            <section>
+            <section data-help="settings-sources">
               <div className="d-flex flex-column mb-2">
                 <span className="text-body-secondary small text-uppercase fw-semibold">
                   Sources
@@ -204,7 +229,10 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
           <div className="modal-footer d-flex align-items-center gap-2">
             <div className="me-auto d-flex align-items-center gap-3 flex-wrap">
               {settingsFooter}
-              <span className="text-body-secondary small font-monospace d-inline-flex align-items-center gap-1">
+              <span
+                className="text-body-secondary small font-monospace d-inline-flex align-items-center gap-1"
+                data-help="settings-version"
+              >
                 {releaseTagUrl ? (
                   <a
                     href={releaseTagUrl}
@@ -222,6 +250,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
                   <button
                     type="button"
                     className="btn btn-link btn-sm p-0 text-body-secondary"
+                    data-help="settings-version-copy"
                     onClick={() => {
                       void copyVersionIdentity();
                     }}
@@ -237,6 +266,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
               type="button"
               className="btn btn-secondary"
               data-bs-dismiss="modal"
+              data-help="settings-close"
               onClick={closeSettingsModal}
             >
               Close

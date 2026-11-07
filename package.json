@@ -8,6 +8,7 @@
     "build": "tsc && vite build",
     "build:sanctum": "node scripts/with-sanctum.mjs build",
     "preview": "vite preview",
+    "postinstall": "node scripts/patch-react-joyride.mjs",
     "test": "jest",
     "test:watch": "jest --watch",
     "test:sanctum": "npm --prefix ../Marginalia.UI.Sanctum test",
@@ -34,7 +35,10 @@
     "idb": "^8.0.3",
     "minisearch": "^7.2.0",
     "pdfjs-dist": "^4.10.38",
+    "react-joyride": "^3.2.0",
+    "react-markdown": "^10.1.0",
     "react-select": "^5.10.2",
+    "remark-gfm": "^4.0.1",
     "stemmer": "^2.0.1"
   },
   "devDependencies": {

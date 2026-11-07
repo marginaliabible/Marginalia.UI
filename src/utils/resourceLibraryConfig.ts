@@ -213,6 +213,10 @@ export function resolveAddress(address: string, baseUrl: string): string {
 
 export function buildFetchUrlCandidates(address: string, baseUrl?: string): string[] {
   const resolved = baseUrl ? resolveAddress(address, baseUrl) : (normalizeGitHubUiUrlToRaw(address) ?? address.trim());
+  // Relative app paths (e.g. /help-content/manifest.json) should stay local — do not CDN-rewrite.
+  if (resolved.startsWith('/') && !resolved.startsWith('//')) {
+    return [resolved];
+  }
   const gitHubRaw = parseGitHubRawUrl(resolved);
   if (!gitHubRaw) {
     return [resolved];

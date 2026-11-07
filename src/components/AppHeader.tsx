@@ -3,10 +3,11 @@ import AppHeaderIcon from '../assets/gitbible-header-icon.svg?react';
 
 interface AppHeaderProps {
   onOpenSettings: () => void;
+  onOpenHelp: () => void;
   accountControl?: React.ReactNode;
 }
 
-const AppHeader: React.FC<AppHeaderProps> = ({ onOpenSettings, accountControl }) => {
+const AppHeader: React.FC<AppHeaderProps> = ({ onOpenSettings, onOpenHelp, accountControl }) => {
   return (
     <header className="card border-0 shadow-sm mb-4">
       <div className="card-body d-flex flex-column gap-3">
@@ -17,11 +18,21 @@ const AppHeader: React.FC<AppHeaderProps> = ({ onOpenSettings, accountControl })
               type="button"
               className="btn btn-outline-secondary rounded-circle d-inline-flex align-items-center justify-content-center"
               aria-label="Open settings"
+              data-help="settings-button"
               data-bs-toggle="modal"
               data-bs-target="#settingsModal"
               onClick={onOpenSettings}
             >
               <i className="bi bi-gear-fill" aria-hidden="true"></i>
+            </button>
+            <button
+              type="button"
+              className="btn btn-outline-secondary rounded-circle d-inline-flex align-items-center justify-content-center"
+              aria-label="Open help"
+              data-help="help-button"
+              onClick={onOpenHelp}
+            >
+              <i className="bi bi-question-lg" aria-hidden="true"></i>
             </button>
           </div>
         </div>

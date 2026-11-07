@@ -10,7 +10,7 @@ export interface VerseContext {
 
 export interface PanelTab {
   id: string;
-  type: 'search' | 'translations' | 'resources' | 'links';
+  type: 'search' | 'translations' | 'resources' | 'links' | 'help';
   title: string;
   iconClass: string;
   searchResults?: SearchResultSet;

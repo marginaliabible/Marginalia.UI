@@ -13,6 +13,7 @@ import { sanctumPlugin } from '@marginalia/sanctum';
 const SanctumAccountSync = sanctumPlugin.AccountSync;
 const SanctumSettingsFooter = sanctumPlugin.SettingsFooter;
 import ToastPanel from './components/ToastPanel';
+import HelpTourRunner from './components/HelpTourRunner';
 import { useCallback, useEffect, useMemo, useRef, useState, ChangeEvent } from 'react';
 import { useAppDispatch, useAppSelector } from './store/hooks';
 import {
@@ -21,6 +22,7 @@ import {
   createDeferredSearchTab,
   setActiveTab,
   closeTab,
+  openHelpTab,
   setCurrentBibleFromId,
   removeLoadedTranslations,
 } from './store/slices/bibleSlice';
@@ -895,6 +897,13 @@ function App() {
     modalRef.current?.hide();
   };
 
+  const handleOpenHelp = () => {
+    dispatch(openHelpTab());
+    if (isMobileLayout) {
+      setIsMobilePanelOpen(true);
+    }
+  };
+
   const handleSelectTab = (tabId: string) => {
     dispatch(setActiveTab({
       tabId,
@@ -973,20 +982,21 @@ function App() {
 
   if (isPanelWindow) {
     return (
-      <>
+      <HelpTourRunner onOpenSettings={openSettingsModal}>
         <PanelWindowShell sidePanelContentProps={panelWindowContentProps} isDocked={isPanelWindowDocked} />
         <ToastPanel />
-      </>
+      </HelpTourRunner>
     );
   }
 
   return (
-    <>
+    <HelpTourRunner onOpenSettings={openSettingsModal}>
       <div className={`container app-shell ${useWideLayout ? 'app-shell-wide' : ''}`}>
         {!isDocumentWindow && (
           <>
             <AppHeader
               onOpenSettings={openSettingsModal}
+              onOpenHelp={handleOpenHelp}
               accountControl={SanctumAccountSync
                 ? <SanctumAccountSync subscriptions={subscriptionsBinding} />
                 : <AccountControl subscriptions={subscriptionsBinding} />}
@@ -1109,7 +1119,7 @@ function App() {
       </div>
 
       <ToastPanel />
-    </>
+    </HelpTourRunner>
   );
 }
 

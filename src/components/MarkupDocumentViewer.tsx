@@ -438,8 +438,41 @@ ${options.bodyHtml}
     var pendingPageLoads = {};
     var pendingScrollPageIndex = null;
     var scrollRetryTimer = null;
+    var scrollReleaseTimer = null;
+
+    function clearPendingScroll() {
+      pendingScrollPageIndex = null;
+      if (scrollRetryTimer) {
+        clearTimeout(scrollRetryTimer);
+        scrollRetryTimer = null;
+      }
+      if (scrollReleaseTimer) {
+        clearTimeout(scrollReleaseTimer);
+        scrollReleaseTimer = null;
+      }
+    }
+
+    // Keep pending briefly after settle so earlier pages finishing load can correct
+    // cumulative offsets — then drop it so free scrolling is not yanked back.
+    function releasePendingScrollSoon() {
+      if (scrollReleaseTimer) {
+        clearTimeout(scrollReleaseTimer);
+      }
+      scrollReleaseTimer = setTimeout(function () {
+        scrollReleaseTimer = null;
+        pendingScrollPageIndex = null;
+        if (scrollRetryTimer) {
+          clearTimeout(scrollRetryTimer);
+          scrollRetryTimer = null;
+        }
+      }, 600);
+    }
 
     function scrollToPageWhenReady(pageIndex) {
+      if (scrollReleaseTimer) {
+        clearTimeout(scrollReleaseTimer);
+        scrollReleaseTimer = null;
+      }
       pendingScrollPageIndex = pageIndex;
       if (scrollRetryTimer) {
         clearTimeout(scrollRetryTimer);
@@ -453,6 +486,23 @@ ${options.bodyHtml}
         if (viewer && typeof viewer.scroll_to === 'function') {
           viewer.scroll_to(pageIndex);
         }
+      }
+
+      function settleScroll() {
+        if (pendingScrollPageIndex !== pageIndex) {
+          return;
+        }
+        try {
+          var settled = viewer.pages && viewer.pages[pageIndex];
+          if (settled && settled.loaded && typeof settled.show === 'function') {
+            settled.show();
+          }
+        } catch (showError) { /* ignore */ }
+        window.parent.postMessage({
+          type: 'markup-page-settled',
+          pageIndex: pageIndex
+        }, '*');
+        releasePendingScrollSoon();
       }
 
       function attempt(remaining) {
@@ -474,16 +524,7 @@ ${options.bodyHtml}
             doScroll();
             requestAnimationFrame(function () {
               doScroll();
-              try {
-                var settled = viewer.pages && viewer.pages[pageIndex];
-                if (settled && settled.loaded && typeof settled.show === 'function') {
-                  settled.show();
-                }
-              } catch (showError) { /* ignore */ }
-              window.parent.postMessage({
-                type: 'markup-page-settled',
-                pageIndex: pageIndex
-              }, '*');
+              settleScroll();
             });
           });
           return;
@@ -491,21 +532,15 @@ ${options.bodyHtml}
 
         // load_page may ask the parent for a blob first; callback fires once content is in.
         viewer.load_page(pageIndex, undefined, function () {
+          if (pendingScrollPageIndex !== pageIndex) {
+            return;
+          }
           doScroll();
           requestAnimationFrame(function () {
             doScroll();
             requestAnimationFrame(function () {
               doScroll();
-              try {
-                var loaded = viewer.pages && viewer.pages[pageIndex];
-                if (loaded && typeof loaded.show === 'function') {
-                  loaded.show();
-                }
-              } catch (showError) { /* ignore */ }
-              window.parent.postMessage({
-                type: 'markup-page-settled',
-                pageIndex: pageIndex
-              }, '*');
+              settleScroll();
             });
           });
         });
@@ -641,6 +676,26 @@ ${options.bodyHtml}
             notifyPageChanged();
             notifyViewportChanged();
           }, { passive: true });
+          // Programmatic scroll_to fires 'scroll' but not these — cancel sticky
+          // pending target as soon as the user takes over.
+          function cancelPendingScrollFromUser() {
+            if (pendingScrollPageIndex === null && !scrollRetryTimer && !scrollReleaseTimer) {
+              return;
+            }
+            clearPendingScroll();
+          }
+          pageContainer.addEventListener('wheel', cancelPendingScrollFromUser, { passive: true });
+          pageContainer.addEventListener('touchstart', cancelPendingScrollFromUser, { passive: true });
+          pageContainer.addEventListener('pointerdown', cancelPendingScrollFromUser, { passive: true });
+          document.addEventListener('keydown', function (event) {
+            var key = event.key;
+            if (
+              key === 'PageUp' || key === 'PageDown' || key === 'Home' || key === 'End'
+              || key === 'ArrowUp' || key === 'ArrowDown' || key === ' '
+            ) {
+              cancelPendingScrollFromUser();
+            }
+          });
           try {
             var openedObserver = new MutationObserver(function (mutations) {
               for (var m = 0; m < mutations.length; m += 1) {
@@ -839,6 +894,8 @@ const MarkupDocumentViewer: React.FC<MarkupDocumentViewerProps> = ({ onScripture
   const [highlightEpoch, setHighlightEpoch] = useState(0);
   const [scriptureLinkEpoch, setScriptureLinkEpoch] = useState(0);
   const highlightAttemptedRef = useRef(false);
+  /** focusNonce for which we already auto-scrolled to the verse highlight (overlays may still re-apply). */
+  const highlightScrolledForNonceRef = useRef<number | null>(null);
   const highlightPageRef = useRef(1);
   const scriptureLinkedPagesRef = useRef<Set<number>>(new Set());
   const openScriptureReferenceRef = useRef(openScriptureReference);
@@ -1222,7 +1279,14 @@ const MarkupDocumentViewer: React.FC<MarkupDocumentViewerProps> = ({ onScripture
 
       highlightAttemptedRef.current = true;
       if (result.status === 'highlighted') {
-        result.element.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
+        // Only auto-scroll once per open/re-click. Later page rematerializations
+        // re-apply overlays via highlightEpoch but must not yank the viewport back.
+        if (highlightScrolledForNonceRef.current !== focusNonce) {
+          highlightScrolledForNonceRef.current = focusNonce;
+          if (activePageRef.current === highlightPage) {
+            result.element.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
+          }
+        }
       }
     };
 

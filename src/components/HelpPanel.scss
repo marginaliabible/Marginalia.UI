@@ -1,0 +1,106 @@
+.help-panel {
+  padding: 0.75rem 0.25rem 1rem;
+}
+
+.help-back-button {
+  // Match .form-control height so it lines up with the search field.
+  width: calc(1.5em + 0.75rem + 2px);
+  height: calc(1.5em + 0.75rem + 2px);
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+
+  .bi {
+    display: block;
+    line-height: 1;
+    // bi-chevron-left is optically heavy on the right; nudge it true-center.
+    transform: translateX(-3px);
+  }
+}
+
+.help-toc-section {
+  letter-spacing: 0.04em;
+  margin-bottom: 0.25rem;
+}
+
+.help-toc-link,
+.help-result-link,
+.help-article-link,
+.help-target-link {
+  text-decoration: none;
+
+  &:hover,
+  &:focus-visible {
+    text-decoration: underline;
+  }
+
+  &.is-active {
+    font-weight: 600;
+    text-decoration: underline;
+  }
+}
+
+.help-tour-button {
+  --help-tour-teal: rgb(0, 127, 168);
+
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  margin: 0.15rem 0 0.5rem;
+  padding: 0.4rem 0.95rem;
+  border: 0;
+  border-radius: 999px;
+  background: var(--help-tour-teal);
+  color: #fff;
+  font-size: 0.92rem;
+  font-weight: 600;
+  line-height: 1.2;
+  cursor: pointer;
+  vertical-align: middle;
+
+  .fa-person-chalkboard {
+    font-size: 0.95em;
+  }
+
+  &:hover,
+  &:focus-visible {
+    background: color-mix(in srgb, var(--help-tour-teal) 88%, #000);
+    color: #fff;
+  }
+
+  &:focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--help-tour-teal) 55%, #fff);
+    outline-offset: 2px;
+  }
+}
+
+.help-article {
+  h1 {
+    font-size: 1.35rem;
+    margin-bottom: 0.75rem;
+  }
+
+  h2 {
+    font-size: 1.15rem;
+    margin-top: 1.25rem;
+    margin-bottom: 0.5rem;
+  }
+
+  h3 {
+    font-size: 1.05rem;
+    margin-top: 1rem;
+    margin-bottom: 0.4rem;
+  }
+
+  p,
+  ul,
+  ol {
+    margin-bottom: 0.75rem;
+  }
+
+  a {
+    text-decoration: underline;
+  }
+}

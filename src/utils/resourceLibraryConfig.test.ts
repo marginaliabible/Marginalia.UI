@@ -137,6 +137,12 @@ describe('address helpers', () => {
 
     expect(candidates[0]).toBe('https://cdn.jsdelivr.net/gh/owner/repo@main/data/library.json');
   });
+
+  it('keeps same-origin relative paths local without CDN rewriting', () => {
+    expect(buildFetchUrlCandidates('/help-content/manifest.json')).toEqual([
+      '/help-content/manifest.json',
+    ]);
+  });
 });
 
 describe('documents validation', () => {

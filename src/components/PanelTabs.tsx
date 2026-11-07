@@ -38,6 +38,7 @@ const PanelTabs: React.FC<PanelTabsProps> = ({
                   role="tab"
                   aria-selected={isActive}
                   onClick={() => onSelectTab(tab.id)}
+                  data-help={`panel-tab-${tab.type}`}
                 >
                   <i className={tab.iconClass} aria-hidden="true"></i>
                   <span className="panel-tab-title">{tab.title}</span>

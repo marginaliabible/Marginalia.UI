@@ -10,6 +10,7 @@ import reducer, {
   clearVerseTabContexts,
   closeTab,
   createDeferredSearchTab,
+  openHelpTab,
   openVerseTabs,
   setActiveTab,
   updateActiveVerseTabContext,
@@ -181,3 +182,30 @@ describe('bibleSlice verse tab context', () => {
     expect(state.lastVersePanelType).toBe('translations');
   });
 });
+
+describe('bibleSlice help tab', () => {
+  it('openHelpTab creates a singleton help tab and activates it', () => {
+    const opened = reducer(undefined, openHelpTab());
+    expect(opened.tabs.filter((tab) => tab.type === 'help')).toHaveLength(1);
+    expect(opened.tabs.find((tab) => tab.id === opened.activeTabId)?.type).toBe('help');
+
+    const again = reducer(opened, openHelpTab());
+    expect(again.tabs.filter((tab) => tab.type === 'help')).toHaveLength(1);
+    expect(again.activeTabId).toBe(opened.tabs.find((tab) => tab.type === 'help')?.id);
+  });
+
+  it('openHelpTab coexists with verse tabs without replacing them', () => {
+    const withVerse = reducer(undefined, openVerseTabs({
+      book: 'Genesis',
+      chapter: 1,
+      verse: 1,
+      hasResources: true,
+    }));
+    const withHelp = reducer(withVerse, openHelpTab());
+
+    expect(withHelp.tabs.some((tab) => tab.type === 'resources')).toBe(true);
+    expect(withHelp.tabs.filter((tab) => tab.type === 'help')).toHaveLength(1);
+    expect(withHelp.tabs.find((tab) => tab.id === withHelp.activeTabId)?.type).toBe('help');
+  });
+});
+

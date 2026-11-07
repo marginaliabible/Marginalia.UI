@@ -12,6 +12,7 @@ interface ImportMetaEnv {
 	readonly VITE_EXTERNAL_DEV_HOST?: string;
 	readonly VITE_APP_VERSION?: string;
 	readonly VITE_APP_GIT_SHA?: string;
+	readonly VITE_HELP_CONTENT_URL?: string;
 }
 
 declare const __SANCTUM__: boolean;

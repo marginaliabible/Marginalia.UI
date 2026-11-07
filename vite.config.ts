@@ -1,17 +1,118 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { defineConfig, loadEnv } from 'vite';
+import { defineConfig, loadEnv, type Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
 import svgr from 'vite-plugin-svgr';
 
 const uiRoot = path.dirname(fileURLToPath(import.meta.url));
 const sanctumRoot = path.resolve(uiRoot, '../Marginalia.UI.Sanctum');
+const helpRoot = path.resolve(uiRoot, '../Marginalia.Help');
 const sanctumEntry = path.join(sanctumRoot, 'src/index.ts');
 const sanctumStub = path.resolve(uiRoot, 'src/sanctum/stub.ts');
 
 function isSanctumFlagOn(value: string | undefined): boolean {
   return ['1', 'true', 'yes'].includes(String(value || '').trim().toLowerCase());
+}
+
+const HELP_CONTENT_HOT_EVENT = 'marginalia-help:update';
+
+function isPathInsideHelpRoot(file: string): boolean {
+  // Windows drive-letter casing differs between Node resolve and chokidar events.
+  const root = path.resolve(helpRoot).toLowerCase();
+  const candidate = path.resolve(file).toLowerCase();
+  return candidate === root || candidate.startsWith(`${root}${path.sep}`);
+}
+
+function isIgnoredHelpWatchPath(file: string): boolean {
+  const relative = path.relative(helpRoot, file).replace(/\\/g, '/').toLowerCase();
+  return relative === '.git' || relative.startsWith('.git/');
+}
+
+/** Dev-only: serve sibling Marginalia.Help at /help-content/ and notify the client on changes. */
+function helpContentDevServerPlugin(): Plugin {
+  const prefix = '/help-content/';
+
+  return {
+    name: 'marginalia-help-content-dev',
+    configureServer(server) {
+      if (!fs.existsSync(helpRoot)) {
+        return;
+      }
+
+      let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+      const notifyHelpClients = (file?: string) => {
+        if (file && (!isPathInsideHelpRoot(file) || isIgnoredHelpWatchPath(file))) {
+          return;
+        }
+        if (debounceTimer) {
+          clearTimeout(debounceTimer);
+        }
+        debounceTimer = setTimeout(() => {
+          const relative = file ? path.relative(helpRoot, file) : '';
+          console.log(`[help-content] changed${relative ? `: ${relative}` : ''} — notifying clients`);
+          server.ws.send({
+            type: 'custom',
+            event: HELP_CONTENT_HOT_EVENT,
+            data: { file: file ?? null },
+          });
+        }, 50);
+      };
+
+      // Vite's watcher often misses files outside the project root on Windows.
+      // Node's recursive fs.watch is reliable here for the sibling Help repo.
+      try {
+        const watcher = fs.watch(helpRoot, { recursive: true }, (_eventType, filename) => {
+          if (!filename) {
+            return;
+          }
+          const absolute = path.join(helpRoot, filename);
+          if (isIgnoredHelpWatchPath(absolute)) {
+            return;
+          }
+          notifyHelpClients(absolute);
+        });
+        watcher.on('error', (error) => {
+          console.warn('[help-content] watch error', error);
+        });
+      } catch (error) {
+        console.warn('[help-content] recursive watch unavailable; falling back to Vite watcher', error);
+        server.watcher.add([
+          path.join(helpRoot, '**/*.md'),
+          path.join(helpRoot, '**/*.json'),
+        ]);
+        server.watcher.on('change', notifyHelpClients);
+        server.watcher.on('add', notifyHelpClients);
+        server.watcher.on('unlink', notifyHelpClients);
+      }
+
+      server.middlewares.use((req, res, next) => {
+        const url = req.url?.split('?')[0] ?? '';
+        if (!url.startsWith(prefix)) {
+          next();
+          return;
+        }
+
+        const relativePath = decodeURIComponent(url.slice(prefix.length));
+        const absolutePath = path.resolve(helpRoot, relativePath);
+        if (!isPathInsideHelpRoot(absolutePath) || !fs.existsSync(absolutePath) || fs.statSync(absolutePath).isDirectory()) {
+          res.statusCode = 404;
+          res.end('Not found');
+          return;
+        }
+
+        const ext = path.extname(absolutePath).toLowerCase();
+        const type = ext === '.json'
+          ? 'application/json; charset=utf-8'
+          : ext === '.md'
+            ? 'text/markdown; charset=utf-8'
+            : 'text/plain; charset=utf-8';
+        res.setHeader('Content-Type', type);
+        res.setHeader('Cache-Control', 'no-store');
+        fs.createReadStream(absolutePath).pipe(res);
+      });
+    },
+  };
 }
 
 export default defineConfig(({ mode }) => {
@@ -30,7 +131,7 @@ export default defineConfig(({ mode }) => {
   const tunnelOrigin = useTunnel ? `https://${tunnelHost}` : undefined;
 
   return {
-    plugins: [react(), svgr()],
+    plugins: [react(), svgr(), helpContentDevServerPlugin()],
     define: {
       __SANCTUM__: JSON.stringify(sanctumEnabled && sanctumExists),
     },
@@ -49,7 +150,11 @@ export default defineConfig(({ mode }) => {
       strictPort: true,
       open: true,
       fs: {
-        allow: [uiRoot, ...(sanctumEnabled && sanctumExists ? [sanctumRoot] : [])],
+        allow: [
+          uiRoot,
+          helpRoot,
+          ...(sanctumEnabled && sanctumExists ? [sanctumRoot] : []),
+        ],
       },
       allowedHosts: useTunnel ? ['localhost', tunnelHost] : true,
       ...(useTunnel
