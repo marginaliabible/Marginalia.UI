@@ -11,9 +11,11 @@
 .search-input-wrap .form-control {
   height: 100%;
   padding-right: 2.5rem;
+  border-radius: 8px 0 0 8px;
 }
 
-.search-input-wrap .form-control::-webkit-search-cancel-button {
+.search-input-wrap .form-control::-webkit-search-cancel-button, 
+.mini-search-input-wrap .form-control::-webkit-search-cancel-button {
   -webkit-appearance: none;
   appearance: none;
 }

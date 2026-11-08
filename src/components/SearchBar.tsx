@@ -97,7 +97,7 @@ const SearchBar: React.FC<SearchBarProps> = ({
                   )}
                 </div>
                 <button className="btn btn-primary" type="submit">
-                  Go
+                  <i className="bi bi-search"></i>
                 </button>
               </div>
               {isSearchFocused && (
