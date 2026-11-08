@@ -43,7 +43,12 @@ const SearchActionDropdown: React.FC<SearchActionDropdownProps> = ({
   const historyStartIndex = quickJumpStartIndex + (quickJumpPreview ? 1 : 0);
 
   return (
-    <div className="quick-jump-preview quick-jump-pulldown is-visible search-action-dropdown" role="listbox" aria-label="Search and jump options">
+    <div
+      className="quick-jump-preview quick-jump-pulldown is-visible search-action-dropdown"
+      role="listbox"
+      aria-label="Search and jump options"
+      data-help="search-dropdown"
+    >
       <button
         type="button"
         className="search-action-close"
@@ -58,6 +63,7 @@ const SearchActionDropdown: React.FC<SearchActionDropdownProps> = ({
         <button
           type="button"
           className={`search-action-quick-jump search-action-item ${selectedIndex === quickJumpStartIndex ? 'is-selected' : ''}`}
+          data-help="search-quick-jump"
           onMouseDown={(event) => event.preventDefault()}
           onClick={onSelectQuickJump}
         >
@@ -96,7 +102,11 @@ const SearchActionDropdown: React.FC<SearchActionDropdownProps> = ({
       {historyEntries.length > 0 && (
         <>
           <div className="search-action-history-label">Recent</div>
-          <div className="search-action-history-list" role="group" aria-label="Quick jump history">
+          <div
+            className="search-action-history-list"
+            role="group"
+            aria-label="Quick jump history"
+          >
             {historyEntries.map((entry, index) => {
               const absoluteIndex = historyStartIndex + index;
               const subtitle = entry.kind === 'quick-jump' && entry.referenceLabel

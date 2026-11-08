@@ -138,6 +138,10 @@ export function parseHelpTourDefinition(payload: unknown): HelpTourDefinition {
     if (advanceVisible) {
       step.advanceVisible = advanceVisible;
     }
+    const advanceEvent = readString(entry['advanceEvent']);
+    if (advanceEvent) {
+      step.advanceEvent = advanceEvent;
+    }
     return [step];
   });
 

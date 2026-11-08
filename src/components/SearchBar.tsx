@@ -58,7 +58,7 @@ const SearchBar: React.FC<SearchBarProps> = ({
           <fieldset className="col-12 mb-0">
             <legend className="visually-hidden">Quick search</legend>
             <div className="quick-jump-shell">
-              <div className="input-group input-group-lg search-input-group">
+              <div className="input-group input-group-lg search-input-group" data-help="search-input">
                 <div className="search-input-wrap">
                   <input
                     id="searchInput"
@@ -69,7 +69,6 @@ const SearchBar: React.FC<SearchBarProps> = ({
                     className="form-control"
                     autoComplete="off"
                     placeholder="Search or jump (e.g. Gen 1:3)"
-                    data-help="search-input"
                     value={searchTerm}
                     onChange={(e) => handleSearchInput(e.target.value)}
                     onKeyDown={handleSearchInputKeyDown}
@@ -96,7 +95,7 @@ const SearchBar: React.FC<SearchBarProps> = ({
                     </button>
                   )}
                 </div>
-                <button className="btn btn-primary" type="submit">
+                <button className="btn btn-primary" type="submit" data-help="search-submit">
                   <i className="bi bi-search"></i>
                 </button>
               </div>

@@ -73,6 +73,11 @@ describe('helpContentParsers', () => {
           advanceVisible: 'translations-selected',
         },
         {
+          target: 'search-input',
+          content: 'Jump to a verse',
+          advanceEvent: 'search-quick-jump',
+        },
+        {
           target: 'translations-drag-handle',
           spotlightTarget: 'translations-selected',
           content: 'Drag handle with wider spotlight',
@@ -81,12 +86,13 @@ describe('helpContentParsers', () => {
     });
 
     expect(tour.id).toBe('open-settings');
-    expect(tour.steps).toHaveLength(4);
+    expect(tour.steps).toHaveLength(5);
     expect(tour.steps[0].before).toEqual({ action: 'openSettings' });
     expect(tour.steps[1].before).toEqual({ action: 'selectPanelTab', tabType: 'help' });
     expect(tour.steps[2].before).toEqual({ action: 'ensureTranslationsTab' });
     expect(tour.steps[2].advanceVisible).toBe('translations-selected');
-    expect(tour.steps[3].spotlightTarget).toBe('translations-selected');
+    expect(tour.steps[3].advanceEvent).toBe('search-quick-jump');
+    expect(tour.steps[4].spotlightTarget).toBe('translations-selected');
   });
 
   it('rejects tours with no valid steps', () => {

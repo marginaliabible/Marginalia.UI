@@ -1,7 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { helpContentService } from '../services/helpContentService';
 import { resolveHelpTourTarget } from '../help/tourTargets';
+import { helpTourEventType } from '../help/tourEvents';
 import { isElementVisible } from '../help/isElementVisible';
+import { scrollTourTargetIntoView } from '../help/scrollTourTargetIntoView';
 import {
   clearTourResumeIndex,
   getTourResumeIndex,
@@ -51,7 +53,7 @@ const HelpTourRunner: React.FC<HelpTourRunnerProps> = ({ onOpenSettings, childre
   const controlsRef = useRef<Controls | null>(null);
   const helpStepsRef = useRef<HelpTourStep[]>([]);
   const resumeBeaconRef = useRef<ResumeBeaconState | null>(null);
-  /** Step indexes whose advanceVisible action already completed this tour run. */
+  /** Step indexes whose advanceVisible / advanceEvent gate already completed this tour run. */
   const satisfiedAdvanceVisibleRef = useRef<Set<number>>(new Set());
 
   helpStepsRef.current = helpSteps;
@@ -119,28 +121,32 @@ const HelpTourRunner: React.FC<HelpTourRunnerProps> = ({ onOpenSettings, childre
     }
   }, [dispatch, ensureVerseContext, onOpenSettings, tabs]);
 
-  /** Open the host UI needed for a logical target when jumping mid-tour. */
+  /** Open the host UI needed for a logical target when jumping mid-tour, then scroll it into view. */
   const ensureTargetVisible = useCallback(async (targetId: string) => {
     const selector = resolveHelpTourTarget(targetId);
-    if (isElementVisible(document.querySelector(selector))) {
-      return;
+    if (!isElementVisible(document.querySelector(selector))) {
+      if (targetId === 'translations-panel' || targetId.startsWith('translations-')) {
+        await runBeforeAction({ action: 'openTranslationsPanel' });
+      } else if (targetId === 'settings-button' || targetId.startsWith('settings-')) {
+        await runBeforeAction({ action: 'openSettings' });
+      } else if (
+        targetId === 'search-panel'
+        || targetId === 'search-results'
+        || targetId === 'search-document-titles'
+        || targetId === 'search-testament-toggles'
+        || targetId === 'search-ot'
+        || targetId === 'search-nt'
+      ) {
+        await runBeforeAction({ action: 'selectPanelTab', tabType: 'search' });
+      }
     }
-    if (targetId === 'translations-panel' || targetId.startsWith('translations-')) {
-      await runBeforeAction({ action: 'openTranslationsPanel' });
-      return;
-    }
-    if (targetId === 'settings-button' || targetId.startsWith('settings-')) {
-      await runBeforeAction({ action: 'openSettings' });
-      return;
-    }
-    if (targetId === 'search-input') {
-      await runBeforeAction({ action: 'selectPanelTab', tabType: 'search' });
-    }
+    scrollTourTargetIntoView(targetId);
   }, [runBeforeAction]);
 
   const toJoyrideSteps = useCallback((tourSteps: HelpTourStep[], activeIndex: number, allowPrimary: boolean): Step[] => (
     tourSteps.map((step, index) => {
-      const waitingOnVisibility = Boolean(step.advanceVisible) && index === activeIndex && !allowPrimary;
+      const hasAdvanceGate = Boolean(step.advanceVisible || step.advanceEvent);
+      const waitingOnVisibility = hasAdvanceGate && index === activeIndex && !allowPrimary;
       return {
         target: resolveHelpTourTarget(step.target),
         ...(step.spotlightTarget
@@ -183,34 +189,75 @@ const HelpTourRunner: React.FC<HelpTourRunnerProps> = ({ onOpenSettings, childre
   const joyrideSteps = run ? tourSteps : beaconSteps;
   const joyrideRun = run || Boolean(resumeBeacon);
 
+  // Joyride's isFixed mode skips document scrolling; bring each step's target into view ourselves.
+  useEffect(() => {
+    if (!run) {
+      return;
+    }
+    const step = helpSteps[stepIndex];
+    if (!step) {
+      return;
+    }
+    scrollTourTargetIntoView(step.target);
+    if (step.spotlightTarget) {
+      scrollTourTargetIntoView(step.spotlightTarget);
+    }
+  }, [helpSteps, run, stepIndex, tourInstanceKey]);
+
   useEffect(() => {
     if (!run) {
       return;
     }
 
     const step = helpSteps[stepIndex];
-    if (!step?.advanceVisible || satisfiedAdvanceVisibleRef.current.has(stepIndex)) {
+    const hasAdvanceGate = Boolean(step?.advanceVisible || step?.advanceEvent);
+    if (!hasAdvanceGate || satisfiedAdvanceVisibleRef.current.has(stepIndex)) {
       // Already completed this gate (or no gate) — allow normal Next/Back navigation.
       setPrimaryEnabled(true);
       return;
     }
 
-    const selector = resolveHelpTourTarget(step.advanceVisible);
+    setPrimaryEnabled(false);
     let advanced = false;
-    const check = () => {
-      const visible = isElementVisible(document.querySelector(selector));
-      setPrimaryEnabled(visible);
-      // User completed the requested action (target now visible) — continue the tour.
-      if (visible && !advanced && controlsRef.current) {
-        advanced = true;
-        satisfiedAdvanceVisibleRef.current.add(stepIndex);
-        controlsRef.current.next();
+    const advance = () => {
+      if (advanced || !controlsRef.current) {
+        return;
       }
+      advanced = true;
+      satisfiedAdvanceVisibleRef.current.add(stepIndex);
+      setPrimaryEnabled(true);
+      controlsRef.current.next();
     };
 
-    check();
-    const intervalId = window.setInterval(check, 200);
-    return () => window.clearInterval(intervalId);
+    let intervalId: number | undefined;
+    if (step.advanceVisible) {
+      const selector = resolveHelpTourTarget(step.advanceVisible);
+      const check = () => {
+        // User completed the requested action (target now visible) — continue the tour.
+        if (isElementVisible(document.querySelector(selector))) {
+          advance();
+        }
+      };
+      check();
+      intervalId = window.setInterval(check, 200);
+    }
+
+    const eventType = step.advanceEvent ? helpTourEventType(step.advanceEvent) : null;
+    const onTourEvent = () => {
+      advance();
+    };
+    if (eventType) {
+      window.addEventListener(eventType, onTourEvent);
+    }
+
+    return () => {
+      if (intervalId !== undefined) {
+        window.clearInterval(intervalId);
+      }
+      if (eventType) {
+        window.removeEventListener(eventType, onTourEvent);
+      }
+    };
   }, [helpSteps, run, stepIndex, tourInstanceKey]);
 
   // Clear mid-tour resume beacon after TTL or when its target disappears.
@@ -299,9 +346,11 @@ const HelpTourRunner: React.FC<HelpTourRunnerProps> = ({ onOpenSettings, childre
       const satisfied = new Set<number>();
       for (let index = 0; index < resumeIndex; index += 1) {
         const step = definition.steps[index];
-        if (step?.advanceVisible) {
+        if (step?.advanceVisible || step?.advanceEvent) {
           satisfied.add(index);
-          await ensureTargetVisible(step.advanceVisible);
+          if (step.advanceVisible) {
+            await ensureTargetVisible(step.advanceVisible);
+          }
         }
       }
       satisfiedAdvanceVisibleRef.current = satisfied;
@@ -314,15 +363,14 @@ const HelpTourRunner: React.FC<HelpTourRunnerProps> = ({ onOpenSettings, childre
         }
       }
 
+      const resumeStep = definition.steps[resumeIndex];
+      const resumeHasGate = Boolean(resumeStep?.advanceVisible || resumeStep?.advanceEvent);
       activeTourIdRef.current = tourId;
       currentStepIndexRef.current = resumeIndex;
       setInitialStepIndex(resumeIndex);
       setStepIndex(resumeIndex);
       setHelpSteps(definition.steps);
-      setPrimaryEnabled(
-        !definition.steps[resumeIndex]?.advanceVisible
-        || satisfied.has(resumeIndex)
-      );
+      setPrimaryEnabled(!resumeHasGate || satisfied.has(resumeIndex));
       setTourInstanceKey((value) => value + 1);
       setRun(true);
     } catch (tourError) {

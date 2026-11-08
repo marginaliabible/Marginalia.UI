@@ -45,6 +45,11 @@ export interface HelpTourStep {
    * Next/Done stays hidden until that target is visible, then the tour advances automatically.
    */
   advanceVisible?: string;
+  /**
+   * Named host action the user must complete (see emitHelpTourEvent).
+   * Next/Done stays hidden until that event fires, then the tour advances automatically.
+   */
+  advanceEvent?: string;
   title?: string;
   content: string;
   placement?: 'top' | 'top-start' | 'top-end' | 'bottom' | 'bottom-start' | 'bottom-end' | 'left' | 'left-start' | 'left-end' | 'right' | 'right-start' | 'right-end' | 'center' | 'auto';

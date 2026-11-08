@@ -7,7 +7,8 @@ import {
 
 describe('tourProgress', () => {
   beforeEach(() => {
-    sessionStorage.clear();
+    clearTourResumeIndex('open-settings');
+    clearTourResumeIndex('try-search');
   });
 
   it('defaults to 0 when nothing is saved', () => {

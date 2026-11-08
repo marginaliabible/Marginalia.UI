@@ -5,6 +5,7 @@ import { setSearchTerm, clearVerseSelection } from '../store/slices/uiSlice';
 import { routeInteraction } from '../services/windowRouting';
 import { parseQuickJump } from '../utils/reference-parser';
 import { buildSearchHashRoute } from '../App';
+import { emitHelpTourEvent } from '../help/tourEvents';
 import type { QuickJumpTarget } from '../models/bible';
 import type { SearchHistoryEntry } from '../components/SearchActionDropdown';
 
@@ -257,6 +258,7 @@ export const useSearchController = ({
         await goToReference(target);
         updateSearchHistory(normalized, target);
         setIsSearchActionDropdownOpen(false);
+        emitHelpTourEvent('search-quick-jump');
         onSearchComplete?.();
         return;
       }
@@ -278,6 +280,7 @@ export const useSearchController = ({
     await goToReference(quickJumpTarget);
     updateSearchHistory(normalized, quickJumpTarget);
     setIsSearchActionDropdownOpen(false);
+    emitHelpTourEvent('search-quick-jump');
     onSearchComplete?.();
   };
 
@@ -296,6 +299,7 @@ export const useSearchController = ({
       await goToReference(parsedQuickJump);
       updateSearchHistory(query, parsedQuickJump);
       setIsSearchActionDropdownOpen(false);
+      emitHelpTourEvent('search-quick-jump');
       onSearchComplete?.();
       return;
     }

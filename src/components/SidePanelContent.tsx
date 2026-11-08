@@ -110,7 +110,7 @@ const SidePanelContent: React.FC<SidePanelContentProps> = ({
           onToggleDetach={onToggleDetach}
         />
       )}
-      <div className="panel-tabs-content" ref={contentRef}>
+      <div className="panel-tabs-content" ref={contentRef} data-help="panel-tabs-content">
         {tabs.map((tab: PanelTab) => (
           <div
             key={tab.id}
