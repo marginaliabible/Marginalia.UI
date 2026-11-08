@@ -231,19 +231,26 @@ const SearchResults: React.FC<SearchResultsProps> = ({ tab, goToReference, onBef
                   <button
                     type="button"
                     className="btn btn-link p-0 small text-decoration-none"
+                    data-help="search-document-titles"
                     onClick={() => setSearchView((mode) => (mode === 'scripture' ? 'documents' : 'scripture'))}
                   >
                     {searchView === 'scripture' ? 'Search document titles' : 'Search in scriptures'}
                   </button>
-                  <div className="btn-group search-testament-toggle-group" role="group" aria-label="Scripture testament filters">
+                  <div
+                    className="btn-group search-testament-toggle-group"
+                    role="group"
+                    aria-label="Scripture testament filters"
+                    data-help="search-testament-toggles"
+                  >
                     <button
                       type="button"
                       className={`btn btn-sm ${showOldTestament ? 'btn-primary' : 'btn-outline-primary'}`}
                       aria-pressed={showOldTestament}
                       title="Toggle Old Testament"
                       aria-label="Toggle Old Testament"
+                      data-help="search-ot"
                       onClick={() => {
-                        setShowOldTestament((show) => !show);
+                        setShowOldTestament((show) => (show && !showNewTestament ? show : !show));
                       }}
                     >
                       OT
@@ -254,8 +261,9 @@ const SearchResults: React.FC<SearchResultsProps> = ({ tab, goToReference, onBef
                       aria-pressed={showNewTestament}
                       title="Toggle New Testament"
                       aria-label="Toggle New Testament"
+                      data-help="search-nt"
                       onClick={() => {
-                        setShowNewTestament((show) => !show);
+                        setShowNewTestament((show) => (show && !showOldTestament ? show : !show));
                       }}
                     >
                       NT
@@ -336,7 +344,7 @@ const SearchResults: React.FC<SearchResultsProps> = ({ tab, goToReference, onBef
                           }, match.translationId);
                         }}
                       >
-                        <div className="card-body d-flex flex-column gap-2 h-100 p-3">
+                        <div className="card-body d-flex flex-column gap-2 h-100 p-3" data-help="search-results">
                           <span className="match-reference d-block">
                             {match.book} {match.chapter}:{match.verse}
                             {match.translationId && (
