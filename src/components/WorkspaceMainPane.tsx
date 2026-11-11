@@ -27,6 +27,7 @@ import type { WorkspacePanelKey } from '../App';
 interface WorkspaceMainPaneProps {
   isDesktopLayout: boolean;
   isPanelDetached: boolean;
+  isPanelFloated: boolean;
   activeWorkspacePanel: WorkspacePanelKey | null;
   mainPanePercent: number;
   isMobileLayout: boolean;
@@ -54,6 +55,7 @@ const getVerseRange = (start: number, end: number): number[] => {
 const WorkspaceMainPane: React.FC<WorkspaceMainPaneProps> = ({
   isDesktopLayout,
   isPanelDetached,
+  isPanelFloated,
   activeWorkspacePanel,
   mainPanePercent,
   isMobileLayout,
@@ -237,11 +239,13 @@ const WorkspaceMainPane: React.FC<WorkspaceMainPaneProps> = ({
     void scrollToVerse({ book: selectedBook, chapter: nextChapter, verse: 1 });
   };
 
+  const isPanelFloating = isMobileLayout || isPanelFloated;
+
   const expandMobilePanel = useCallback(() => {
-    if (isMobileLayout && !isPanelDetached) {
+    if (isPanelFloating && !isPanelDetached) {
       setIsMobilePanelOpen(true);
     }
-  }, [isMobileLayout, isPanelDetached, setIsMobilePanelOpen]);
+  }, [isPanelFloating, isPanelDetached, setIsMobilePanelOpen]);
 
   const openVersePanel = (verse: number, options?: { expandMobile?: boolean }) => {
     // Ensures verse tabs exist (and expands on mobile when requested).
@@ -510,7 +514,7 @@ const WorkspaceMainPane: React.FC<WorkspaceMainPaneProps> = ({
       tabIndex={-1}
       onPointerDownCapture={focusMainPane}
       style={
-        isDesktopLayout && activeWorkspacePanel && !isPanelDetached
+        isDesktopLayout && !isPanelFloated && activeWorkspacePanel && !isPanelDetached
           ? { flexBasis: `${mainPanePercent}%` }
           : undefined
       }
@@ -549,6 +553,7 @@ const WorkspaceMainPane: React.FC<WorkspaceMainPaneProps> = ({
               starredTranslationIds={starredTranslationIds}
               goToReference={goToReference}
               isPanelDetached={isPanelDetached}
+              isPanelFloating={isPanelFloating}
               miniSearchFocusToken={miniSearchFocusToken}
               isMiniSearchVisible={isMiniSearchVisible}
               setIsMiniSearchVisible={setIsMiniSearchVisible}

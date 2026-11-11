@@ -8,7 +8,7 @@ interface SearchBarProps {
   starredTranslationIds: string[];
   goToReference: (target: QuickJumpTarget, translationId?: string) => Promise<void>;
   isPanelDetached: boolean;
-  isDesktopLayout: boolean;
+  isPanelFloating: boolean;
   setIsMobilePanelOpen: (open: boolean) => void;
   onSearchComplete: () => void;
 }
@@ -18,7 +18,7 @@ const SearchBar: React.FC<SearchBarProps> = ({
   starredTranslationIds,
   goToReference,
   isPanelDetached,
-  isDesktopLayout,
+  isPanelFloating,
   setIsMobilePanelOpen,
   onSearchComplete,
 }) => {
@@ -44,7 +44,7 @@ const SearchBar: React.FC<SearchBarProps> = ({
     starredTranslationIds,
     goToReference,
     isPanelDetached,
-    isDesktopLayout,
+    isPanelFloating,
     setIsMobilePanelOpen,
     onSearchComplete,
   });

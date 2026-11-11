@@ -16,7 +16,7 @@ interface UseSearchControllerOptions {
   starredTranslationIds: string[];
   goToReference: (target: QuickJumpTarget, translationId?: string) => Promise<void>;
   isPanelDetached: boolean;
-  isDesktopLayout: boolean;
+  isPanelFloating: boolean;
   setIsMobilePanelOpen: (open: boolean) => void;
   onEmptyEscape?: () => void;
   onSearchComplete?: () => void;
@@ -53,7 +53,7 @@ export const useSearchController = ({
   starredTranslationIds,
   goToReference,
   isPanelDetached,
-  isDesktopLayout,
+  isPanelFloating,
   setIsMobilePanelOpen,
   onEmptyEscape,
   onSearchComplete,
@@ -220,7 +220,7 @@ export const useSearchController = ({
     setIsSearchActionDropdownOpen(false);
     setSearchActionIndex(0);
 
-    if (!isDesktopLayout && !isPanelDetached) {
+    if (isPanelFloating && !isPanelDetached) {
       setIsMobilePanelOpen(true);
     }
 

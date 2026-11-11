@@ -2,9 +2,11 @@
   min-height: 0;
 }
 
-// The mobile main pane is content-sized, so a docked viewer would collapse to the iframe's
-// default height. Take over the screen instead, beneath the side panel drawer (z-index 1040+).
-.workspace-layout.is-mobile .workspace-pane.workspace-main .pdf-viewer-shell {
+// The mobile/floated main pane is content-sized, so a docked viewer would collapse to the
+// iframe's default height. Take over the screen instead, beneath the side panel drawer
+// (z-index 1040+). Floated desktop uses the same overlay panel, so it needs the same shell.
+.workspace-layout.is-mobile .workspace-pane.workspace-main .pdf-viewer-shell,
+.workspace-layout.is-panel-floated .workspace-pane.workspace-main .pdf-viewer-shell {
   position: fixed;
   inset: 0;
   z-index: 1030;
@@ -13,7 +15,8 @@
 }
 
 // Keep the toolbar clear of the side panel's edge tab strip.
-.workspace-layout.is-mobile.has-side-panel .workspace-pane.workspace-main .pdf-viewer-shell {
+.workspace-layout.is-mobile.has-side-panel .workspace-pane.workspace-main .pdf-viewer-shell,
+.workspace-layout.is-panel-floated.has-side-panel .workspace-pane.workspace-main .pdf-viewer-shell {
   padding-right: 2.4rem;
 }
 
@@ -24,7 +27,8 @@
   height: calc(100vh - 1rem);
 }
 
-.workspace-layout.is-mobile .workspace-pane.workspace-main .pdf-viewer-stage {
+.workspace-layout.is-mobile .workspace-pane.workspace-main .pdf-viewer-stage,
+.workspace-layout.is-panel-floated .workspace-pane.workspace-main .pdf-viewer-stage {
   overscroll-behavior: contain;
 }
 

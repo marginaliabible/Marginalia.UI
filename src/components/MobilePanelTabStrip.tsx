@@ -1,6 +1,6 @@
 import React from 'react';
 import { useAppDispatch, useAppSelector } from '../store/hooks';
-import { setActiveTab, closeTab } from '../store/slices/bibleSlice';
+import { setActiveTab } from '../store/slices/bibleSlice';
 import { resolveSelectedVerseContext } from '../utils/selectedVerseContext';
 import type { PanelTab } from '../models/tab';
 
@@ -9,6 +9,8 @@ interface MobilePanelTabStripProps {
   activeTabId: string | null;
   isMobilePanelOpen: boolean;
   onToggle: () => void;
+  showDockToggle: boolean;
+  onDockPanel: () => void;
 }
 
 const MobilePanelTabStrip: React.FC<MobilePanelTabStripProps> = ({
@@ -16,6 +18,8 @@ const MobilePanelTabStrip: React.FC<MobilePanelTabStripProps> = ({
   activeTabId,
   isMobilePanelOpen,
   onToggle,
+  showDockToggle,
+  onDockPanel,
 }) => {
   const dispatch = useAppDispatch();
   const { selectedBook, selectedChapter, selectedVerses } = useAppSelector((state) => state.ui);
@@ -34,6 +38,17 @@ const MobilePanelTabStrip: React.FC<MobilePanelTabStripProps> = ({
           aria-hidden="true"
         ></i>
       </button>
+      {isMobilePanelOpen && showDockToggle && (
+        <button
+          type="button"
+          className="mobile-panel-strip-dock"
+          aria-label="Dock panel"
+          title="Dock panel"
+          onClick={onDockPanel}
+        >
+          <i className="fa-solid fa-thumbtack" aria-hidden="true"></i>
+        </button>
+      )}
       {isMobilePanelOpen &&
         tabs.map((tab) => (
           <button
@@ -48,34 +63,6 @@ const MobilePanelTabStrip: React.FC<MobilePanelTabStripProps> = ({
               }));
             }}
           >
-            <span
-              className={`mobile-panel-vtab-close${tab.id === activeTabId ? '' : ' is-hidden'}`}
-              role="button"
-              tabIndex={tab.id === activeTabId ? 0 : -1}
-              aria-hidden={tab.id === activeTabId ? undefined : true}
-              aria-label={tab.id === activeTabId ? `Close ${tab.title}` : undefined}
-              onClick={(event) => {
-                if (tab.id !== activeTabId) return;
-                event.stopPropagation();
-                dispatch(closeTab({
-                  tabId: tab.id,
-                  verseContext: selectedVerseContext,
-                }));
-              }}
-              onKeyDown={(event) => {
-                if (tab.id !== activeTabId) return;
-                if (event.key === 'Enter' || event.key === ' ') {
-                  event.preventDefault();
-                  event.stopPropagation();
-                  dispatch(closeTab({
-                    tabId: tab.id,
-                    verseContext: selectedVerseContext,
-                  }));
-                }
-              }}
-            >
-              ×
-            </span>
             <i className={tab.iconClass} aria-hidden="true"></i>
             <span className="mobile-panel-vtab-title">{tab.title}</span>
           </button>

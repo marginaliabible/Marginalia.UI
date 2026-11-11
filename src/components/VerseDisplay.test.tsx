@@ -41,6 +41,7 @@ function renderVerseDisplay(chaptersByTranslation: Record<string, BibleChapter |
       starredTranslationIds={['KJV', 'ASV']}
       goToReference={asyncNoop}
       isPanelDetached={false}
+      isPanelFloating={false}
       miniSearchFocusToken={0}
       onSearchComplete={noop}
       isMiniSearchVisible={false}

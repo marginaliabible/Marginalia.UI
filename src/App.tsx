@@ -21,7 +21,6 @@ import {
   refreshTranslations,
   createDeferredSearchTab,
   setActiveTab,
-  closeTab,
   openHelpTab,
   setCurrentBibleFromId,
   removeLoadedTranslations,
@@ -147,6 +146,7 @@ function App() {
   const mainPaneRef = useRef<HTMLDivElement | null>(null);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const [isMobilePanelOpen, setIsMobilePanelOpen] = useState(false);
+  const [isPanelFloated, setIsPanelFloated] = useState(false);
   const [miniSearchFocusToken, setMiniSearchFocusToken] = useState(0);
   const [isMiniSearchVisible, setIsMiniSearchVisible] = useState(false);
   const [subscriptionLibraries, setSubscriptionLibraries] = useState<SubscriptionLibrary[]>([]);
@@ -204,6 +204,8 @@ function App() {
 
   const isDesktopLayout = useDesktopLayout();
   const isMobileLayout = !isDesktopLayout;
+  const isPanelFloating = isMobileLayout || isPanelFloated;
+  const isPanelDockedDesktop = isDesktopLayout && !isPanelFloated;
 
   const activeWorkspacePanel: WorkspacePanelKey | null = tabs.length > 0 ? 'search' : null;
 
@@ -223,9 +225,9 @@ function App() {
     useWorkspaceSplit({ workspaceRef, isDesktopLayout, activeWorkspacePanel });
 
   useMobilePanelEffects({
-    isMobileLayout,
+    isPanelFloating,
     isMobilePanelOpen,
-    isDesktopLayout,
+    isPanelDockedDesktop,
     isPanelDetached,
     activeWorkspacePanel,
     setIsMobilePanelOpen,
@@ -899,7 +901,7 @@ function App() {
 
   const handleOpenHelp = () => {
     dispatch(openHelpTab());
-    if (isMobileLayout) {
+    if (isPanelFloating) {
       setIsMobilePanelOpen(true);
     }
   };
@@ -911,17 +913,20 @@ function App() {
     }));
   };
 
-  const handleCloseTab = (tabId: string) => {
-    dispatch(closeTab({
-      tabId,
-      verseContext: resolveSelectedVerseContext(selectedBook, selectedChapter, selectedVerses),
-    }));
+  const handleFloatPanel = () => {
+    setIsPanelFloated(true);
+    setIsMobilePanelOpen(true);
+  };
+
+  const handleDockPanel = () => {
+    setIsPanelFloated(false);
+    setIsMobilePanelOpen(false);
   };
 
   const panelWindowContentProps: React.ComponentProps<typeof PanelWindowShell>['sidePanelContentProps'] = {
-    isMobileLayout: false,
     isDesktopLayout: true,
     isPanelDetached: true,
+    isPanelFloating: false,
     isMobilePanelOpen: false,
     setIsMobilePanelOpen: () => {},
     goToReference: goToReferenceFromPanel,
@@ -933,8 +938,8 @@ function App() {
     onToggleStar: (id) => dispatch(toggleStarTranslation(id)),
     onReorder: (fromIndex, toIndex) => dispatch(reorderTranslations({ fromIndex, toIndex })),
     onSelectTab: handleSelectTab,
-    onCloseTab: handleCloseTab,
     onToggleDetach: handleToggleDetachPanel,
+    onFloatPanel: () => {},
     focusMainWindow,
   };
 
@@ -1007,7 +1012,7 @@ function App() {
               starredTranslationIds={starredTranslationIds}
               goToReference={goToReference}
               isPanelDetached={isPanelDetached}
-              isDesktopLayout={isDesktopLayout}
+              isPanelFloating={isPanelFloating}
               setIsMobilePanelOpen={setIsMobilePanelOpen}
               onSearchComplete={() => setIsMiniSearchVisible(false)}
             />
@@ -1028,13 +1033,18 @@ function App() {
 
         <div
           ref={workspaceRef}
-          className={`workspace-layout ${hasSidePanel ? 'has-side-panel' : ''} ${
-            isDesktopLayout ? 'is-desktop' : 'is-mobile'
-          }`}
+          className={[
+            'workspace-layout',
+            hasSidePanel ? 'has-side-panel' : '',
+            isPanelDockedDesktop ? 'is-desktop' : '',
+            isMobileLayout ? 'is-mobile' : '',
+            isDesktopLayout && isPanelFloated ? 'is-panel-floated' : '',
+          ].filter(Boolean).join(' ')}
         >
           <WorkspaceMainPane
             isDesktopLayout={isDesktopLayout}
             isPanelDetached={isPanelDetached}
+            isPanelFloated={isPanelFloated}
             activeWorkspacePanel={activeWorkspacePanel}
             mainPanePercent={mainPanePercent}
             isMobileLayout={isMobileLayout}
@@ -1051,7 +1061,7 @@ function App() {
             resourceHiddenTags={resourceHiddenTags}
           />
 
-          {isDesktopLayout && !isPanelDetached && activeWorkspacePanel && (
+          {isPanelDockedDesktop && !isPanelDetached && activeWorkspacePanel && (
             <WorkspaceDivider
               onPointerDown={handleDividerPointerDown}
               onKeyDown={handleDividerKeyDown}
@@ -1063,6 +1073,7 @@ function App() {
               isMobileLayout={isMobileLayout}
               isDesktopLayout={isDesktopLayout}
               isPanelDetached={isPanelDetached}
+              isPanelFloated={isPanelFloated}
               isMobilePanelOpen={isMobilePanelOpen}
               setIsMobilePanelOpen={setIsMobilePanelOpen}
               sidePanePercent={sidePanePercent}
@@ -1075,13 +1086,14 @@ function App() {
               onToggleStar={(id) => dispatch(toggleStarTranslation(id))}
               onReorder={(fromIndex, toIndex) => dispatch(reorderTranslations({ fromIndex, toIndex }))}
               onSelectTab={handleSelectTab}
-              onCloseTab={handleCloseTab}
               onToggleDetach={handleToggleDetachPanel}
+              onFloatPanel={handleFloatPanel}
+              onDockPanel={handleDockPanel}
               focusMainWindow={focusMainWindow}
             />
           )}
 
-          {isMobileLayout && hasSidePanel && isMobilePanelOpen && (
+          {isPanelFloating && hasSidePanel && isMobilePanelOpen && (
             <button
               type="button"
               className="mobile-panel-backdrop"

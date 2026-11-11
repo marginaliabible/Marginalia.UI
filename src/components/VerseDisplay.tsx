@@ -45,6 +45,7 @@ interface VerseDisplayProps {
   starredTranslationIds: string[];
   goToReference: (target: QuickJumpTarget, translationId?: string) => Promise<void>;
   isPanelDetached: boolean;
+  isPanelFloating: boolean;
   miniSearchFocusToken: number;
   onSearchComplete: () => void;
   isMiniSearchVisible: boolean;
@@ -84,6 +85,7 @@ const VerseDisplay: React.FC<VerseDisplayProps> = ({
   starredTranslationIds,
   goToReference,
   isPanelDetached,
+  isPanelFloating,
   miniSearchFocusToken,
   onSearchComplete,
   isMiniSearchVisible,
@@ -525,7 +527,7 @@ const VerseDisplay: React.FC<VerseDisplayProps> = ({
               starredTranslationIds={starredTranslationIds}
               goToReference={goToReference}
               isPanelDetached={isPanelDetached}
-              isDesktopLayout={!isMobileLayout}
+              isPanelFloating={isPanelFloating}
               setIsMobilePanelOpen={setIsMobilePanelOpen}
               isVisible={isMiniSearchVisible}
               onRequestHide={() => setIsMiniSearchVisible(false)}

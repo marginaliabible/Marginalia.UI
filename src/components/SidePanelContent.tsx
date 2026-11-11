@@ -11,9 +11,9 @@ import type { QuickJumpTarget, BibleTranslationMeta, TranslationRecord } from '.
 import type { PanelTab } from '../models/tab';
 
 interface SidePanelContentProps {
-  isMobileLayout: boolean;
   isDesktopLayout: boolean;
   isPanelDetached: boolean;
+  isPanelFloating: boolean;
   isMobilePanelOpen: boolean;
   setIsMobilePanelOpen: (open: boolean) => void;
   goToReference: (target: QuickJumpTarget, translationId?: string) => Promise<void>;
@@ -25,15 +25,15 @@ interface SidePanelContentProps {
   onToggleStar: (id: string) => void;
   onReorder: (fromIndex: number, toIndex: number) => void;
   onSelectTab: (tabId: string) => void;
-  onCloseTab: (tabId: string) => void;
   onToggleDetach: () => void;
+  onFloatPanel: () => void;
   focusMainWindow: () => void;
 }
 
 const SidePanelContent: React.FC<SidePanelContentProps> = ({
-  isMobileLayout,
   isDesktopLayout,
   isPanelDetached,
+  isPanelFloating,
   isMobilePanelOpen,
   setIsMobilePanelOpen,
   goToReference,
@@ -45,17 +45,17 @@ const SidePanelContent: React.FC<SidePanelContentProps> = ({
   onToggleStar,
   onReorder,
   onSelectTab,
-  onCloseTab,
   onToggleDetach,
+  onFloatPanel,
   focusMainWindow,
 }) => {
   const dispatch = useAppDispatch();
   const { tabs, activeTabId } = useAppSelector((state) => state.bible);
   const contentRef = useRef<HTMLDivElement | null>(null);
-  const isPanelVisible = !isMobileLayout || isMobilePanelOpen;
+  const isPanelVisible = !isPanelFloating || isMobilePanelOpen;
 
-  const collapseMobilePanel = () => {
-    if (isMobileLayout && isMobilePanelOpen) {
+  const collapseFloatingPanel = () => {
+    if (isPanelFloating && isMobilePanelOpen) {
       setIsMobilePanelOpen(false);
     }
   };
@@ -99,15 +99,16 @@ const SidePanelContent: React.FC<SidePanelContentProps> = ({
 
   return (
     <>
-      {!isMobileLayout && (
+      {!isPanelFloating && (
         <PanelTabs
           tabs={tabs}
           activeTabId={activeTabId}
           onSelectTab={onSelectTab}
-          onCloseTab={onCloseTab}
           isDetached={isPanelDetached}
           showDetachButton={isDesktopLayout}
           onToggleDetach={onToggleDetach}
+          showDockToggle={isDesktopLayout && !isPanelDetached}
+          onFloatPanel={onFloatPanel}
         />
       )}
       <div className="panel-tabs-content" ref={contentRef} data-help="panel-tabs-content">
@@ -121,7 +122,7 @@ const SidePanelContent: React.FC<SidePanelContentProps> = ({
                 tab={tab}
                 goToReference={goToReference}
                 onBeforeNavigate={() => {
-                  collapseMobilePanel();
+                  collapseFloatingPanel();
                   if (isPanelDetached) {
                     focusMainWindow();
                   }
@@ -138,19 +139,19 @@ const SidePanelContent: React.FC<SidePanelContentProps> = ({
                 onRemoveTranslation={onRemoveTranslation}
                 onToggleStar={onToggleStar}
                 onReorder={onReorder}
-                onBeforeNavigate={collapseMobilePanel}
+                onBeforeNavigate={collapseFloatingPanel}
               />
             ) : tab.type === 'resources' ? (
               <ResourcesPanel
                 tab={tab}
                 isActive={tab.id === activeTabId}
-                onBeforeNavigate={collapseMobilePanel}
+                onBeforeNavigate={collapseFloatingPanel}
               />
             ) : tab.type === 'links' ? (
               <LinksPanel
                 tab={tab}
                 isActive={tab.id === activeTabId}
-                onBeforeNavigate={collapseMobilePanel}
+                onBeforeNavigate={collapseFloatingPanel}
               />
             ) : tab.type === 'help' ? (
               <HelpPanel

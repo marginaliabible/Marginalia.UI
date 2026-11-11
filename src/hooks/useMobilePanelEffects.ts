@@ -2,32 +2,32 @@ import { useEffect } from 'react';
 import type { WorkspacePanelKey } from '../App';
 
 interface UseMobilePanelEffectsProps {
-  isMobileLayout: boolean;
+  isPanelFloating: boolean;
   isMobilePanelOpen: boolean;
-  isDesktopLayout: boolean;
+  isPanelDockedDesktop: boolean;
   isPanelDetached: boolean;
   activeWorkspacePanel: WorkspacePanelKey | null;
   setIsMobilePanelOpen: (open: boolean) => void;
 }
 
 export const useMobilePanelEffects = ({
-  isMobileLayout,
+  isPanelFloating,
   isMobilePanelOpen,
-  isDesktopLayout,
+  isPanelDockedDesktop,
   isPanelDetached,
   activeWorkspacePanel,
   setIsMobilePanelOpen,
 }: UseMobilePanelEffectsProps): void => {
-  // Close mobile panel when switching to desktop, detaching, or clearing panel
+  // Close floating panel when docking on desktop, detaching, or clearing panel
   useEffect(() => {
-    if (isDesktopLayout || isPanelDetached || !activeWorkspacePanel) {
+    if (isPanelDockedDesktop || isPanelDetached || !activeWorkspacePanel) {
       setIsMobilePanelOpen(false);
     }
-  }, [isDesktopLayout, isPanelDetached, activeWorkspacePanel, setIsMobilePanelOpen]);
+  }, [isPanelDockedDesktop, isPanelDetached, activeWorkspacePanel, setIsMobilePanelOpen]);
 
-  // Escape key closes mobile panel
+  // Escape key closes floating panel
   useEffect(() => {
-    if (!isMobileLayout || !isMobilePanelOpen) {
+    if (!isPanelFloating || !isMobilePanelOpen) {
       return;
     }
 
@@ -39,7 +39,7 @@ export const useMobilePanelEffects = ({
 
     window.addEventListener('keydown', handleEscape);
     return () => window.removeEventListener('keydown', handleEscape);
-  }, [isMobileLayout, isMobilePanelOpen, setIsMobilePanelOpen]);
+  }, [isPanelFloating, isMobilePanelOpen, setIsMobilePanelOpen]);
 
   // Toggle body class to prevent background scroll
   useEffect(() => {
@@ -47,9 +47,9 @@ export const useMobilePanelEffects = ({
       return;
     }
 
-    document.body.classList.toggle('mobile-panel-open', isMobileLayout && isMobilePanelOpen);
+    document.body.classList.toggle('mobile-panel-open', isPanelFloating && isMobilePanelOpen);
     return () => {
       document.body.classList.remove('mobile-panel-open');
     };
-  }, [isMobileLayout, isMobilePanelOpen]);
+  }, [isPanelFloating, isMobilePanelOpen]);
 };

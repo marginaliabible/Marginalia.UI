@@ -8,6 +8,7 @@ interface WorkspaceSidePanelProps {
   isMobileLayout: boolean;
   isDesktopLayout: boolean;
   isPanelDetached: boolean;
+  isPanelFloated: boolean;
   isMobilePanelOpen: boolean;
   setIsMobilePanelOpen: (open: boolean) => void;
   sidePanePercent: number;
@@ -20,8 +21,9 @@ interface WorkspaceSidePanelProps {
   onToggleStar: (id: string) => void;
   onReorder: (fromIndex: number, toIndex: number) => void;
   onSelectTab: (tabId: string) => void;
-  onCloseTab: (tabId: string) => void;
   onToggleDetach: () => void;
+  onFloatPanel: () => void;
+  onDockPanel: () => void;
   focusMainWindow: () => void;
 }
 
@@ -29,6 +31,7 @@ const WorkspaceSidePanel: React.FC<WorkspaceSidePanelProps> = ({
   isMobileLayout,
   isDesktopLayout,
   isPanelDetached,
+  isPanelFloated,
   isMobilePanelOpen,
   setIsMobilePanelOpen,
   sidePanePercent,
@@ -41,31 +44,36 @@ const WorkspaceSidePanel: React.FC<WorkspaceSidePanelProps> = ({
   onToggleStar,
   onReorder,
   onSelectTab,
-  onCloseTab,
   onToggleDetach,
+  onFloatPanel,
+  onDockPanel,
   focusMainWindow,
 }) => {
   const { tabs, activeTabId } = useAppSelector((state) => state.bible);
+  const isPanelFloating = isMobileLayout || isPanelFloated;
+  const isDockedDesktop = isDesktopLayout && !isPanelFloated;
 
   return (
     <aside
       id="workspace-side-panel"
       className={`workspace-pane workspace-side ${isMobilePanelOpen ? 'is-open' : ''}`}
-      style={isDesktopLayout ? { flexBasis: `${sidePanePercent}%` } : undefined}
+      style={isDockedDesktop ? { flexBasis: `${sidePanePercent}%` } : undefined}
     >
-      {isMobileLayout && (
+      {isPanelFloating && (
         <MobilePanelTabStrip
           tabs={tabs}
           activeTabId={activeTabId}
           isMobilePanelOpen={isMobilePanelOpen}
           onToggle={() => setIsMobilePanelOpen(!isMobilePanelOpen)}
+          showDockToggle={isDesktopLayout}
+          onDockPanel={onDockPanel}
         />
       )}
       <div className="workspace-scroll panel-scroll-with-tabs">
         <SidePanelContent
-          isMobileLayout={isMobileLayout}
           isDesktopLayout={isDesktopLayout}
           isPanelDetached={isPanelDetached}
+          isPanelFloating={isPanelFloating}
           isMobilePanelOpen={isMobilePanelOpen}
           setIsMobilePanelOpen={setIsMobilePanelOpen}
           goToReference={goToReference}
@@ -77,8 +85,8 @@ const WorkspaceSidePanel: React.FC<WorkspaceSidePanelProps> = ({
           onToggleStar={onToggleStar}
           onReorder={onReorder}
           onSelectTab={onSelectTab}
-          onCloseTab={onCloseTab}
           onToggleDetach={onToggleDetach}
+          onFloatPanel={onFloatPanel}
           focusMainWindow={focusMainWindow}
         />
       </div>
