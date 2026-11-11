@@ -248,6 +248,7 @@
   justify-content: center;
   padding: 0;
   flex: 0 0 auto;
+  z-index: 1;
 }
 
 .verse-grid-column-shift:hover,
@@ -264,6 +265,68 @@
 .verse-grid-column-shift-right {
   position: absolute;
   right: 0;
+}
+
+.verse-grid-shell.is-translation-swipe .verse-grid-rows,
+.verse-grid-shell.is-translation-swipe .verse-grid-column-headers-row,
+.verse-grid-shell.is-translation-swipe .verse-grid-row {
+  min-width: 0;
+}
+
+.verse-grid-shell.is-translation-swipe .verse-grid-rows,
+.verse-grid-shell.is-translation-swipe .verse-grid-column-headers-row,
+.verse-grid-shell.is-translation-swipe .verse-grid-row,
+.verse-grid-shell.is-translation-swipe .verse-grid-swipe-viewport,
+.verse-grid-shell.is-translation-swipe .verse-grid-swipe-track,
+.verse-grid-shell.is-translation-swipe .verse-text,
+.verse-grid-shell.is-translation-swipe .verse-grid-column-label {
+  touch-action: pan-y;
+}
+
+.verse-grid-shell[data-swipe-dragging='true'] {
+  user-select: none;
+}
+
+.verse-grid-swipe-viewport {
+  min-width: 0;
+  overflow: hidden;
+  grid-column: 2 / -1;
+  overscroll-behavior-x: contain;
+}
+
+.verse-grid-swipe-track {
+  display: flex;
+  align-items: flex-start;
+  width: max-content;
+  transform: translate3d(var(--verse-swipe-offset, 0px), 0, 0);
+  transition-property: transform;
+  transition-duration: var(--verse-swipe-duration, 0ms);
+  transition-timing-function: ease-out;
+  will-change: transform;
+}
+
+.verse-grid-column-headers-row .verse-grid-swipe-track {
+  align-items: center;
+}
+
+.verse-grid-shell.is-translation-swipe .verse-grid-swipe-track > .verse-text,
+.verse-grid-shell.is-translation-swipe .verse-grid-swipe-track > .verse-grid-column-label {
+  flex: 0 0 var(--verse-swipe-column-width, 100%);
+  width: var(--verse-swipe-column-width, 100%);
+  max-width: var(--verse-swipe-column-width, 100%);
+  box-sizing: border-box;
+}
+
+.verse-grid-shell.is-translation-swipe .verse-grid-swipe-track > .verse-text + .verse-text,
+.verse-grid-shell.is-translation-swipe .verse-grid-swipe-track > .verse-grid-column-label + .verse-grid-column-label {
+  box-shadow: -1px 0 0 color-mix(in srgb, var(--bs-border-color) 65%, transparent);
+}
+
+.verse-grid-shell.is-translation-swipe.is-sliding-left .verse-grid-column-label,
+.verse-grid-shell.is-translation-swipe.is-sliding-left .verse-text,
+.verse-grid-shell.is-translation-swipe.is-sliding-right .verse-grid-column-label,
+.verse-grid-shell.is-translation-swipe.is-sliding-right .verse-text {
+  animation: none;
 }
 
 .verse-grid-verse-label {
@@ -461,6 +524,12 @@
 
 .verse-text.is-mobile-anchor {
   border-color: color-mix(in srgb, var(--bs-primary) 62%, var(--bs-border-color));
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .verse-grid-shell.is-translation-swipe .verse-grid-swipe-track {
+    transition-duration: 0ms;
+  }
 }
 
 @media (max-width: 410px) {
