@@ -820,7 +820,12 @@ const VerseResourceDonut: React.FC<{
     : undefined;
 
   return (
-    <span className="verse-resource-donut-wrap" title={title} aria-label={title}>
+    <span
+      className="verse-resource-donut-wrap"
+      title={title}
+      aria-label={title}
+      data-help={tags.length > 0 ? 'verse-resource-donut' : undefined}
+    >
       <span
         className={`verse-resource-donut${tags.length === 0 ? ' is-empty' : ''}`}
         style={donutStyle}

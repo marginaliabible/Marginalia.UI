@@ -1,9 +1,20 @@
 import type {
   HelpManifest,
   HelpSearchIndex,
+  HelpTourBeforeAction,
   HelpTourDefinition,
   HelpTourStep,
 } from '../models/help';
+
+const SIMPLE_BEFORE_ACTIONS = new Set([
+  'openSettings',
+  'openTranslationsPanel',
+  'ensureTranslationsTab',
+  'openResourcesPanel',
+  'ensureResourcesTab',
+] as const satisfies ReadonlyArray<HelpTourBeforeAction['action']>);
+
+const PANEL_TAB_TYPES = new Set(['search', 'translations', 'resources', 'links', 'help'] as const);
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -11,6 +22,30 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 
 function readString(value: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+function parseBeforeAction(value: unknown): HelpTourBeforeAction | undefined {
+  if (!isPlainObject(value) || typeof value['action'] !== 'string') {
+    return undefined;
+  }
+
+  const action = value['action'];
+  if ((SIMPLE_BEFORE_ACTIONS as Set<string>).has(action)) {
+    return { action } as HelpTourBeforeAction;
+  }
+
+  if (
+    action === 'selectPanelTab'
+    && typeof value['tabType'] === 'string'
+    && (PANEL_TAB_TYPES as Set<string>).has(value['tabType'])
+  ) {
+    return {
+      action: 'selectPanelTab',
+      tabType: value['tabType'] as Extract<HelpTourBeforeAction, { action: 'selectPanelTab' }>['tabType'],
+    };
+  }
+
+  return undefined;
 }
 
 export function parseHelpManifest(payload: unknown): HelpManifest {
@@ -116,23 +151,9 @@ export function parseHelpTourDefinition(payload: unknown): HelpTourDefinition {
     if (placement) {
       step.placement = placement as HelpTourStep['placement'];
     }
-    const before = entry['before'];
-    if (isPlainObject(before) && typeof before['action'] === 'string') {
-      if (before['action'] === 'openSettings') {
-        step.before = { action: 'openSettings' };
-      } else if (before['action'] === 'openTranslationsPanel') {
-        step.before = { action: 'openTranslationsPanel' };
-      } else if (before['action'] === 'ensureTranslationsTab') {
-        step.before = { action: 'ensureTranslationsTab' };
-      } else if (
-        before['action'] === 'selectPanelTab'
-        && typeof before['tabType'] === 'string'
-      ) {
-        step.before = {
-          action: 'selectPanelTab',
-          tabType: before['tabType'] as 'search' | 'translations' | 'resources' | 'links' | 'help',
-        };
-      }
+    const before = parseBeforeAction(entry['before']);
+    if (before) {
+      step.before = before;
     }
     const advanceVisible = readString(entry['advanceVisible']);
     if (advanceVisible) {

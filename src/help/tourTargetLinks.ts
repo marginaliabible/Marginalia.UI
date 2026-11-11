@@ -13,7 +13,7 @@ export interface TourStepTargetMatch {
   stepIndex: number;
 }
 
-/** Parse `translations-selected` or `use-translations-panel.translations-selected`. */
+/** Parse `translations-selected` or `translations-panel.translations-selected`. */
 export function parseHelpTargetRef(spec: string): ParsedHelpTargetRef {
   const trimmed = spec.trim();
   const separator = trimmed.indexOf('.');

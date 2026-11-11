@@ -31,6 +31,15 @@ export const HELP_TOUR_TARGETS = {
   'translations-add-list': '[data-help="translations-add-list"]',
   'translations-unstar': '[data-help="translations-unstar"]',
   'translations-drag-handle': '[data-help="translations-drag-handle"]',
+  'verse-resource-donut': '[data-help="verse-resource-donut"]',
+  'resources-panel': '[data-help="resources-panel"]',
+  'resources-tab': '[data-help="panel-tab-resources"]',
+  'resources-reference': '[data-help="resources-reference"]',
+  'resources-match-toggle': '[data-help="resources-match-toggle"]',
+  'resources-tags': '[data-help="resources-tags"]',
+  'resources-document-list': '[data-help="resources-document-list"]',
+  'resources-document': '[data-help="resources-document"]',
+  'resources-page-link': '[data-help="resources-page-link"]',
 } as const;
 
 export type HelpTourTargetId = keyof typeof HELP_TOUR_TARGETS;

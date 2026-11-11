@@ -212,7 +212,7 @@ const ResourcesPanel: React.FC<ResourcesPanelProps> = ({ tab, isActive, onBefore
 
   if (!verseContext) {
     return (
-      <div className="card border-0 shadow-sm h-100">
+      <div className="card border-0 shadow-sm h-100" data-help="resources-panel">
         <div className="card-body d-flex flex-column justify-content-center align-items-center text-center">
           <p className="text-body-secondary mb-0">Click a verse to open resources</p>
         </div>
@@ -221,24 +221,27 @@ const ResourcesPanel: React.FC<ResourcesPanelProps> = ({ tab, isActive, onBefore
   }
 
   return (
-    <div className="card border-0 shadow-sm h-100 d-flex flex-column">
+    <div className="card border-0 shadow-sm h-100 d-flex flex-column" data-help="resources-panel">
       <div className="card-body d-flex flex-column gap-3 flex-grow-1 resources-panel-body">
         <div className="position-sticky top-0 z-3 bg-body border-bottom pb-3 resources-panel-sticky">
           <div className="d-flex align-items-start justify-content-between gap-2">
-            <VerseReferenceLabel
-              verseContext={verseContext}
-              className="small fw-semibold mb-1"
-              onClick={() => {
-                onBeforeNavigate?.();
-                revealInBible(verseContext);
-              }}
-            />
+            <div data-help="resources-reference">
+              <VerseReferenceLabel
+                verseContext={verseContext}
+                className="small fw-semibold mb-1"
+                onClick={() => {
+                  onBeforeNavigate?.();
+                  revealInBible(verseContext);
+                }}
+              />
+            </div>
             {selectedVerseNumbers.length > 1 && (
               <div
                 className="btn-group btn-group-sm resources-verse-match-toggle"
                 role="group"
                 aria-label="Show resources containing ALL these verses or ANY of these verses."
                 title="Show resources containing ALL these verses or ANY of these verses."
+                data-help="resources-match-toggle"
               >
                 <button
                   type="button"
@@ -282,7 +285,7 @@ const ResourcesPanel: React.FC<ResourcesPanelProps> = ({ tab, isActive, onBefore
           {!isLoading && !error && payload && (
             <>
               {payload.tags.length > 0 && (
-                <div className="d-flex flex-wrap gap-2 resources-panel-tags">
+                <div className="d-flex flex-wrap gap-2 resources-panel-tags" data-help="resources-tags">
                   {payload.tags.map((tag) => {
                     const isOn = !hiddenTags.has(tag);
                     const color = tagColors.get(tag) ?? '#6c757d';
@@ -317,8 +320,8 @@ const ResourcesPanel: React.FC<ResourcesPanelProps> = ({ tab, isActive, onBefore
                     : 'No resources matched this verse.'}
                 </p>
               ) : (
-                <div className="d-flex flex-column gap-2">
-                  {groupedDocuments.map((document) => {
+                <div className="d-flex flex-column gap-2" data-help="resources-document-list">
+                  {groupedDocuments.map((document, documentIndex) => {
                     const isSelected = pdfViewer.isOpen
                       && document.pageLinks.some((link) => link.url === pdfViewer.sourceUrl);
 
@@ -326,6 +329,7 @@ const ResourcesPanel: React.FC<ResourcesPanelProps> = ({ tab, isActive, onBefore
                     <div
                       key={document.documentId}
                       className={`resource-document border rounded p-2 ${isSelected ? 'is-selected' : ''}`}
+                      data-help={documentIndex === 0 ? 'resources-document' : undefined}
                     >
                       <div className="d-flex align-items-center justify-content-between gap-2 flex-wrap">
                         <div className="d-flex align-items-center flex-wrap gap-2 flex-grow-1">
@@ -362,6 +366,7 @@ const ResourcesPanel: React.FC<ResourcesPanelProps> = ({ tab, isActive, onBefore
                               <a
                                 className="resource-page-link btn btn-link btn-sm p-0 align-baseline"
                                 href={href}
+                                data-help={documentIndex === 0 && index === 0 ? 'resources-page-link' : undefined}
                                 onClick={(event) => handlePageLinkClick(event, href)}
                               >
                                 {link.page}

@@ -4,6 +4,9 @@ import { resolveHelpTourTarget } from '../help/tourTargets';
 import { helpTourEventType } from '../help/tourEvents';
 import { isElementVisible } from '../help/isElementVisible';
 import { scrollTourTargetIntoView } from '../help/scrollTourTargetIntoView';
+import { renderTourContent } from '../help/renderTourContent';
+import { HELP_OPEN_ARTICLE_EVENT } from '../help/openHelpArticle';
+import { ensureResourcesPanelTourReady } from '../help/resourcesPanelTourGates';
 import {
   clearTourResumeIndex,
   getTourResumeIndex,
@@ -13,13 +16,16 @@ import {
 } from '../help/tourProgress';
 import { HelpTourProvider, type StartTourOptions } from '../help/HelpTourContext';
 import { findTourStepForTarget } from '../help/tourTargetLinks';
+import { useSourcePreferences } from '../hooks/useSourcePreferences';
 import { useAppDispatch, useAppSelector } from '../store/hooks';
-import { openVerseTabs, setActiveTab } from '../store/slices/bibleSlice';
+import { openHelpTab, openVerseTabs, setActiveTab } from '../store/slices/bibleSlice';
+import type { QuickJumpTarget } from '../models/bible';
 import type { HelpTourBeforeAction, HelpTourStep } from '../models/help';
 import type { ButtonType, Controls, EventHandler, Placement, Step } from 'react-joyride';
 
 interface HelpTourRunnerProps {
   onOpenSettings: () => void | Promise<void>;
+  goToReference: (target: QuickJumpTarget, translationId?: string) => Promise<void>;
   children: React.ReactNode;
 }
 
@@ -33,13 +39,33 @@ interface ResumeBeaconState {
 
 const DEFAULT_TOUR_BUTTONS: ButtonType[] = ['back', 'close', 'primary'];
 const WAITING_TOUR_BUTTONS: ButtonType[] = ['back', 'close'];
+const BLOCKER_TOUR_BUTTONS: ButtonType[] = ['close'];
 
-const HelpTourRunner: React.FC<HelpTourRunnerProps> = ({ onOpenSettings, children }) => {
+/** When jumping past step 0, "ensure tab" befores should open the panel instead. */
+const ENSURE_TAB_OPEN_PANEL: Partial<Record<HelpTourBeforeAction['action'], HelpTourBeforeAction>> = {
+  ensureTranslationsTab: { action: 'openTranslationsPanel' },
+  ensureResourcesTab: { action: 'openResourcesPanel' },
+};
+
+function resolveBeforeActionForResume(
+  before: HelpTourBeforeAction,
+  resumeIndex: number
+): HelpTourBeforeAction {
+  if (resumeIndex <= 0) {
+    return before;
+  }
+  return ENSURE_TAB_OPEN_PANEL[before.action] ?? before;
+}
+
+const HelpTourRunner: React.FC<HelpTourRunnerProps> = ({ onOpenSettings, goToReference, children }) => {
   const dispatch = useAppDispatch();
   const tabs = useAppSelector((state) => state.bible.tabs);
+  const currentBible = useAppSelector((state) => state.bible.currentBible);
   const selectedBook = useAppSelector((state) => state.ui.selectedBook);
   const selectedChapter = useAppSelector((state) => state.ui.selectedChapter);
   const selectedVerses = useAppSelector((state) => state.ui.selectedVerses);
+  const sourceUrls = useAppSelector((state) => state.ui.sourceUrls);
+  const sourcePreferences = useSourcePreferences();
   const [joyrideModule, setJoyrideModule] = useState<JoyrideModule | null>(null);
   const [helpSteps, setHelpSteps] = useState<HelpTourStep[]>([]);
   const [run, setRun] = useState(false);
@@ -58,6 +84,14 @@ const HelpTourRunner: React.FC<HelpTourRunnerProps> = ({ onOpenSettings, childre
 
   helpStepsRef.current = helpSteps;
   resumeBeaconRef.current = resumeBeacon;
+
+  useEffect(() => {
+    const onOpenArticle = () => {
+      dispatch(openHelpTab());
+    };
+    window.addEventListener(HELP_OPEN_ARTICLE_EVENT, onOpenArticle);
+    return () => window.removeEventListener(HELP_OPEN_ARTICLE_EVENT, onOpenArticle);
+  }, [dispatch]);
 
   const ensureVerseContext = useCallback(() => {
     const book = selectedBook?.trim() || 'John';
@@ -112,6 +146,33 @@ const HelpTourRunner: React.FC<HelpTourRunnerProps> = ({ onOpenSettings, childre
       }
       return;
     }
+    if (action.action === 'openResourcesPanel') {
+      const context = ensureVerseContext();
+      dispatch(openVerseTabs({
+        ...context,
+        hasResources: true,
+        preferPanel: 'resources',
+      }));
+      await new Promise((resolve) => window.setTimeout(resolve, 350));
+      return;
+    }
+    if (action.action === 'ensureResourcesTab') {
+      const helpTab = tabs.find((tab) => tab.type === 'help');
+      const hasResourcesTab = tabs.some((tab) => tab.type === 'resources');
+      if (!hasResourcesTab) {
+        const context = ensureVerseContext();
+        dispatch(openVerseTabs({
+          ...context,
+          hasResources: true,
+          preferPanel: 'resources',
+        }));
+        if (helpTab) {
+          dispatch(setActiveTab({ tabId: helpTab.id }));
+        }
+        await new Promise((resolve) => window.setTimeout(resolve, 200));
+      }
+      return;
+    }
     if (action.action === 'selectPanelTab') {
       const tab = tabs.find((entry) => entry.type === action.tabType);
       if (tab) {
@@ -138,28 +199,56 @@ const HelpTourRunner: React.FC<HelpTourRunnerProps> = ({ onOpenSettings, childre
         || targetId === 'search-nt'
       ) {
         await runBeforeAction({ action: 'selectPanelTab', tabType: 'search' });
+      } else if (
+        targetId === 'resources-panel'
+        || targetId.startsWith('resources-')
+      ) {
+        await runBeforeAction({ action: 'openResourcesPanel' });
       }
     }
     scrollTourTargetIntoView(targetId);
   }, [runBeforeAction]);
 
+  const stopTour = useCallback(() => {
+    setRun(false);
+    setHelpSteps([]);
+    setPrimaryEnabled(true);
+    activeTourIdRef.current = null;
+    controlsRef.current = null;
+    satisfiedAdvanceVisibleRef.current = new Set();
+  }, []);
+
+  const endTourForArticleLink = useCallback(() => {
+    const tourId = activeTourIdRef.current;
+    if (tourId) {
+      clearTourResumeIndex(tourId);
+    }
+    setResumeBeacon(null);
+    stopTour();
+  }, [stopTour]);
+
   const toJoyrideSteps = useCallback((tourSteps: HelpTourStep[], activeIndex: number, allowPrimary: boolean): Step[] => (
     tourSteps.map((step, index) => {
       const hasAdvanceGate = Boolean(step.advanceVisible || step.advanceEvent);
       const waitingOnVisibility = hasAdvanceGate && index === activeIndex && !allowPrimary;
+      const isBlockerStep = step.target === 'body' && step.placement === 'center';
       return {
         target: resolveHelpTourTarget(step.target),
         ...(step.spotlightTarget
           ? { spotlightTarget: resolveHelpTourTarget(step.spotlightTarget) }
           : {}),
         title: step.title,
-        content: step.content,
+        content: renderTourContent(step.content, { onArticleLinkClick: endTourForArticleLink }),
         placement: (step.placement ?? 'auto') as Placement,
         skipBeacon: true,
-        buttons: waitingOnVisibility ? WAITING_TOUR_BUTTONS : DEFAULT_TOUR_BUTTONS,
+        buttons: isBlockerStep
+          ? BLOCKER_TOUR_BUTTONS
+          : waitingOnVisibility
+            ? WAITING_TOUR_BUTTONS
+            : DEFAULT_TOUR_BUTTONS,
       };
     })
-  ), []);
+  ), [endTourForArticleLink]);
 
   const tourSteps = useMemo(
     () => toJoyrideSteps(helpSteps, stepIndex, primaryEnabled),
@@ -195,7 +284,7 @@ const HelpTourRunner: React.FC<HelpTourRunnerProps> = ({ onOpenSettings, childre
       return;
     }
     const step = helpSteps[stepIndex];
-    if (!step) {
+    if (!step || step.target === 'body') {
       return;
     }
     scrollTourTargetIntoView(step.target);
@@ -283,15 +372,6 @@ const HelpTourRunner: React.FC<HelpTourRunnerProps> = ({ onOpenSettings, childre
     };
   }, [resumeBeacon, run, tourInstanceKey]);
 
-  const stopTour = useCallback(() => {
-    setRun(false);
-    setHelpSteps([]);
-    setPrimaryEnabled(true);
-    activeTourIdRef.current = null;
-    controlsRef.current = null;
-    satisfiedAdvanceVisibleRef.current = new Set();
-  }, []);
-
   const placeResumeBeacon = useCallback((tourId: string, resumeIndex: number, steps: HelpTourStep[]) => {
     if (!shouldShowResumeBeacon(resumeIndex, steps.length)) {
       setResumeBeacon(null);
@@ -316,6 +396,35 @@ const HelpTourRunner: React.FC<HelpTourRunnerProps> = ({ onOpenSettings, childre
       setResumeBeacon(null);
 
       const definition = await helpContentService.getTour(tourId);
+
+      if (tourId === 'resources-panel') {
+        const gate = await ensureResourcesPanelTourReady({
+          selectedBook,
+          selectedChapter,
+          availableBooks: currentBible?.books ?? [],
+          sourceUrls,
+          preferences: sourcePreferences,
+          goToReference,
+        });
+        if (gate.status === 'blocked') {
+          activeTourIdRef.current = tourId;
+          currentStepIndexRef.current = 0;
+          satisfiedAdvanceVisibleRef.current = new Set();
+          setInitialStepIndex(0);
+          setStepIndex(0);
+          setPrimaryEnabled(true);
+          setHelpSteps([{
+            target: 'body',
+            title: 'Resources panel',
+            content: gate.message,
+            placement: 'center',
+          }]);
+          setTourInstanceKey((value) => value + 1);
+          setRun(true);
+          return;
+        }
+      }
+
       const resumeIndex = typeof options?.stepIndex === 'number'
         ? Math.max(0, Math.min(options.stepIndex, definition.steps.length - 1))
         : getTourResumeIndex(tourId, definition.steps.length);
@@ -331,15 +440,7 @@ const HelpTourRunner: React.FC<HelpTourRunnerProps> = ({ onOpenSettings, childre
           continue;
         }
         seenBefores.add(key);
-        // Jumping past a gate: open the panel instead of only ensuring the tab exists.
-        if (
-          resumeIndex > 0
-          && step.before.action === 'ensureTranslationsTab'
-        ) {
-          await runBeforeAction({ action: 'openTranslationsPanel' });
-          continue;
-        }
-        await runBeforeAction(step.before);
+        await runBeforeAction(resolveBeforeActionForResume(step.before, resumeIndex));
       }
 
       // Steps already passed before resume/jump shouldn't auto-advance again on Back.
@@ -379,7 +480,17 @@ const HelpTourRunner: React.FC<HelpTourRunnerProps> = ({ onOpenSettings, childre
         tourError
       );
     }
-  }, [ensureTargetVisible, joyrideModule, runBeforeAction]);
+  }, [
+    currentBible?.books,
+    ensureTargetVisible,
+    goToReference,
+    joyrideModule,
+    runBeforeAction,
+    selectedBook,
+    selectedChapter,
+    sourcePreferences,
+    sourceUrls,
+  ]);
 
   const startTourAtTarget = useCallback(async (targetSpec: string) => {
     try {

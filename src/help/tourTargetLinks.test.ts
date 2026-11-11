@@ -17,8 +17,8 @@ describe('tourTargetLinks', () => {
     expect(parseHelpTargetRef('translations-selected')).toEqual({
       targetId: 'translations-selected',
     });
-    expect(parseHelpTargetRef('use-translations-panel.translations-selected')).toEqual({
-      tourId: 'use-translations-panel',
+    expect(parseHelpTargetRef('translations-panel.translations-selected')).toEqual({
+      tourId: 'translations-panel',
       targetId: 'translations-selected',
     });
   });
@@ -27,7 +27,7 @@ describe('tourTargetLinks', () => {
     (helpContentService.getManifest as jest.Mock).mockResolvedValue({
       tours: [
         { id: 'open-settings', path: 'tours/open-settings.json' },
-        { id: 'use-translations-panel', path: 'tours/use-translations-panel.json' },
+        { id: 'translations-panel', path: 'tours/translations-panel.json' },
       ],
     });
     (helpContentService.getTour as jest.Mock).mockImplementation(async (tourId: string) => {
@@ -38,7 +38,7 @@ describe('tourTargetLinks', () => {
         };
       }
       return {
-        id: 'use-translations-panel',
+        id: 'translations-panel',
         steps: [
           { target: 'translations-panel', content: 'Tab' },
           { target: 'translations-selected', content: 'Cards' },
@@ -47,7 +47,7 @@ describe('tourTargetLinks', () => {
     });
 
     await expect(findTourStepForTarget('translations-selected')).resolves.toEqual({
-      tourId: 'use-translations-panel',
+      tourId: 'translations-panel',
       stepIndex: 1,
     });
   });
@@ -55,11 +55,11 @@ describe('tourTargetLinks', () => {
   it('respects an explicit tour id prefix', async () => {
     (helpContentService.getManifest as jest.Mock).mockResolvedValue({
       tours: [
-        { id: 'use-translations-panel', path: 'tours/use-translations-panel.json' },
+        { id: 'translations-panel', path: 'tours/translations-panel.json' },
       ],
     });
     (helpContentService.getTour as jest.Mock).mockResolvedValue({
-      id: 'use-translations-panel',
+      id: 'translations-panel',
       steps: [
         { target: 'translations-panel', content: 'Tab' },
         { target: 'translations-selected', content: 'Cards' },
@@ -72,9 +72,9 @@ describe('tourTargetLinks', () => {
     });
 
     await expect(
-      findTourStepForTarget('use-translations-panel.translations-selected')
+      findTourStepForTarget('translations-panel.translations-selected')
     ).resolves.toEqual({
-      tourId: 'use-translations-panel',
+      tourId: 'translations-panel',
       stepIndex: 1,
     });
   });

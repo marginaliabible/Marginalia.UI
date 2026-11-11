@@ -1,10 +1,11 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { SubscriptionsBinding } from '../models/subscription';
 import CloudFolderPicker, {
   type CloudFolderPickerHandle,
   type FolderSelectionTarget,
 } from './CloudFolderPicker';
 import type { FederatedProvider, FederatedSession } from '../models/bible';
+import { setLinkedCloudProviders } from '../help/linkedCloudProviders';
 import './AccountControl.scss';
 
 interface AccountControlProps {
@@ -30,6 +31,10 @@ const AccountControl: React.FC<AccountControlProps> = ({ subscriptions }) => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const folderPickerRef = useRef<CloudFolderPickerHandle | null>(null);
+
+  useEffect(() => {
+    setLinkedCloudProviders(EMPTY_PROVIDER_FLAGS);
+  }, []);
 
   const handleApply = useCallback(async () => ({
     queuedProviders: [] as FederatedProvider[],

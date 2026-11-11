@@ -487,6 +487,14 @@ class BibleService {
     return this.resourceLibraryService.listResourceLibraryDocuments(sourceUrls);
   }
 
+  async findFirstReferenceWithResources(
+    availableBooks: string[],
+    sourceUrls: string[] = [],
+    preferences?: SourcePreferences
+  ): Promise<{ book: string; chapter: number; verse: number } | null> {
+    return this.resourceLibraryService.findFirstReferenceWithResources(availableBooks, sourceUrls, preferences);
+  }
+
   async findDocumentByLink(
     link: ResourceDocumentLinkKey & { page: number },
     sourceUrls: string[] = []

@@ -34,6 +34,8 @@ export type HelpTourBeforeAction =
   | { action: 'openSettings' }
   | { action: 'openTranslationsPanel' }
   | { action: 'ensureTranslationsTab' }
+  | { action: 'openResourcesPanel' }
+  | { action: 'ensureResourcesTab' }
   | { action: 'selectPanelTab'; tabType: 'search' | 'translations' | 'resources' | 'links' | 'help' };
 
 export interface HelpTourStep {

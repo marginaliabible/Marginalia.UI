@@ -1,6 +1,11 @@
 import type { DBSchema, IDBPDatabase } from 'idb';
 import type { BibleTranslationMeta, FederatedProvider } from '../models/bible';
-import { BOOK_ALIAS_CONFIG, normalizeBookName } from '../utils/book-aliases';
+import {
+  BOOK_ALIAS_CONFIG,
+  compareBibleReferences,
+  getCanonicalBookName,
+  normalizeBookName,
+} from '../utils/book-aliases';
 import {
   DEFAULT_DOCUMENT_STORE_ADDRESS,
   buildDocumentStorePageUrl,
@@ -234,6 +239,67 @@ export class ResourceLibraryService {
       // documentsById also indexes each entry under its content hash.
       documents: Array.from(new Set(library.documentsById.values())).sort((a, b) => a.title.localeCompare(b.title)),
     }));
+  }
+
+  /**
+   * First scripture reference (Bible order) that has at least one resource after preferences.
+   * `availableBooks` should be the caller's translation book names in display order.
+   */
+  async findFirstReferenceWithResources(
+    availableBooks: string[],
+    sourceUrls: string[] = [],
+    preferences?: SourcePreferences
+  ): Promise<{ book: string; chapter: number; verse: number } | null> {
+    if (availableBooks.length === 0) {
+      return null;
+    }
+
+    const libraries = await this.loadResourceLibraries(sourceUrls);
+    const candidates: Array<{ book: string; chapter: number; verse: number }> = [];
+    const seen = new Set<string>();
+
+    for (const library of libraries) {
+      for (const shard of library.resources) {
+        const entries = await this.readResourceShard(library, shard.file);
+        for (const entry of entries) {
+          if (entry.occurrences.length === 0) {
+            continue;
+          }
+          const parsed = parseReferenceRef(entry.ref);
+          if (!parsed) {
+            continue;
+          }
+          const book = resolveAvailableBookName(parsed.bookToken, availableBooks);
+          if (!book) {
+            continue;
+          }
+          const key = `${book}.${parsed.chapter}.${parsed.verse}`;
+          if (seen.has(key)) {
+            continue;
+          }
+          seen.add(key);
+          candidates.push({ book, chapter: parsed.chapter, verse: parsed.verse });
+        }
+      }
+    }
+
+    candidates.sort(compareBibleReferences);
+
+    for (const candidate of candidates) {
+      const payload = await this.getResourcesForVerse(
+        candidate.book,
+        candidate.chapter,
+        candidate.verse,
+        sourceUrls,
+        preferences
+      );
+      // Match VerseDisplay donuts: only verses with tags count.
+      if (payload.tags.length > 0) {
+        return candidate;
+      }
+    }
+
+    return null;
   }
 
   /** Finds a shared page link's document among the caller's own libraries; null when they don't have it. */
@@ -752,6 +818,23 @@ function findBestManifestShard(
   }
 
   return undefined;
+}
+
+function resolveAvailableBookName(bookToken: string, availableBooks: string[]): string | null {
+  const canonical = getCanonicalBookName(bookToken)
+    ?? getCanonicalBookName(normalizeReferenceBookToken(bookToken))
+    ?? null;
+  if (!canonical) {
+    return null;
+  }
+
+  for (const book of availableBooks) {
+    if (getCanonicalBookName(book) === canonical || book === canonical) {
+      return book;
+    }
+  }
+
+  return null;
 }
 
 function parseReferenceRef(ref: string): { bookToken: string; chapter: number; verse: number } | null {

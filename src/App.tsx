@@ -987,7 +987,7 @@ function App() {
 
   if (isPanelWindow) {
     return (
-      <HelpTourRunner onOpenSettings={openSettingsModal}>
+      <HelpTourRunner onOpenSettings={openSettingsModal} goToReference={goToReference}>
         <PanelWindowShell sidePanelContentProps={panelWindowContentProps} isDocked={isPanelWindowDocked} />
         <ToastPanel />
       </HelpTourRunner>
@@ -995,7 +995,7 @@ function App() {
   }
 
   return (
-    <HelpTourRunner onOpenSettings={openSettingsModal}>
+    <HelpTourRunner onOpenSettings={openSettingsModal} goToReference={goToReference}>
       <div className={`container app-shell ${useWideLayout ? 'app-shell-wide' : ''}`}>
         {!isDocumentWindow && (
           <>

@@ -9,6 +9,11 @@ import { helpSearchService, type HelpSearchHit } from '../services/helpSearchSer
 import { getAppVersion } from '../services/appBuildIdentity';
 import { subscribeHelpContentHotReload } from '../help/helpContentHotReload';
 import { useHelpTour } from '../help/HelpTourContext';
+import {
+  HELP_OPEN_ARTICLE_EVENT,
+  consumePendingHelpArticleId,
+  readHelpOpenArticleId,
+} from '../help/openHelpArticle';
 import './HelpPanel.scss';
 
 interface HelpPanelProps {
@@ -180,6 +185,28 @@ const HelpPanel: React.FC<HelpPanelProps> = ({ isActive }) => {
     setPendingHeadingSlug(headingSlug ?? null);
     setQuery('');
   }, []);
+
+  useEffect(() => {
+    const applyArticle = (articleId: string) => {
+      consumePendingHelpArticleId();
+      openArticle(articleId);
+    };
+
+    const onOpenArticle = (event: Event) => {
+      const articleId = readHelpOpenArticleId(event);
+      if (articleId) {
+        applyArticle(articleId);
+      }
+    };
+
+    window.addEventListener(HELP_OPEN_ARTICLE_EVENT, onOpenArticle);
+    const pending = consumePendingHelpArticleId();
+    if (pending) {
+      openArticle(pending);
+    }
+
+    return () => window.removeEventListener(HELP_OPEN_ARTICLE_EVENT, onOpenArticle);
+  }, [openArticle]);
 
   const goBack = useCallback(() => {
     setArticleHistory((history) => {
