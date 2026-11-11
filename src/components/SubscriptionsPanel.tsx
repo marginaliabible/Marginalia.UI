@@ -105,7 +105,7 @@ const SubscriptionsPanel: React.FC<SubscriptionsPanelProps> = ({ binding, stagin
           setFlashKey(targetKey);
           window.setTimeout(() => {
             setFlashKey((current) => (current === targetKey ? null : current));
-          }, 3000);
+          }, 7000);
         }
       }, 30);
     },

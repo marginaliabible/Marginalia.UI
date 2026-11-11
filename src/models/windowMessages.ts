@@ -1,5 +1,6 @@
 import type { QuickJumpTarget, ThemePreference } from './bible';
 import type { PanelTab, VerseContext } from './tab';
+import type { DocumentSubscriptionItem } from './accountSync';
 import type { DocumentSyncItem, TranslationRecord } from '../store/slices/uiSlice';
 import type { ResourceTagOverrides } from '../utils/sourceSubscriptions';
 
@@ -42,6 +43,7 @@ export interface OpenDocumentPayload {
   matchRaws?: string[];
   kind?: 'pdf' | 'markup';
   syncItem?: DocumentSyncItem | null;
+  subscriptionItem?: DocumentSubscriptionItem | null;
   shared?: boolean;
 }
 

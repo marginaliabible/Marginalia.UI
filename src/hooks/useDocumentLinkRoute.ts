@@ -10,6 +10,7 @@ import {
   type SharedDocumentLookup,
 } from '../services/sharedDocumentService';
 import { buildMarkupDocumentShellUrl } from '../utils/resourceLibraryConfig';
+import { subscriptionItemFromResource } from '../utils/accountSyncTarget';
 import { routeInteraction } from '../services/windowRouting';
 import type { OpenDocumentPayload } from '../models/windowMessages';
 import {
@@ -158,6 +159,11 @@ export const useDocumentLinkRoute = ({ ready }: UseDocumentLinkRouteOptions): vo
         title: resolved.title,
         kind: resolved.viewer,
         syncItem: resolved.cloudProvider ? { provider: resolved.cloudProvider, itemId: resolved.documentId } : null,
+        subscriptionItem: subscriptionItemFromResource({
+          cloudProvider: resolved.cloudProvider,
+          libraryKey: resolved.libraryKey,
+          resourceKey: resolved.resourceKey,
+        }),
       };
     } else {
       // Not in the user's libraries: a content-hash link opens the rendered package straight from storage.
@@ -182,6 +188,7 @@ export const useDocumentLinkRoute = ({ ready }: UseDocumentLinkRouteOptions): vo
         title: lookup.title,
         kind: 'markup',
         syncItem: null,
+        subscriptionItem: null,
         shared: true,
       };
     }

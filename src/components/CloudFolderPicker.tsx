@@ -19,6 +19,7 @@ import { findStarredTranslationBlock, useSubscriptionStaging } from '../hooks/us
 import { showToast } from '../services/toastService';
 import { formatAccountSyncApplyToast, type FolderApplyResult } from '../utils/syncToastMessages';
 import { describeSyncFailure } from '../utils/syncFailureMessages';
+import type { AccountSyncRevealRequest } from '../models/accountSync';
 
 const ROOT_LABEL: Record<FederatedProvider, string> = {
   google: 'Google Drive',
@@ -142,6 +143,8 @@ interface CloudFolderPickerProps {
   providerSyncFilesEnabled: Record<FederatedProvider, boolean>;
   linkedProviders: Record<FederatedProvider, boolean>;
   focusRequest: { provider: FederatedProvider; requestId: number } | null;
+  /** Open File Sync to a cloud file or Subscriptions document and highlight it. */
+  revealRequest?: AccountSyncRevealRequest | null;
   onSelectionsChange: (next: Record<FederatedProvider, FolderSelectionTarget[]>) => Promise<FolderApplyResult>;
   onConnectRequested: (provider: FederatedProvider) => void;
   onDirtyChange?: (isDirty: boolean) => void;
@@ -748,6 +751,7 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
   providerSyncFilesEnabled,
   linkedProviders,
   focusRequest,
+  revealRequest = null,
   onSelectionsChange,
   onConnectRequested,
   onDirtyChange,
@@ -781,6 +785,8 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
     hasAnyFolderSelection(initialSelections) ? 'files' : 'providers'
   ));
   const [highlightNodeKey, setHighlightNodeKey] = useState<string | null>(null);
+  const [highlightSelectedKey, setHighlightSelectedKey] = useState<string | null>(null);
+  const [isRevealingLocation, setIsRevealingLocation] = useState(false);
   const [highlightServiceProvider, setHighlightServiceProvider] = useState<FederatedProvider | null>(null);
   const [rightExpandedKeyByParent, setRightExpandedKeyByParent] = useState<Record<string, string | null>>({});
   const tagColors = useResourceTagColors();
@@ -1351,12 +1357,19 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
       return;
     }
     if (!subscriptionLibraries.some((library) => library.key === pendingSubscriptionReveal.libraryKey)) {
+      if (subscriptions && !subscriptions.isCatalogLoading) {
+        showToast({
+          tone: 'error',
+          message: 'Unable to locate that document in Subscriptions.',
+        });
+        setPendingSubscriptionReveal(null);
+      }
       return;
     }
 
     subscriptionsPanelRef.current?.reveal(pendingSubscriptionReveal);
     setPendingSubscriptionReveal(null);
-  }, [pendingSubscriptionReveal, subscriptionLibraries]);
+  }, [pendingSubscriptionReveal, subscriptionLibraries, subscriptions]);
 
   const handleApply = useCallback(() => {
     const shouldApplyFiles = areFilesDirty || !areSubscriptionsDirty;
@@ -1519,7 +1532,7 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
         setHighlightNodeKey(resolvedKey);
         window.setTimeout(() => {
           setHighlightNodeKey((current) => current === resolvedKey ? null : current);
-        }, 3000);
+        }, 7000);
       }, 30);
     };
 
@@ -1620,6 +1633,282 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
 
     revealNode(currentKey);
   }, [loadChildren, rootKeys, updateNodes]);
+
+  const flashSelectedRow = useCallback(async (rowKey: string, isCancelled?: () => boolean) => {
+    const deadline = Date.now() + 5_000;
+    while (Date.now() < deadline) {
+      if (isCancelled?.()) {
+        return;
+      }
+      const row = selectedRowRefs.current[rowKey];
+      if (row) {
+        row.scrollIntoView({ block: 'center', behavior: 'smooth' });
+        setHighlightSelectedKey(rowKey);
+        window.setTimeout(() => {
+          setHighlightSelectedKey((current) => (current === rowKey ? null : current));
+        }, 7000);
+        return;
+      }
+      await new Promise<void>((resolve) => {
+        window.setTimeout(resolve, 50);
+      });
+    }
+  }, []);
+
+  const expandRightAncestors = useCallback((rootSelectionKey: string, ancestorKeys: string[]) => {
+    setRightExpandedKeyByParent((current) => {
+      const next: Record<string, string | null> = {
+        ...current,
+        [RIGHT_PANEL_TOP_LEVEL_GROUP]: rootSelectionKey,
+      };
+      for (let index = 1; index < ancestorKeys.length; index += 1) {
+        next[ancestorKeys[index - 1]] = ancestorKeys[index];
+      }
+      return next;
+    });
+  }, []);
+
+  const waitForChildrenLoaded = useCallback(async (nodeKey: string): Promise<FolderTreeNode[]> => {
+    const deadline = Date.now() + 12_000;
+
+    while (Date.now() < deadline) {
+      const node = nodesRef.current[nodeKey];
+      if (!node) {
+        return [];
+      }
+
+      if (!node.childrenLoaded && !node.isLoading) {
+        await loadChildren(nodeKey);
+      }
+
+      if (node.isLoading) {
+        const inFlight = inFlightLoadsRef.current[nodeKey];
+        if (inFlight) {
+          await inFlight;
+        } else {
+          await new Promise<void>((resolve) => {
+            window.setTimeout(resolve, 25);
+          });
+        }
+      }
+
+      const refreshed = nodesRef.current[nodeKey];
+      if (refreshed?.childrenLoaded && !refreshed.isLoading) {
+        return refreshed.childKeys
+          .map((childKey) => nodesRef.current[childKey])
+          .filter((entry): entry is FolderTreeNode => Boolean(entry));
+      }
+
+      await new Promise<void>((resolve) => {
+        window.setTimeout(resolve, 25);
+      });
+    }
+
+    const fallbackNode = nodesRef.current[nodeKey];
+    return (fallbackNode?.childKeys || [])
+      .map((childKey) => nodesRef.current[childKey])
+      .filter((entry): entry is FolderTreeNode => Boolean(entry));
+  }, [loadChildren]);
+
+  const selectedRowsRef = useRef(selectedRows);
+  selectedRowsRef.current = selectedRows;
+  const folderContentsByRootRef = useRef(folderContentsByRoot);
+  folderContentsByRootRef.current = folderContentsByRoot;
+
+  const revealCloudItem = useCallback(async (
+    provider: FederatedProvider,
+    itemId: string,
+    isCancelled?: () => boolean
+  ): Promise<boolean> => {
+    setMobilePane('files');
+    setErrorMessage(null);
+
+    const itemKey = makeNodeKey(provider, itemId);
+    const providerRoots = selectedRowsRef.current.filter((row) => row.provider === provider);
+    if (providerRoots.length === 0) {
+      setErrorMessage(`No ${ROOT_LABEL[provider]} folders are selected in File Sync.`);
+      showToast({
+        tone: 'error',
+        message: `Couldn't locate that document: no ${ROOT_LABEL[provider]} folders are selected in File Sync.`,
+      });
+      return false;
+    }
+
+    const directRoot = providerRoots.find((row) => row.id === itemId) ?? null;
+    if (directRoot) {
+      expandRightAncestors(directRoot.key, [directRoot.key]);
+      await flashSelectedRow(directRoot.key, isCancelled);
+      if (isCancelled?.()) {
+        return false;
+      }
+      await revealPath(directRoot);
+      return true;
+    }
+
+    const session = sessions[provider];
+    if (!session || !cloudSync) {
+      setErrorMessage('That cloud provider is not currently connected.');
+      showToast({
+        tone: 'error',
+        message: `Couldn't locate that document: ${ROOT_LABEL[provider]} is not connected.`,
+      });
+      return false;
+    }
+
+    for (const root of providerRoots) {
+      if (isCancelled?.()) {
+        return false;
+      }
+
+      const rootNode = nodesRef.current[root.key];
+      if (!rootNode || rootNode.kind !== 'folder') {
+        continue;
+      }
+
+      // Prefer the size-walk inventory when we already have it; otherwise BFS the live folder tree.
+      let ancestorKeys: string[] | null = null;
+      const cached = folderContentsByRootRef.current[root.key]?.find((file) => file.id === itemId);
+      if (cached && cached.ancestorIds[0] === root.id) {
+        ancestorKeys = cached.ancestorIds.map((id) => makeNodeKey(provider, id));
+      } else {
+        try {
+          const contents = await cloudSync.listSupportedFolderContentsForSession(
+            session,
+            root.id,
+            root.driveId
+          );
+          if (isCancelled?.()) {
+            return false;
+          }
+          const match = contents.files.find((file) => file.id === itemId);
+          if (match && match.ancestorIds[0] === root.id) {
+            ancestorKeys = match.ancestorIds.map((id) => makeNodeKey(provider, id));
+            setFolderContentsByRoot((current) => ({ ...current, [root.key]: contents.files }));
+          }
+        } catch {
+          // Fall through to a live tree walk.
+        }
+      }
+
+      if (!ancestorKeys) {
+        const parentOf = new Map<string, string | null>([[root.key, null]]);
+        const queue = [root.key];
+        while (queue.length > 0) {
+          if (isCancelled?.()) {
+            return false;
+          }
+          const currentKey = queue.shift()!;
+          const children = await waitForChildrenLoaded(currentKey);
+          for (const child of children) {
+            parentOf.set(child.key, currentKey);
+            if (child.id === itemId) {
+              const chain: string[] = [];
+              let cursor: string | null = currentKey;
+              while (cursor) {
+                chain.unshift(cursor);
+                cursor = parentOf.get(cursor) ?? null;
+              }
+              ancestorKeys = chain;
+              break;
+            }
+            if (child.kind === 'folder') {
+              queue.push(child.key);
+            }
+          }
+          if (ancestorKeys) {
+            break;
+          }
+        }
+      }
+
+      if (!ancestorKeys || ancestorKeys.length === 0) {
+        continue;
+      }
+
+      expandRightAncestors(root.key, ancestorKeys);
+
+      for (const ancestorKey of ancestorKeys) {
+        if (isCancelled?.()) {
+          return false;
+        }
+        await waitForChildrenLoaded(ancestorKey);
+      }
+
+      if (!nodesRef.current[itemKey]) {
+        continue;
+      }
+
+      await flashSelectedRow(itemKey, isCancelled);
+      if (isCancelled?.()) {
+        return false;
+      }
+
+      const parentFolder = nodesRef.current[ancestorKeys[ancestorKeys.length - 1]];
+      if (parentFolder) {
+        await revealPath({
+          key: parentFolder.key,
+          provider,
+          path: parentFolder.path,
+        });
+      } else {
+        await revealPath(root);
+      }
+      return true;
+    }
+
+    setErrorMessage('Unable to locate that document in your current File Sync selections.');
+    showToast({
+      tone: 'error',
+      message: 'Unable to locate that document in your current File Sync selections.',
+    });
+    return false;
+  }, [
+    cloudSync,
+    expandRightAncestors,
+    flashSelectedRow,
+    revealPath,
+    sessions,
+    waitForChildrenLoaded,
+  ]);
+
+  useEffect(() => {
+    if (!revealRequest || loadingRoots || !hasBootstrappedSelectionsRef.current) {
+      return;
+    }
+
+    let cancelled = false;
+    const isCancelled = () => cancelled;
+
+    if (revealRequest.target.kind === 'subscription') {
+      setMobilePane('files');
+      setIsSubscriptionsExpanded(true);
+      setPendingSubscriptionReveal({
+        libraryKey: revealRequest.target.libraryKey,
+        type: revealRequest.target.type,
+        documentKey: revealRequest.target.documentKey,
+        flash: true,
+      });
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    setIsRevealingLocation(true);
+    void revealCloudItem(
+      revealRequest.target.provider,
+      revealRequest.target.itemId,
+      isCancelled
+    ).finally(() => {
+      if (!cancelled) {
+        setIsRevealingLocation(false);
+      }
+    });
+
+    return () => {
+      cancelled = true;
+      setIsRevealingLocation(false);
+    };
+  }, [loadingRoots, revealCloudItem, revealRequest]);
 
   const toggleRightExpanded = useCallback((groupKey: string, childKey: string) => {
     setRightExpandedKeyByParent((current) => {
@@ -1871,8 +2160,26 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
     .filter((provider) => reconnectPending?.[provider])
     .map((provider) => ({ provider, folderCount: initialSelections[provider].length }));
 
+  const showRevealOverlay = Boolean(
+    revealRequest
+    && revealRequest.target.kind === 'cloud'
+    && (loadingRoots || isRevealingLocation)
+  );
+
   return (
     <section className="cloud-folder-picker" aria-label="File Sync">
+      {showRevealOverlay && (
+        <div
+          className="cloud-folder-reveal-overlay"
+          role="status"
+          aria-live="polite"
+          aria-label="Locating document in Account Sync"
+        >
+          <div className="spinner-border text-secondary" role="presentation"></div>
+          <span className="small text-body-secondary">Locating document…</span>
+        </div>
+      )}
+
       {reconnectNotices.map(({ provider, folderCount }) => (
         <div key={provider} className="alert alert-info mb-0 cloud-folder-reconnect-notice" role="status">
           Restored {folderCount} {folderCount === 1 ? 'folder' : 'folders'} from your previous {ROOT_LABEL[provider]} connection.
@@ -2182,7 +2489,7 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
                       ref={(entry) => {
                         selectedRowRefs.current[visibleRow.key] = entry;
                       }}
-                      className={`cloud-folder-selected-row${canActivateName ? ' is-clickable' : ''}`}
+                      className={`cloud-folder-selected-row${canActivateName ? ' is-clickable' : ''}${highlightSelectedKey === visibleRow.key ? ' is-highlighted' : ''}`}
                       style={{ paddingLeft: `${visibleRow.depth * 0.55}rem` }}
                       onClick={canActivateName ? handleNameActivate : undefined}
                     >

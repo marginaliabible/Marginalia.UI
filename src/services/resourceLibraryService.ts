@@ -118,6 +118,10 @@ export interface ResolvedResourceDocumentLink {
   viewer: DocumentViewerKind;
   /** Document store URL for the requested page. */
   url: string;
+  /** Subscription library key when this document is managed under File Sync > Subscriptions. */
+  libraryKey?: string;
+  /** Stable key for per-document subscription preferences (see resourceDocumentKey). */
+  resourceKey?: string;
 }
 
 export interface ResourceLibraryDocumentList {
@@ -327,6 +331,8 @@ export class ResourceLibraryService {
         cloudProvider: readCloudSyncProviderFromResourcesUrl(library.resourcesUrl),
         viewer: library.documentViewer === 'markup' ? 'markup' : 'pdf',
         url: buildDocumentStorePageUrl(library.documentStoreAddress, library.resourcesUrl, document, link.page),
+        libraryKey: resolveLibraryKey(library.configuredSourceUrl, sourceUrls),
+        resourceKey: resourceDocumentKey(library.resourcesUrl, document.documentId),
       };
     }
 

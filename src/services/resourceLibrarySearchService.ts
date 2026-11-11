@@ -46,6 +46,8 @@ export interface ResourceDocumentTitleSearchMatch {
   tags: string[];
   url: string;
   viewer: DocumentViewerKind;
+  libraryKey?: string;
+  resourceKey?: string;
 }
 
 export interface ResourceDocumentTitleSearchResultSet {
@@ -144,6 +146,9 @@ export async function searchResourceDocumentTitles(
   const openableResults = results.filter((result) =>
     typeof result['hash'] === 'string' || !/\{\{?hash\b/.test(result['documentStoreAddress'] as string)
   );
+  const libraryKeyByResourcesUrl = new Map(
+    candidates.map((candidate) => [candidate.resourcesUrl, candidate.libraryKey ?? BUILT_IN_LIBRARY_KEY])
+  );
   const total = openableResults.length;
   const matches = openableResults.slice(0, SEARCH_LIMIT).map((result): ResourceDocumentTitleSearchMatch => {
     const title = result['title'] as string;
@@ -158,6 +163,9 @@ export async function searchResourceDocumentTitles(
     const hash = typeof result['hash'] === 'string' ? (result['hash'] as string) : undefined;
     const viewer = readDocumentViewerKind(result['documentViewer']) ?? 'pdf';
 
+    const libraryKey = libraryKeyByResourcesUrl.get(resourcesUrl) ?? BUILT_IN_LIBRARY_KEY;
+    const resourceKey = resourceDocumentKey(resourcesUrl, documentId);
+
     return {
       id: `${libraryId}-${documentId}`,
       libraryId,
@@ -168,6 +176,8 @@ export async function searchResourceDocumentTitles(
       tags,
       url: buildDocumentStorePageUrl(documentStoreAddress, resourcesUrl, { documentId, hash }, 1),
       viewer,
+      libraryKey,
+      resourceKey,
     };
   });
 

@@ -57,6 +57,7 @@ const sharedOpenAction = (title: string, matchRaws: string[]) => ({
     matchRaws,
     kind: 'markup',
     syncItem: null,
+    subscriptionItem: null,
     shared: true,
   },
 });
@@ -103,6 +104,7 @@ const openAction = (matchRaws: string[]) => ({
     matchRaws,
     kind: 'markup',
     syncItem: { provider: 'google', itemId: 'drive-file-1' },
+    subscriptionItem: null,
   },
 });
 

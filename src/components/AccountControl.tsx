@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { SubscriptionsBinding } from '../models/subscription';
+import type { AccountSyncRevealRequest, AccountSyncRevealTarget } from '../models/accountSync';
 import CloudFolderPicker, {
   type CloudFolderPickerHandle,
   type FolderSelectionTarget,
 } from './CloudFolderPicker';
 import type { FederatedProvider, FederatedSession } from '../models/bible';
 import { setLinkedCloudProviders } from '../help/linkedCloudProviders';
+import { registerAccountSyncRevealHandler } from '../services/accountSyncRevealService';
 import './AccountControl.scss';
 
 interface AccountControlProps {
@@ -30,11 +32,19 @@ const EMPTY_PROVIDER_FLAGS: Record<FederatedProvider, boolean> = {
 const AccountControl: React.FC<AccountControlProps> = ({ subscriptions }) => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  const [revealRequest, setRevealRequest] = useState<AccountSyncRevealRequest | null>(null);
+  const revealRequestCounterRef = useRef(0);
   const folderPickerRef = useRef<CloudFolderPickerHandle | null>(null);
 
   useEffect(() => {
     setLinkedCloudProviders(EMPTY_PROVIDER_FLAGS);
   }, []);
+
+  useEffect(() => registerAccountSyncRevealHandler((target: AccountSyncRevealTarget) => {
+    revealRequestCounterRef.current += 1;
+    setRevealRequest({ requestId: revealRequestCounterRef.current, target });
+    setIsModalOpen(true);
+  }), []);
 
   const handleApply = useCallback(async () => ({
     queuedProviders: [] as FederatedProvider[],
@@ -95,6 +105,7 @@ const AccountControl: React.FC<AccountControlProps> = ({ subscriptions }) => {
                     providerSyncFilesEnabled={EMPTY_PROVIDER_FLAGS}
                     linkedProviders={EMPTY_PROVIDER_FLAGS}
                     focusRequest={null}
+                    revealRequest={revealRequest}
                     onSelectionsChange={handleApply}
                     onConnectRequested={() => undefined}
                     onDirtyChange={setHasUnsavedChanges}

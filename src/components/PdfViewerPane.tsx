@@ -26,10 +26,11 @@ import {
 import { findTopVisiblePageIndexInContainer } from '../utils/viewerTopPage';
 import { clampScale, stepScale } from '../utils/viewerZoom';
 import { sanctumPlugin } from '@marginalia/sanctum';
-
-const SanctumDocumentToolbarExtras = sanctumPlugin.DocumentToolbarExtras;
+import AccountSyncLocateButton from './AccountSyncLocateButton';
 import DocumentPopoutButton from './DocumentPopoutButton';
 import ViewerZoomControls from './ViewerZoomControls';
+
+const SanctumDocumentToolbarExtras = sanctumPlugin.DocumentToolbarExtras;
 
 GlobalWorkerOptions.workerSrc = workerUrl;
 
@@ -643,6 +644,11 @@ const PdfViewerPane: React.FC<PdfViewerPaneProps> = ({ onScriptureReferenceOpen 
         <div className="pdf-viewer-title fw-semibold text-truncate" title={title}>{title}</div>
 
         <div className="ms-auto d-flex align-items-center gap-2">
+          <AccountSyncLocateButton
+            syncItem={pdfViewer.syncItem}
+            subscriptionItem={pdfViewer.subscriptionItem}
+            documentLabel={title}
+          />
           {SanctumDocumentToolbarExtras && (
             <SanctumDocumentToolbarExtras syncItem={pdfViewer.syncItem} documentLabel={title} />
           )}

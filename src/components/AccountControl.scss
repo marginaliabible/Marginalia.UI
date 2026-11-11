@@ -92,6 +92,20 @@
   position: relative;
 }
 
+.cloud-folder-reveal-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 8;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.55rem;
+  background: color-mix(in srgb, var(--bs-body-bg) 86%, transparent);
+  backdrop-filter: blur(1.2px);
+  border-radius: inherit;
+}
+
 .cloud-folder-tree-name-wrap {
   display: flex;
   align-items: center;
@@ -203,7 +217,7 @@
 
 .cloud-folder-tree-row.is-highlighted {
   border-color: color-mix(in srgb, var(--bs-primary) 55%, transparent);
-  animation: cloud-folder-highlight-fade 3s ease forwards;
+  animation: cloud-folder-highlight-fade 7s ease forwards;
 }
 
 .cloud-folder-tree-chevron,
@@ -283,7 +297,7 @@
 }
 
 .cloud-folder-selected-row.is-highlighted {
-  animation: cloud-folder-highlight-fade 3s ease forwards;
+  animation: cloud-folder-highlight-fade 7s ease forwards;
 }
 .cloud-folder-selected-file-icon {
   width: 1rem;

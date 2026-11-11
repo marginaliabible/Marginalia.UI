@@ -10,6 +10,7 @@ import { searchResourceDocumentTitles, type ResourceDocumentTitleSearchResultSet
 import { normalizeEnglishTerm } from '../services/searchNormalizer';
 import { isNewTestamentBook } from '../utils/book-aliases';
 import { useSourcePreferences } from '../hooks/useSourcePreferences';
+import { subscriptionItemFromResource } from '../utils/accountSyncTarget';
 
 const escapeRegex = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
@@ -180,6 +181,11 @@ const SearchResults: React.FC<SearchResultsProps> = ({ tab, goToReference, onBef
       matchRaws: [],
       kind,
       syncItem: match.cloudProvider ? { provider: match.cloudProvider, itemId: match.documentId } : null,
+      subscriptionItem: subscriptionItemFromResource({
+        cloudProvider: match.cloudProvider,
+        libraryKey: match.libraryKey,
+        resourceKey: match.resourceKey,
+      }),
     };
     routeInteraction(
       { kind: 'document', type: 'open-document', payload },

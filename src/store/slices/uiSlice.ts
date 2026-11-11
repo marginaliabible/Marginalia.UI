@@ -1,5 +1,6 @@
 import { createSlice, type PayloadAction } from '@reduxjs/toolkit';
 import type { FederatedProvider, ThemePreference } from '../../models/bible';
+import type { DocumentSubscriptionItem } from '../../models/accountSync';
 import type { ResourceVerseMatchMode } from '../../utils/verseResources';
 import type { SharedSettings } from '../../models/windowMessages';
 import {
@@ -18,6 +19,8 @@ export interface DocumentSyncItem {
   provider: FederatedProvider;
   itemId: string;
 }
+
+export type { DocumentSubscriptionItem };
 
 interface UiState {
   selectedTranslationId: string;
@@ -48,6 +51,8 @@ interface UiState {
     /** Bumps on every open so re-clicking the same page still triggers scroll-into-view. */
     focusNonce: number;
     syncItem: DocumentSyncItem | null;
+    /** Subscriptions-panel document when the resource is not from a connected cloud Drive. */
+    subscriptionItem: DocumentSubscriptionItem | null;
     /** Opened from a shared link straight from storage; not in any of the user's libraries. */
     shared: boolean;
   };
@@ -88,6 +93,7 @@ const initialState: UiState = {
     matchRaws: [],
     focusNonce: 0,
     syncItem: null,
+    subscriptionItem: null,
     shared: false,
   },
   documentLinkNotice: null,
@@ -105,6 +111,7 @@ interface OpenDocumentViewerPayload {
   matchRaws?: readonly string[] | null;
   kind?: 'pdf' | 'markup';
   syncItem?: DocumentSyncItem | null;
+  subscriptionItem?: DocumentSubscriptionItem | null;
   shared?: boolean;
 }
 
@@ -134,6 +141,7 @@ function buildOpenViewerState(previousFocusNonce: number, payload: OpenDocumentV
     matchRaws: normalizeMatchRaws(payload.matchRaws),
     focusNonce: (previousFocusNonce || 0) + 1,
     syncItem: payload.syncItem ?? null,
+    subscriptionItem: payload.subscriptionItem ?? null,
     shared: payload.shared === true,
   };
 }
@@ -399,6 +407,9 @@ const uiSlice = createSlice({
       }
       if (next.pdfViewer && typeof next.pdfViewer.syncItem === 'undefined') {
         next.pdfViewer = { ...next.pdfViewer, syncItem: null };
+      }
+      if (next.pdfViewer && typeof next.pdfViewer.subscriptionItem === 'undefined') {
+        next.pdfViewer = { ...next.pdfViewer, subscriptionItem: null };
       }
       if (next.pdfViewer && typeof next.pdfViewer.shared !== 'boolean') {
         next.pdfViewer = { ...next.pdfViewer, shared: false };

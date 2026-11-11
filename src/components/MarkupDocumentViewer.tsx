@@ -13,10 +13,11 @@ import { buildTextLayerHaystack, findAllMatchRanges, getMatchClientRects, placeO
 import { collapseRedundantTextLayerCopySpaces } from '../utils/textLayerCopySpaces';
 import { clampScale, computeFitWidthScale, fitWidthPageIndex, stepScale } from '../utils/viewerZoom';
 import { sanctumPlugin } from '@marginalia/sanctum';
-
-const SanctumDocumentToolbarExtras = sanctumPlugin.DocumentToolbarExtras;
+import AccountSyncLocateButton from './AccountSyncLocateButton';
 import DocumentPopoutButton from './DocumentPopoutButton';
 import ViewerZoomControls from './ViewerZoomControls';
+
+const SanctumDocumentToolbarExtras = sanctumPlugin.DocumentToolbarExtras;
 
 /** Pages to keep materialized around the active page (matches pdf2htmlEX preload_pages ≈ 3). */
 const PAGE_WINDOW_RADIUS = 2;
@@ -1408,6 +1409,11 @@ const MarkupDocumentViewer: React.FC<MarkupDocumentViewerProps> = ({ onScripture
         )}
 
         <div className="ms-auto d-flex align-items-center gap-2">
+          <AccountSyncLocateButton
+            syncItem={pdfViewer.syncItem}
+            subscriptionItem={pdfViewer.subscriptionItem}
+            documentLabel={title}
+          />
           {SanctumDocumentToolbarExtras && (
             <SanctumDocumentToolbarExtras syncItem={pdfViewer.syncItem} documentLabel={title} />
           )}
