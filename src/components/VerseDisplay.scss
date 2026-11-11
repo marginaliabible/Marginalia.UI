@@ -267,19 +267,16 @@
   right: 0;
 }
 
-.verse-grid-shell.is-translation-swipe .verse-grid-rows,
-.verse-grid-shell.is-translation-swipe .verse-grid-column-headers-row,
-.verse-grid-shell.is-translation-swipe .verse-grid-row {
+.verse-grid-shell.is-translation-swipe :is(
+  .verse-grid-rows,
+  .verse-grid-column-headers-row,
+  .verse-grid-row,
+  .verse-grid-swipe-viewport,
+  .verse-grid-swipe-track,
+  .verse-text,
+  .verse-grid-column-label
+) {
   min-width: 0;
-}
-
-.verse-grid-shell.is-translation-swipe .verse-grid-rows,
-.verse-grid-shell.is-translation-swipe .verse-grid-column-headers-row,
-.verse-grid-shell.is-translation-swipe .verse-grid-row,
-.verse-grid-shell.is-translation-swipe .verse-grid-swipe-viewport,
-.verse-grid-shell.is-translation-swipe .verse-grid-swipe-track,
-.verse-grid-shell.is-translation-swipe .verse-text,
-.verse-grid-shell.is-translation-swipe .verse-grid-column-label {
   touch-action: pan-y;
 }
 
@@ -291,7 +288,6 @@
   min-width: 0;
   overflow: hidden;
   grid-column: 2 / -1;
-  overscroll-behavior-x: contain;
 }
 
 .verse-grid-swipe-track {
@@ -299,34 +295,21 @@
   align-items: flex-start;
   width: max-content;
   transform: translate3d(var(--verse-swipe-offset, 0px), 0, 0);
-  transition-property: transform;
-  transition-duration: var(--verse-swipe-duration, 0ms);
-  transition-timing-function: ease-out;
-  will-change: transform;
+  transition: transform var(--verse-swipe-duration, 0ms) ease-out;
 }
 
 .verse-grid-column-headers-row .verse-grid-swipe-track {
   align-items: center;
 }
 
-.verse-grid-shell.is-translation-swipe .verse-grid-swipe-track > .verse-text,
-.verse-grid-shell.is-translation-swipe .verse-grid-swipe-track > .verse-grid-column-label {
+.verse-grid-shell.is-translation-swipe .verse-grid-swipe-track > :is(.verse-text, .verse-grid-column-label) {
+  box-sizing: border-box;
   flex: 0 0 var(--verse-swipe-column-width, 100%);
   width: var(--verse-swipe-column-width, 100%);
-  max-width: var(--verse-swipe-column-width, 100%);
-  box-sizing: border-box;
 }
 
-.verse-grid-shell.is-translation-swipe .verse-grid-swipe-track > .verse-text + .verse-text,
-.verse-grid-shell.is-translation-swipe .verse-grid-swipe-track > .verse-grid-column-label + .verse-grid-column-label {
+.verse-grid-shell.is-translation-swipe .verse-grid-swipe-track > :is(.verse-text, .verse-grid-column-label) + :is(.verse-text, .verse-grid-column-label) {
   box-shadow: -1px 0 0 color-mix(in srgb, var(--bs-border-color) 65%, transparent);
-}
-
-.verse-grid-shell.is-translation-swipe.is-sliding-left .verse-grid-column-label,
-.verse-grid-shell.is-translation-swipe.is-sliding-left .verse-text,
-.verse-grid-shell.is-translation-swipe.is-sliding-right .verse-grid-column-label,
-.verse-grid-shell.is-translation-swipe.is-sliding-right .verse-text {
-  animation: none;
 }
 
 .verse-grid-verse-label {

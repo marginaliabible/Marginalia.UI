@@ -1,14 +1,8 @@
 import { useEffect, useLayoutEffect, useRef, type RefObject } from 'react';
-import {
-  classifySwipeAxis,
-  resolveSwipeShift,
-  rubberBandDelta,
-  SWIPE_TRANSITION_MS,
-  velocityFromSamples,
-  type TranslationSwipeDirection,
-} from '../utils/verseTranslationSwipe';
 
-interface UseVerseTranslationSwipeOptions {
+type SwipeDirection = 'left' | 'right';
+
+interface SwipeOptions {
   enabled: boolean;
   hasVerseGrid: boolean;
   shellRef: RefObject<HTMLElement | null>;
@@ -16,301 +10,205 @@ interface UseVerseTranslationSwipeOptions {
   stride: number;
   canGoPrevious: boolean;
   canGoNext: boolean;
-  onShift: (direction: TranslationSwipeDirection) => void;
+  onShift: (direction: SwipeDirection) => void;
   onHorizontalLock: () => void;
   isBlocked: () => boolean;
 }
 
-function prefersReducedMotion(): boolean {
-  if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
-    return false;
-  }
+const AXIS_PX = 10;
 
-  return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+function rubber(delta: number, min: number, max: number, size: number): number {
+  const damp = (over: number) => (over * size * 0.55) / (Math.max(size, 1) + (0.55 * over));
+  if (delta < min) return min - damp(min - delta);
+  if (delta > max) return max + damp(delta - max);
+  return delta;
 }
 
-function writeSwipeOffset(shell: HTMLElement, offset: number, animate: boolean): void {
-  const shouldAnimate = animate && !prefersReducedMotion();
-  if (!shouldAnimate) {
-    shell.style.setProperty('--verse-swipe-duration', '0ms');
-    shell.style.setProperty('--verse-swipe-offset', `${offset}px`);
-    return;
-  }
-
-  // Commit the current dragged position, then transition to the resting offset.
-  shell.style.setProperty('--verse-swipe-duration', '0ms');
-  if (!shell.style.getPropertyValue('--verse-swipe-offset')) {
-    shell.style.setProperty('--verse-swipe-offset', `${offset}px`);
-  }
-  void shell.offsetWidth;
-  shell.style.setProperty('--verse-swipe-duration', `${SWIPE_TRANSITION_MS}ms`);
-  shell.style.setProperty('--verse-swipe-offset', `${offset}px`);
-}
-
-function eventElement(target: EventTarget | null): Element | null {
-  if (target instanceof Element) {
-    return target;
-  }
-
-  if (target instanceof Node) {
-    return target.parentElement;
-  }
-
+function settle(
+  delta: number,
+  velocity: number,
+  canGoPrevious: boolean,
+  canGoNext: boolean,
+  stride: number,
+): SwipeDirection | null {
+  if (!(stride > 0) || delta === 0) return null;
+  const distance = Math.min(stride * 0.85, Math.max(48, stride * 0.22));
+  const reversing = (delta < 0 && velocity > 0.2) || (delta > 0 && velocity < -0.2);
+  const commit = !reversing && (Math.abs(delta) >= distance || (Math.abs(velocity) >= 0.5 && Math.abs(delta) >= 18));
+  if (commit && delta < 0 && canGoNext) return 'right';
+  if (commit && delta > 0 && canGoPrevious) return 'left';
   return null;
 }
 
-/**
- * Mobile column paging. The verse grid stays row-aligned, so this tracks one
- * horizontal pointer drag and slides every translation column together.
- * Vertical drags are left to the page scroll (see touch-action: pan-y).
- */
-export function useVerseTranslationSwipe({
-  enabled,
-  hasVerseGrid,
-  shellRef,
-  translationWindowStart,
-  stride,
-  canGoPrevious,
-  canGoNext,
-  onShift,
-  onHorizontalLock,
-  isBlocked,
-}: UseVerseTranslationSwipeOptions): void {
-  const latestRef = useRef({
-    enabled,
-    translationWindowStart,
-    stride,
-    canGoPrevious,
-    canGoNext,
-    onShift,
-    onHorizontalLock,
-    isBlocked,
-  });
-  latestRef.current = {
-    enabled,
-    translationWindowStart,
-    stride,
-    canGoPrevious,
-    canGoNext,
-    onShift,
-    onHorizontalLock,
-    isBlocked,
-  };
+function writeOffset(shell: HTMLElement, offset: number, animate: boolean): void {
+  const reduce = typeof window.matchMedia === 'function'
+    && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  shell.style.setProperty('--verse-swipe-duration', '0ms');
+  if (!animate || reduce) {
+    shell.style.setProperty('--verse-swipe-offset', `${offset}px`);
+    return;
+  }
+  void shell.offsetWidth;
+  shell.style.setProperty('--verse-swipe-duration', '300ms');
+  shell.style.setProperty('--verse-swipe-offset', `${offset}px`);
+}
 
-  const sessionRef = useRef({ tracking: false });
-  const previousRestRef = useRef<{ start: number; stride: number } | null>(null);
+/** Slides the mobile translation columns. Vertical drags stay with page scroll. */
+export function useVerseTranslationSwipe(options: SwipeOptions): void {
+  const latest = useRef(options);
+  latest.current = options;
+  const tracking = useRef(false);
+  const previous = useRef<{ start: number; stride: number } | null>(null);
+  const { enabled, hasVerseGrid, shellRef, stride, translationWindowStart } = options;
 
   useLayoutEffect(() => {
     const shell = shellRef.current;
-    if (!shell) {
-      return;
-    }
-
+    if (!shell) return;
     if (!enabled || !hasVerseGrid || !(stride > 0)) {
       shell.style.removeProperty('--verse-swipe-offset');
       shell.style.removeProperty('--verse-swipe-duration');
       delete shell.dataset['swipeDragging'];
-      previousRestRef.current = null;
+      previous.current = null;
       return;
     }
+    if (tracking.current) return;
 
-    if (sessionRef.current.tracking) {
-      return;
-    }
-
-    const offset = -translationWindowStart * stride;
-    const previous = previousRestRef.current;
-    previousRestRef.current = { start: translationWindowStart, stride };
-    const strideChanged = previous !== null && Math.abs(previous.stride - stride) >= 0.5;
-    const startChanged = previous !== null && previous.start !== translationWindowStart;
-    writeSwipeOffset(shell, offset, startChanged && !strideChanged);
+    const before = previous.current;
+    previous.current = { start: translationWindowStart, stride };
+    const animate = before !== null
+      && before.start !== translationWindowStart
+      && Math.abs(before.stride - stride) < 0.5;
+    writeOffset(shell, -translationWindowStart * stride, animate);
   }, [enabled, hasVerseGrid, shellRef, stride, translationWindowStart]);
 
   useEffect(() => {
-    if (!enabled || !hasVerseGrid) {
-      return;
-    }
-
+    if (!enabled || !hasVerseGrid) return;
     const shell = shellRef.current;
-    if (!shell) {
-      return;
-    }
+    if (!shell) return;
 
-    const session = {
-      tracking: false,
-      pointerId: -1,
-      startX: 0,
-      startY: 0,
-      lastX: 0,
-      mode: 'undecided' as 'undecided' | 'horizontal' | 'vertical',
-      samples: [] as { x: number; t: number }[],
+    let pointerId = -1;
+    let startX = 0;
+    let startY = 0;
+    let lastX = 0;
+    let prevX = 0;
+    let prevT = 0;
+    let velocity = 0;
+    let mode: 'pending' | 'horizontal' | 'vertical' = 'pending';
+    let active = false;
+
+    const restOffset = () => -latest.current.translationWindowStart * latest.current.stride;
+
+    const detach = () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onCancel);
     };
 
-    const trimSamples = (now: number) => {
-      const cutoff = now - 80;
-      while (session.samples.length > 2 && session.samples[0].t < cutoff) {
-        session.samples.shift();
-      }
-    };
-
-    const detachMoveListeners = () => {
-      window.removeEventListener('pointermove', onPointerMove);
-      window.removeEventListener('pointerup', onPointerUp);
-      window.removeEventListener('pointercancel', onPointerCancel);
-    };
-
-    const endGesture = (kind: 'commit' | 'cancel' | 'ignore') => {
-      const wasHorizontal = session.mode === 'horizontal';
-      session.tracking = false;
-      sessionRef.current.tracking = false;
-      session.mode = 'undecided';
-      detachMoveListeners();
+    const finish = (commit: boolean) => {
+      const horizontal = mode === 'horizontal';
+      const delta = lastX - startX;
+      active = false;
+      tracking.current = false;
+      mode = 'pending';
+      detach();
       delete shell.dataset['swipeDragging'];
+      if (!horizontal) return;
 
-      if (!wasHorizontal || kind === 'ignore') {
-        return;
-      }
-
-      const latest = latestRef.current;
-      const deltaX = session.lastX - session.startX;
-      const direction = kind === 'commit'
-        ? resolveSwipeShift({
-          deltaX,
-          velocityX: velocityFromSamples(session.samples),
-          canGoPrevious: latest.canGoPrevious,
-          canGoNext: latest.canGoNext,
-          stride: latest.stride,
-        })
+      const current = latest.current;
+      const direction = commit
+        ? settle(delta, velocity, current.canGoPrevious, current.canGoNext, current.stride)
         : null;
-
-      if (direction) {
-        latest.onShift(direction);
-        return;
-      }
-
-      writeSwipeOffset(shell, -latest.translationWindowStart * latest.stride, true);
+      if (direction) current.onShift(direction);
+      else writeOffset(shell, restOffset(), true);
     };
 
-    const onPointerMove = (event: PointerEvent) => {
-      if (!session.tracking || event.pointerId !== session.pointerId) {
+    const trackVelocity = (event: PointerEvent) => {
+      const dt = event.timeStamp - prevT;
+      if (dt > 0) velocity = (event.clientX - prevX) / dt;
+      prevX = event.clientX;
+      prevT = event.timeStamp;
+      lastX = event.clientX;
+    };
+
+    const onMove = (event: PointerEvent) => {
+      if (!active || event.pointerId !== pointerId) return;
+      const current = latest.current;
+      if (!current.enabled || current.isBlocked() || !(current.stride > 0)) {
+        finish(false);
         return;
       }
 
-      const latest = latestRef.current;
-      if (!latest.enabled || latest.isBlocked() || !(latest.stride > 0)) {
-        endGesture(session.mode === 'horizontal' ? 'cancel' : 'ignore');
-        return;
-      }
-
-      const deltaX = event.clientX - session.startX;
-      const deltaY = event.clientY - session.startY;
-      session.lastX = event.clientX;
-      session.samples.push({ x: event.clientX, t: event.timeStamp });
-      trimSamples(event.timeStamp);
-
-      if (session.mode === 'undecided') {
-        const axis = classifySwipeAxis(deltaX, deltaY);
-        if (axis === 'undecided') {
+      const dx = event.clientX - startX;
+      const dy = event.clientY - startY;
+      trackVelocity(event);
+      if (mode === 'pending') {
+        const absX = Math.abs(dx);
+        const absY = Math.abs(dy);
+        if (absX < AXIS_PX && absY < AXIS_PX) return;
+        if (!(absX >= AXIS_PX && absX > absY * 1.25)) {
+          if (absY >= absX) finish(false);
           return;
         }
-
-        if (axis === 'vertical') {
-          endGesture('ignore');
-          return;
-        }
-
-        session.mode = 'horizontal';
+        mode = 'horizontal';
         shell.dataset['swipeDragging'] = 'true';
-        latest.onHorizontalLock();
+        current.onHorizontalLock();
       }
 
-      if (session.mode !== 'horizontal') {
-        return;
-      }
-
-      if (event.cancelable) {
-        event.preventDefault();
-      }
-
-      const minDelta = latest.canGoNext ? -latest.stride : 0;
-      const maxDelta = latest.canGoPrevious ? latest.stride : 0;
-      const banded = rubberBandDelta(deltaX, minDelta, maxDelta, latest.stride);
-      const offset = (-latest.translationWindowStart * latest.stride) + banded;
+      if (event.cancelable) event.preventDefault();
+      const min = current.canGoNext ? -current.stride : 0;
+      const max = current.canGoPrevious ? current.stride : 0;
+      const offset = restOffset() + rubber(dx, min, max, current.stride);
       shell.style.setProperty('--verse-swipe-duration', '0ms');
       shell.style.setProperty('--verse-swipe-offset', `${offset}px`);
     };
 
-    const onPointerUp = (event: PointerEvent) => {
-      if (!session.tracking || event.pointerId !== session.pointerId) {
-        return;
-      }
-
-      session.lastX = event.clientX;
-      session.samples.push({ x: event.clientX, t: event.timeStamp });
-      trimSamples(event.timeStamp);
-      endGesture('commit');
+    const onUp = (event: PointerEvent) => {
+      if (!active || event.pointerId !== pointerId) return;
+      trackVelocity(event);
+      finish(true);
     };
 
-    const onPointerCancel = (event: PointerEvent) => {
-      if (!session.tracking || event.pointerId !== session.pointerId) {
-        return;
-      }
-
-      endGesture(session.mode === 'horizontal' ? 'cancel' : 'ignore');
+    const onCancel = (event: PointerEvent) => {
+      if (!active || event.pointerId !== pointerId) return;
+      finish(false);
     };
 
-    const onPointerDown = (event: PointerEvent) => {
-      if (session.tracking && event.pointerId !== session.pointerId) {
-        endGesture(session.mode === 'horizontal' ? 'cancel' : 'ignore');
+    const onDown = (event: PointerEvent) => {
+      const current = latest.current;
+      const target = event.target instanceof Element ? event.target : null;
+      if (
+        active
+        || !current.enabled
+        || !(current.stride > 0)
+        || !event.isPrimary
+        || event.button !== 0
+        || (event.pointerType !== 'touch' && event.pointerType !== 'pen')
+        || current.isBlocked()
+        || !target?.closest('.verse-grid-rows, .verse-grid-column-headers-row')
+        || target.closest('button, a, input, select, textarea, label')
+      ) {
         return;
       }
 
-      const latest = latestRef.current;
-      if (!latest.enabled || !(latest.stride > 0) || session.tracking) {
-        return;
-      }
-
-      if (!event.isPrimary || event.button !== 0) {
-        return;
-      }
-
-      if (event.pointerType !== 'touch' && event.pointerType !== 'pen') {
-        return;
-      }
-
-      if (latest.isBlocked()) {
-        return;
-      }
-
-      const element = eventElement(event.target);
-      if (!element?.closest('.verse-grid-rows, .verse-grid-column-headers-row')) {
-        return;
-      }
-
-      if (element.closest('button, a, input, select, textarea, label')) {
-        return;
-      }
-
-      session.tracking = true;
-      sessionRef.current.tracking = true;
-      session.pointerId = event.pointerId;
-      session.startX = event.clientX;
-      session.startY = event.clientY;
-      session.lastX = event.clientX;
-      session.mode = 'undecided';
-      session.samples = [{ x: event.clientX, t: event.timeStamp }];
-      window.addEventListener('pointermove', onPointerMove, { passive: false });
-      window.addEventListener('pointerup', onPointerUp);
-      window.addEventListener('pointercancel', onPointerCancel);
+      active = true;
+      tracking.current = true;
+      pointerId = event.pointerId;
+      startX = lastX = prevX = event.clientX;
+      startY = event.clientY;
+      prevT = event.timeStamp;
+      velocity = 0;
+      mode = 'pending';
+      window.addEventListener('pointermove', onMove, { passive: false });
+      window.addEventListener('pointerup', onUp);
+      window.addEventListener('pointercancel', onCancel);
     };
 
-    shell.addEventListener('pointerdown', onPointerDown);
-
+    shell.addEventListener('pointerdown', onDown);
     return () => {
-      session.tracking = false;
-      sessionRef.current.tracking = false;
-      detachMoveListeners();
-      shell.removeEventListener('pointerdown', onPointerDown);
+      active = false;
+      tracking.current = false;
+      detach();
+      shell.removeEventListener('pointerdown', onDown);
       delete shell.dataset['swipeDragging'];
     };
   }, [enabled, hasVerseGrid, shellRef]);
