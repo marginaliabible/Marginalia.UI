@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ReactMarkdown, { defaultUrlTransform } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import rehypeRaw from 'rehype-raw';
 import type { Components } from 'react-markdown';
 import type { PanelTab } from '../models/tab';
 import type { HelpArticleMeta, HelpManifest } from '../models/help';
@@ -404,6 +405,7 @@ const HelpPanel: React.FC<HelpPanelProps> = ({ isActive }) => {
         {!isLoadingArticle && !articleError && articleMarkdown && (
           <ReactMarkdown
             remarkPlugins={[remarkGfm]}
+            rehypePlugins={[rehypeRaw]}
             components={markdownComponents}
             urlTransform={(url) => (
               // react-markdown strips unknown protocols by default; keep help deep-links.
