@@ -1,4 +1,5 @@
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useVerseTranslationSwipe } from '../hooks/useVerseTranslationSwipe';
 import type { BibleBook, BibleChapter } from '../models/bible';
 import MiniSearchBar, { type MiniSearchBarHandle } from './MiniSearchBar';
 import type { QuickJumpTarget } from '../models/bible';
@@ -97,6 +98,7 @@ const VerseDisplay: React.FC<VerseDisplayProps> = ({
   verseDomChapter,
 }) => {
   const shellRef = useRef<HTMLDivElement | null>(null);
+  const swipeViewportRef = useRef<HTMLDivElement | null>(null);
   const longPressTimeoutRef = useRef<number | null>(null);
   const longPressTriggeredRef = useRef(false);
   const touchMovedRef = useRef(false);
@@ -104,6 +106,7 @@ const VerseDisplay: React.FC<VerseDisplayProps> = ({
   const suppressClickUntilRef = useRef(0);
   const [translationWindowStart, setTranslationWindowStart] = useState(0);
   const [layoutWidth, setLayoutWidth] = useState(0);
+  const [swipeViewportWidth, setSwipeViewportWidth] = useState(0);
   const [slideDirection, setSlideDirection] = useState<'left' | 'right' | null>(null);
   const [hoveredCell, setHoveredCell] = useState<{ translationId: string; verse: number } | null>(null);
   const [isCtrlLikeDown, setIsCtrlLikeDown] = useState(false);
@@ -227,8 +230,18 @@ const VerseDisplay: React.FC<VerseDisplayProps> = ({
     );
   }, [translationOrder, translationWindowStart, visibleTranslationCount]);
 
+  const swipeEnabled = isMobileLayout
+    && visibleTranslationCount > 0
+    && translationOrder.length > visibleTranslationCount;
+  const swipeColumnWidth = swipeEnabled && visibleTranslationCount > 0 && swipeViewportWidth > 0
+    ? swipeViewportWidth / visibleTranslationCount
+    : 0;
+
   const gridStyle = {
-    ['--translation-count' as '--translation-count']: String(Math.max(visibleTranslationIds.length, 1))
+    ['--translation-count' as '--translation-count']: String(Math.max(visibleTranslationIds.length, 1)),
+    ...(swipeColumnWidth > 0
+      ? { ['--verse-swipe-column-width' as '--verse-swipe-column-width']: `${swipeColumnWidth}px` }
+      : {}),
   } as React.CSSProperties;
 
   const hiddenLeftCount = translationWindowStart;
@@ -241,7 +254,7 @@ const VerseDisplay: React.FC<VerseDisplayProps> = ({
         ? Math.max(0, start - 1)
         : Math.min(maxStart, start + 1);
 
-      if (nextStart !== start) {
+      if (nextStart !== start && !swipeEnabled) {
         setSlideDirection(direction);
       }
 
@@ -263,8 +276,37 @@ const VerseDisplay: React.FC<VerseDisplayProps> = ({
     };
   }, [slideDirection]);
 
+  useLayoutEffect(() => {
+    const viewport = swipeViewportRef.current;
+    if (!swipeEnabled || !viewport) {
+      setSwipeViewportWidth(0);
+      return;
+    }
+
+    const measure = () => {
+      const next = viewport.getBoundingClientRect().width;
+      setSwipeViewportWidth((current) => (Math.abs(current - next) < 0.5 ? current : next));
+    };
+
+    measure();
+
+    if (typeof ResizeObserver === 'undefined') {
+      return;
+    }
+
+    const observer = new ResizeObserver(() => {
+      measure();
+    });
+    observer.observe(viewport);
+
+    return () => {
+      observer.disconnect();
+    };
+  }, [swipeEnabled, visibleTranslationCount, layoutWidth]);
+
+  const verseSourceIds = swipeEnabled ? translationOrder : visibleTranslationIds;
   const verseNumbers = Array.from(new Set(
-    visibleTranslationIds.flatMap((translationId) =>
+    verseSourceIds.flatMap((translationId) =>
       (chaptersByTranslation[translationId]?.verses ?? []).map((verse) => verse.verse)
     )
   )).sort((a, b) => a - b);
@@ -367,6 +409,23 @@ const VerseDisplay: React.FC<VerseDisplayProps> = ({
       longPressTimeoutRef.current = null;
     }
   };
+
+  useVerseTranslationSwipe({
+    enabled: swipeEnabled,
+    hasVerseGrid: verseNumbers.length > 0,
+    shellRef,
+    translationWindowStart,
+    stride: swipeColumnWidth,
+    canGoPrevious: hiddenLeftCount > 0,
+    canGoNext: hiddenRightCount > 0,
+    onShift: shiftWindow,
+    onHorizontalLock: () => {
+      touchMovedRef.current = true;
+      suppressClickUntilRef.current = Date.now() + 700;
+      clearPendingLongPress();
+    },
+    isBlocked: () => longPressTriggeredRef.current || mobileMultiSelectMode !== null,
+  });
 
   const handleVerseCellClick = (
     event: React.MouseEvent<HTMLSpanElement>,
@@ -474,11 +533,106 @@ const VerseDisplay: React.FC<VerseDisplayProps> = ({
     return <p className="text-body-secondary mb-0">Select a chapter to begin.</p>;
   }
 
+  const renderedTranslationIds = swipeEnabled ? translationOrder : visibleTranslationIds;
+  const isTranslationColumnVisible = (translationId: string) => {
+    const index = translationOrder.indexOf(translationId);
+    return index >= translationWindowStart && index < translationWindowStart + visibleTranslationCount;
+  };
+
+  const renderColumnLabel = (translationId: string) => {
+    const label = translationLabels[translationId] ?? translationId;
+    const hiddenFromAssistiveTech = swipeEnabled && !isTranslationColumnVisible(translationId);
+
+    return (
+      <span
+        key={translationId}
+        className="verse-grid-column-label"
+        title={label}
+        aria-hidden={hiddenFromAssistiveTech ? true : undefined}
+      >
+        <span className="verse-grid-column-label-text">{label}</span>
+      </span>
+    );
+  };
+
+  const renderVerseCell = (translationId: string, verseNumber: number) => {
+    const isTranslationLoaded = isTranslationChapterLoaded(chaptersByTranslation, translationId);
+    const verseText =
+      chaptersByTranslation[translationId]?.verses.find((verse) => verse.verse === verseNumber)?.text ?? '';
+    const markupFlags = markupFlagsByTranslation[translationId] ?? markupFlagsFromBible(null);
+    const plainVerseText = verseText ? stripVerseMarkers(verseText, markupFlags) : '';
+    const missingNotice = missingVerseNotice(isTranslationLoaded);
+    const isMobileAnchor =
+      mobileMultiSelectMode?.translationId === translationId
+      && mobileMultiSelectMode.anchorVerse === verseNumber;
+    const isSelected = !isMobileAnchor && selectedVerseTranslationId === translationId && selectedVerseSet.has(verseNumber);
+    const isTranslationEligible =
+      selectedVerses.length === 0
+      || !selectedVerseTranslationId
+      || selectedVerseTranslationId === translationId;
+    const isHoverTarget = hoveredCell?.translationId === translationId && hoveredCell?.verse === verseNumber;
+    const isCtrlEligible = isHoverTarget && isCtrlLikeDown && isTranslationEligible;
+    const isRangePreview = selectedVerseTranslationId === translationId && shiftPreviewSet.has(verseNumber);
+    const hiddenFromAssistiveTech = swipeEnabled && !isTranslationColumnVisible(translationId);
+
+    return (
+      <span
+        key={`${translationId}-${verseNumber}`}
+        className={[
+          'verse-text',
+          isSelected ? 'is-selected' : '',
+          isCtrlEligible ? 'is-ctrl-eligible' : '',
+          isRangePreview ? 'is-range-preview' : '',
+          isMobileAnchor ? 'is-mobile-anchor' : '',
+          !plainVerseText && !isTranslationLoaded ? 'is-unloaded' : '',
+        ].filter(Boolean).join(' ')}
+        data-translation-id={translationId}
+        data-verse={verseNumber}
+        title={plainVerseText ? undefined : missingNotice}
+        aria-hidden={hiddenFromAssistiveTech ? true : undefined}
+        onMouseDown={(event) => {
+          if (event.shiftKey) {
+            event.preventDefault();
+          }
+        }}
+        onClick={(event) => handleVerseCellClick(event, translationId, verseNumber)}
+        onMouseEnter={() => setHoveredCell({ translationId, verse: verseNumber })}
+        onMouseLeave={() => setHoveredCell((current) => {
+          if (!current || current.translationId !== translationId || current.verse !== verseNumber) {
+            return current;
+          }
+          return null;
+        })}
+        onTouchStart={(event) => {
+          const touch = event.touches[0];
+          touchStartPointRef.current = touch
+            ? { x: touch.clientX, y: touch.clientY }
+            : null;
+          handleVerseTouchStart(translationId, verseNumber);
+        }}
+        onTouchMove={handleVerseTouchMove}
+        onTouchEnd={(event) => handleVerseTouchEnd(event, translationId, verseNumber)}
+      >
+        {verseText
+          ? renderVerseMarkers(verseText, markupFlags, verseMarkupSettings)
+          : (isTranslationLoaded ? '-' : missingNotice)}
+      </span>
+    );
+  };
+
+  const shellClassName = [
+    'verse-grid-shell',
+    !swipeEnabled && slideDirection ? `is-sliding-${slideDirection}` : '',
+    swipeEnabled ? 'is-translation-swipe' : '',
+  ].filter(Boolean).join(' ');
+
   return (
     <div
-      className={`verse-grid-shell ${slideDirection ? `is-sliding-${slideDirection}` : ''}`}
+      className={shellClassName}
       ref={shellRef}
       style={gridStyle}
+      data-translation-window-start={translationWindowStart}
+      data-swipe-column-width={swipeEnabled && swipeColumnWidth > 0 ? String(swipeColumnWidth) : undefined}
     >
       <div className="verse-grid-header">
         <div className="verse-grid-chapter-heading">
@@ -590,19 +744,15 @@ const VerseDisplay: React.FC<VerseDisplayProps> = ({
             </button>
           )}
           <span className="verse-grid-verse-label" aria-hidden="true"></span>
-          {visibleTranslationIds.map((translationId) => {
-            const label = translationLabels[translationId] ?? translationId;
-
-            return (
-              <span
-                key={translationId}
-                className="verse-grid-column-label"
-                title={label}
-              >
-                <span className="verse-grid-column-label-text">{label}</span>
-              </span>
-            );
-          })}
+          {swipeEnabled ? (
+            <div className="verse-grid-swipe-viewport" ref={swipeViewportRef}>
+              <div className="verse-grid-swipe-track">
+                {renderedTranslationIds.map((translationId) => renderColumnLabel(translationId))}
+              </div>
+            </div>
+          ) : (
+            renderedTranslationIds.map((translationId) => renderColumnLabel(translationId))
+          )}
           {hiddenRightCount > 0 && (
             <button
               type="button"
@@ -633,68 +783,15 @@ const VerseDisplay: React.FC<VerseDisplayProps> = ({
                 onVerseNumberClick={() => onVerseNumberClick?.(verseNumber)}
               />
             </span>
-            {visibleTranslationIds.map((translationId) => {
-              const isTranslationLoaded = isTranslationChapterLoaded(chaptersByTranslation, translationId);
-              const verseText =
-                chaptersByTranslation[translationId]?.verses.find((verse) => verse.verse === verseNumber)?.text ?? '';
-              const markupFlags = markupFlagsByTranslation[translationId] ?? markupFlagsFromBible(null);
-              const plainVerseText = verseText ? stripVerseMarkers(verseText, markupFlags) : '';
-              const missingNotice = missingVerseNotice(isTranslationLoaded);
-              const isMobileAnchor =
-                mobileMultiSelectMode?.translationId === translationId
-                && mobileMultiSelectMode.anchorVerse === verseNumber;
-              const isSelected = !isMobileAnchor && selectedVerseTranslationId === translationId && selectedVerseSet.has(verseNumber);
-              const isTranslationEligible =
-                selectedVerses.length === 0
-                || !selectedVerseTranslationId
-                || selectedVerseTranslationId === translationId;
-              const isHoverTarget = hoveredCell?.translationId === translationId && hoveredCell?.verse === verseNumber;
-              const isCtrlEligible = isHoverTarget && isCtrlLikeDown && isTranslationEligible;
-              const isRangePreview = selectedVerseTranslationId === translationId && shiftPreviewSet.has(verseNumber);
-
-              return (
-                <span
-                  key={`${translationId}-${verseNumber}`}
-                  className={[
-                    'verse-text',
-                    isSelected ? 'is-selected' : '',
-                    isCtrlEligible ? 'is-ctrl-eligible' : '',
-                    isRangePreview ? 'is-range-preview' : '',
-                    isMobileAnchor ? 'is-mobile-anchor' : '',
-                    !plainVerseText && !isTranslationLoaded ? 'is-unloaded' : '',
-                  ].filter(Boolean).join(' ')}
-                  data-translation-id={translationId}
-                  data-verse={verseNumber}
-                  title={plainVerseText ? undefined : missingNotice}
-                  onMouseDown={(event) => {
-                    if (event.shiftKey) {
-                      event.preventDefault();
-                    }
-                  }}
-                  onClick={(event) => handleVerseCellClick(event, translationId, verseNumber)}
-                  onMouseEnter={() => setHoveredCell({ translationId, verse: verseNumber })}
-                  onMouseLeave={() => setHoveredCell((current) => {
-                    if (!current || current.translationId !== translationId || current.verse !== verseNumber) {
-                      return current;
-                    }
-                    return null;
-                  })}
-                  onTouchStart={(event) => {
-                    const touch = event.touches[0];
-                    touchStartPointRef.current = touch
-                      ? { x: touch.clientX, y: touch.clientY }
-                      : null;
-                    handleVerseTouchStart(translationId, verseNumber);
-                  }}
-                  onTouchMove={handleVerseTouchMove}
-                  onTouchEnd={(event) => handleVerseTouchEnd(event, translationId, verseNumber)}
-                >
-                  {verseText
-                    ? renderVerseMarkers(verseText, markupFlags, verseMarkupSettings)
-                    : (isTranslationLoaded ? '-' : missingNotice)}
-                </span>
-              );
-            })}
+            {swipeEnabled ? (
+              <div className="verse-grid-swipe-viewport">
+                <div className="verse-grid-swipe-track">
+                  {renderedTranslationIds.map((translationId) => renderVerseCell(translationId, verseNumber))}
+                </div>
+              </div>
+            ) : (
+              renderedTranslationIds.map((translationId) => renderVerseCell(translationId, verseNumber))
+            )}
           </div>
         ))}
       </div>
