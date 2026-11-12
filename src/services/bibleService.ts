@@ -32,6 +32,7 @@ import {
 } from './resourceLibraryService';
 import type { SourcePreferences } from '../utils/sourceSubscriptions';
 import { fetchStorageAware } from './storageAuthenticatedFetch';
+import { parseSearchQuery, textContainsAllPhrases } from './searchQueryParser';
 import {
   buildFetchUrlCandidates,
   inferSourceFileKindFromPayload,
@@ -1231,13 +1232,13 @@ class BibleService {
   }
 
   runSearch(bible: BibleData, query: string): SearchResultSet | null {
-    const normalized = query.trim();
+    const parsed = parseSearchQuery(query);
 
-    if (!bible || !normalized) {
+    if (!bible || !parsed.indexQuery) {
       return null;
     }
 
-    const lower = normalized.toLowerCase();
+    const lower = parsed.indexQuery.toLowerCase();
     const markupFlags = markupFlagsFromBible(bible);
     let totalMatches = 0;
     const matches: SearchMatch[] = [];
@@ -1250,7 +1251,10 @@ class BibleService {
           }
 
           const plainText = stripVerseMarkers(verse.text, markupFlags);
-          if (plainText.toLowerCase().includes(lower)) {
+          const matchesQuery = parsed.phrases.length > 0
+            ? textContainsAllPhrases(plainText, parsed.phrases)
+            : plainText.toLowerCase().includes(lower);
+          if (matchesQuery) {
             totalMatches += 1;
             if (matches.length < SEARCH_LIMIT) {
               matches.push(
@@ -1263,7 +1267,7 @@ class BibleService {
     }
 
     return {
-      query: normalized,
+      query: parsed.raw,
       matches,
       total: totalMatches,
       limited: matches.length < totalMatches

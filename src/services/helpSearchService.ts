@@ -1,5 +1,6 @@
 import MiniSearch from 'minisearch';
 import type { HelpSearchDocument, HelpSearchIndex } from '../models/help';
+import { parseSearchQuery, textContainsAllPhrases, type ParsedSearchQuery } from './searchQueryParser';
 
 export interface HelpSearchHit {
   id: string;
@@ -11,22 +12,29 @@ export interface HelpSearchHit {
 
 const SNIPPET_RADIUS = 60;
 
-function buildSnippet(body: string, query: string): string {
+function collectMatchNeedles(parsed: ParsedSearchQuery): string[] {
+  if (parsed.phrases.length > 0) {
+    return parsed.phrases.map((phrase) => phrase.toLowerCase());
+  }
+
+  return parsed.indexQuery
+    .toLowerCase()
+    .split(/\s+/)
+    .map((term) => term.trim())
+    .filter(Boolean);
+}
+
+function buildSnippet(body: string, parsed: ParsedSearchQuery): string {
   const normalizedBody = body.replace(/\s+/g, ' ').trim();
   if (!normalizedBody) {
     return '';
   }
 
-  const terms = query
-    .toLowerCase()
-    .split(/\s+/)
-    .map((term) => term.trim())
-    .filter(Boolean);
-
+  const needles = collectMatchNeedles(parsed);
   const lower = normalizedBody.toLowerCase();
   let matchIndex = -1;
-  for (const term of terms) {
-    const index = lower.indexOf(term);
+  for (const needle of needles) {
+    const index = lower.indexOf(needle);
     if (index >= 0) {
       matchIndex = index;
       break;
@@ -44,19 +52,40 @@ function buildSnippet(body: string, query: string): string {
   return `${prefix}${normalizedBody.slice(start, end).trim()}${suffix}`;
 }
 
-function matchHeadingSlug(doc: HelpSearchDocument, query: string): string | undefined {
-  const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
-  if (terms.length === 0) {
+function matchHeadingSlug(doc: HelpSearchDocument, parsed: ParsedSearchQuery): string | undefined {
+  const needles = collectMatchNeedles(parsed);
+  if (needles.length === 0) {
     return undefined;
   }
 
   for (let index = 0; index < doc.headings.length; index += 1) {
-    const heading = doc.headings[index]?.toLowerCase() ?? '';
-    if (terms.some((term) => heading.includes(term))) {
+    const heading = doc.headings[index] ?? '';
+    if (parsed.phrases.length > 0) {
+      if (textContainsAllPhrases(heading, parsed.phrases)) {
+        return doc.headingSlugs?.[index];
+      }
+      continue;
+    }
+
+    const lowerHeading = heading.toLowerCase();
+    if (needles.some((needle) => lowerHeading.includes(needle))) {
       return doc.headingSlugs?.[index];
     }
   }
   return undefined;
+}
+
+function documentContainsPhrases(doc: HelpSearchDocument, phrases: readonly string[]): boolean {
+  if (textContainsAllPhrases(doc.title, phrases)) {
+    return true;
+  }
+  if (textContainsAllPhrases(doc.section, phrases)) {
+    return true;
+  }
+  if (doc.headings.some((heading) => textContainsAllPhrases(heading, phrases))) {
+    return true;
+  }
+  return textContainsAllPhrases(doc.body, phrases);
 }
 
 class HelpSearchService {
@@ -69,8 +98,11 @@ class HelpSearchService {
       storeFields: ['title', 'section', 'headings', 'headingSlugs', 'body'],
       searchOptions: {
         boost: { title: 4, headings: 2, section: 1.5, body: 1 },
+        // Require every query term so multi-word searches stay on-topic.
+        combineWith: 'AND',
         prefix: true,
-        fuzzy: 0.15,
+        // Fuzzy only for longer tokens — short fuzzy matches (e.g. processing→pressing) are noisy.
+        fuzzy: (term) => (term.length >= 7 ? 0.15 : 0),
       },
     });
 
@@ -89,12 +121,46 @@ class HelpSearchService {
   }
 
   search(queryInput: string, limit = 20): HelpSearchHit[] {
-    const query = queryInput.trim();
-    if (!query || !this.index) {
+    const parsed = parseSearchQuery(queryInput);
+    if (!parsed.indexQuery || !this.index) {
       return [];
     }
 
-    const results = this.index.search(query);
+    const hasPhrases = parsed.phrases.length > 0;
+    let results;
+    try {
+      results = this.index.search(parsed.indexQuery, {
+        // Phrase queries need exact consecutive text; skip fuzzy/prefix expansion.
+        ...(hasPhrases ? { fuzzy: 0, prefix: false } : {}),
+        ...(hasPhrases
+          ? {
+              filter: (result) => {
+                const doc = this.documentsById.get(String(result.id));
+                return doc ? documentContainsPhrases(doc, parsed.phrases) : false;
+              },
+            }
+          : {}),
+      });
+    } catch {
+      // MiniSearch throws when all query tokens are filtered out.
+      results = [];
+    }
+
+    // Help corpora are small: if a quoted phrase yields no indexed hits, scan docs
+    // so literal substrings still match (punctuation / tokenization edge cases).
+    if (hasPhrases && results.length === 0) {
+      return [...this.documentsById.values()]
+        .filter((doc) => documentContainsPhrases(doc, parsed.phrases))
+        .slice(0, limit)
+        .map((doc) => ({
+          id: doc.id,
+          title: doc.title,
+          section: doc.section,
+          snippet: buildSnippet(doc.body, parsed),
+          headingSlug: matchHeadingSlug(doc, parsed),
+        }));
+    }
+
     return results.slice(0, limit).flatMap((result) => {
       const doc = this.documentsById.get(String(result.id));
       if (!doc) {
@@ -104,8 +170,8 @@ class HelpSearchService {
         id: doc.id,
         title: doc.title,
         section: doc.section,
-        snippet: buildSnippet(doc.body, query),
-        headingSlug: matchHeadingSlug(doc, query),
+        snippet: buildSnippet(doc.body, parsed),
+        headingSlug: matchHeadingSlug(doc, parsed),
       }];
     });
   }

@@ -32,6 +32,7 @@ export interface HelpSearchIndex {
 
 export type HelpTourBeforeAction =
   | { action: 'openSettings' }
+  | { action: 'openAccountSync' }
   | { action: 'openTranslationsPanel' }
   | { action: 'ensureTranslationsTab' }
   | { action: 'openResourcesPanel' }

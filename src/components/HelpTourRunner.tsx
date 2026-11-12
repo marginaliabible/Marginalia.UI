@@ -6,6 +6,7 @@ import { isElementVisible } from '../help/isElementVisible';
 import { scrollTourTargetIntoView } from '../help/scrollTourTargetIntoView';
 import { renderTourContent } from '../help/renderTourContent';
 import { HELP_OPEN_ARTICLE_EVENT } from '../help/openHelpArticle';
+import { openHelpAccountSync } from '../help/accountSyncOpener';
 import { ensureResourcesPanelTourReady } from '../help/resourcesPanelTourGates';
 import {
   clearTourResumeIndex,
@@ -118,6 +119,11 @@ const HelpTourRunner: React.FC<HelpTourRunnerProps> = ({ onOpenSettings, goToRef
       await new Promise((resolve) => window.setTimeout(resolve, 400));
       return;
     }
+    if (action.action === 'openAccountSync') {
+      openHelpAccountSync();
+      await new Promise((resolve) => window.setTimeout(resolve, 350));
+      return;
+    }
     if (action.action === 'openTranslationsPanel') {
       const context = ensureVerseContext();
       dispatch(openVerseTabs({
@@ -190,6 +196,8 @@ const HelpTourRunner: React.FC<HelpTourRunnerProps> = ({ onOpenSettings, goToRef
         await runBeforeAction({ action: 'openTranslationsPanel' });
       } else if (targetId === 'settings-button' || targetId.startsWith('settings-')) {
         await runBeforeAction({ action: 'openSettings' });
+      } else if (targetId === 'account-sync-button' || targetId.startsWith('account-sync-')) {
+        await runBeforeAction({ action: 'openAccountSync' });
       } else if (
         targetId === 'search-panel'
         || targetId === 'search-results'

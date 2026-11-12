@@ -3,6 +3,7 @@ import type { BibleData } from '../models/bible';
 import { SearchMatch } from '../models/bible';
 import { markupFlagsFromBible, stripVerseMarkers } from '../utils/verseMarkup';
 import { normalizeTerm } from './searchNormalizer';
+import { parseSearchQuery, textContainsAllPhrases } from './searchQueryParser';
 
 interface VerseDocument {
   id: string;
@@ -29,6 +30,12 @@ const DEFAULT_CACHED_INDEXES = 2;
  */
 const FUZZY_TOLERANCE = 0.05;
 const MIN_FUZZY_TERM_LENGTH = 7;
+
+/** True when at least one query token survives language-specific normalization. */
+function hasSearchableTokens(indexQuery: string, language?: string | string[]): boolean {
+  const tokens = indexQuery.toLowerCase().split(/[^\p{L}\p{N}']+/u).filter(Boolean);
+  return tokens.some((token) => normalizeTerm(token, language) !== null);
+}
 
 class SearchIndexService {
   private readonly indexes = new Map<string, MiniSearch<VerseDocument>>();
@@ -89,6 +96,18 @@ class SearchIndexService {
     bible: BibleData,
     language?: string | string[],
   ): IndexedSearchResult | null {
+    const parsed = parseSearchQuery(query);
+    if (!parsed.indexQuery) {
+      return null;
+    }
+
+    const hasPhrases = parsed.phrases.length > 0;
+    // Stopword-only phrases (e.g. "it is") leave MiniSearch with no tokens.
+    // Return null so the caller can fall back to literal substring search.
+    if (hasPhrases && !hasSearchableTokens(parsed.indexQuery, language)) {
+      return null;
+    }
+
     if (!this.hasIndex(translationId)) {
       this.buildIndex(translationId, bible, language);
     }
@@ -100,15 +119,25 @@ class SearchIndexService {
     this.touchIndex(translationId, index);
 
     const searchOptions: SearchOptions = {
-      fuzzy: (term) => (term.length >= MIN_FUZZY_TERM_LENGTH ? FUZZY_TOLERANCE : 0),
+      // Phrase queries need exact consecutive text; skip fuzzy candidate expansion.
+      fuzzy: hasPhrases
+        ? 0
+        : (term) => (term.length >= MIN_FUZZY_TERM_LENGTH ? FUZZY_TOLERANCE : 0),
       combineWith: 'AND',
+      ...(hasPhrases
+        ? {
+            filter: (result) =>
+              textContainsAllPhrases(String(result['text'] ?? ''), parsed.phrases),
+          }
+        : {}),
     };
 
     let results;
     try {
-      results = index.search(query, searchOptions);
+      results = index.search(parsed.indexQuery, searchOptions);
     } catch {
       // MiniSearch throws when all query tokens are filtered out
+      // (e.g. stopword-only phrases). Let the caller use substring fallback.
       return null;
     }
 

@@ -1,6 +1,7 @@
 import MiniSearch from 'minisearch';
 import type { FederatedProvider } from '../models/bible';
 import { normalizeEnglishTerm } from './searchNormalizer';
+import { parseSearchQuery, textContainsAllPhrases } from './searchQueryParser';
 import {
   DEFAULT_DOCUMENT_STORE_ADDRESS,
   buildDocumentStorePageUrl,
@@ -90,11 +91,12 @@ export async function searchResourceDocumentTitles(
   sourceUrls: string[] = [],
   preferences?: SourcePreferences
 ): Promise<ResourceDocumentTitleSearchResultSet | null> {
-  const query = queryInput.trim();
-  if (!query) {
+  const parsed = parseSearchQuery(queryInput);
+  if (!parsed.indexQuery) {
     return null;
   }
 
+  const query = parsed.raw;
   const candidates = await loadResourceLibraryCandidates(sourceUrls);
   if (candidates.length === 0) {
     return {
@@ -127,11 +129,18 @@ export async function searchResourceDocumentTitles(
 
   index.addAll(documents);
 
+  const hasPhrases = parsed.phrases.length > 0;
   let results;
   try {
-    results = index.search(query, {
-      fuzzy: (term: string) => (term.length >= 7 ? 0.05 : 0),
+    results = index.search(parsed.indexQuery, {
+      fuzzy: hasPhrases ? 0 : (term: string) => (term.length >= 7 ? 0.05 : 0),
       combineWith: 'AND',
+      ...(hasPhrases
+        ? {
+            filter: (result) =>
+              textContainsAllPhrases(String(result['title'] ?? ''), parsed.phrases),
+          }
+        : {}),
     });
   } catch {
     return {

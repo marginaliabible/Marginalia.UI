@@ -7,6 +7,7 @@ import CloudFolderPicker, {
 } from './CloudFolderPicker';
 import type { FederatedProvider, FederatedSession } from '../models/bible';
 import { setLinkedCloudProviders } from '../help/linkedCloudProviders';
+import { registerHelpAccountSyncOpener } from '../help/accountSyncOpener';
 import { registerAccountSyncRevealHandler } from '../services/accountSyncRevealService';
 import './AccountControl.scss';
 
@@ -40,6 +41,8 @@ const AccountControl: React.FC<AccountControlProps> = ({ subscriptions }) => {
     setLinkedCloudProviders(EMPTY_PROVIDER_FLAGS);
   }, []);
 
+  useEffect(() => registerHelpAccountSyncOpener(() => setIsModalOpen(true)), []);
+
   useEffect(() => registerAccountSyncRevealHandler((target: AccountSyncRevealTarget) => {
     revealRequestCounterRef.current += 1;
     setRevealRequest({ requestId: revealRequestCounterRef.current, target });
@@ -71,6 +74,7 @@ const AccountControl: React.FC<AccountControlProps> = ({ subscriptions }) => {
         type="button"
         className="btn btn-outline-secondary rounded-circle d-inline-flex align-items-center justify-content-center account-trigger"
         aria-label="Open File Sync"
+        data-help="account-sync-button"
         onClick={() => setIsModalOpen(true)}
       >
         <i className="fa-solid fa-folder-open" aria-hidden="true"></i>
@@ -82,7 +86,7 @@ const AccountControl: React.FC<AccountControlProps> = ({ subscriptions }) => {
             className="modal-backdrop fade show account-modal-backdrop"
             onClick={closeModal}
           />
-          <div className="modal fade show d-block account-modal" tabIndex={-1} aria-modal="true" role="dialog">
+          <div className="modal fade show d-block account-modal" tabIndex={-1} aria-modal="true" role="dialog" data-help="account-sync-modal">
             <div className="modal-dialog modal-dialog-centered modal-lg account-modal-dialog">
               <div className="modal-content shadow border-0">
                 <div className="modal-header">

@@ -2282,6 +2282,7 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
                                 type="button"
                                 className="btn btn-link btn-sm cloud-folder-tree-connect-link"
                                 aria-label={`${rootLinkLabel} ${ROOT_LABEL[node.provider]}`}
+                                data-help="account-sync-provider-connect"
                                 onClick={() => onConnectRequested(node.provider)}
                               >
                                 {rootLinkLabel}

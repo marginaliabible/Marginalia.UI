@@ -22,6 +22,22 @@ describe('helpSearchService', () => {
           headingSlugs: ['run-a-search', 'tips'],
           body: 'Type a word or phrase in the search box to find verses.',
         },
+        {
+          id: 'account-sync',
+          title: 'Account Sync',
+          section: 'Basics',
+          headings: ['Usage and plan limits'],
+          headingSlugs: ['usage-and-plan-limits'],
+          body: 'This is referred to as Committed Processing, and its impact is shown as a blue segment.',
+        },
+        {
+          id: 'resources',
+          title: 'Resources panel',
+          section: 'Panels',
+          headings: ['Resource Tags'],
+          headingSlugs: ['resource-tags'],
+          body: 'Long-pressing a swatch shows the tag name on mobile.',
+        },
       ],
     });
   });
@@ -42,6 +58,24 @@ describe('helpSearchService', () => {
     const hits = helpSearchService.search('tips');
     const searchHit = hits.find((hit) => hit.id === 'search');
     expect(searchHit?.headingSlug).toBe('tips');
+  });
+
+  it('requires all query terms and avoids fuzzy false positives', () => {
+    const hits = helpSearchService.search('committed processing');
+    expect(hits.map((hit) => hit.id)).toEqual(['account-sync']);
+  });
+
+  it('treats quoted queries as literal consecutive phrases', () => {
+    const phraseHits = helpSearchService.search('"committed processing"');
+    expect(phraseHits.map((hit) => hit.id)).toEqual(['account-sync']);
+
+    // Same words, wrong order — must not match a quoted phrase.
+    expect(helpSearchService.search('"processing committed"')).toEqual([]);
+
+    // Unquoted still matches as an unordered AND of terms.
+    expect(helpSearchService.search('processing committed').map((hit) => hit.id)).toEqual([
+      'account-sync',
+    ]);
   });
 
   it('returns an empty list for blank queries', () => {

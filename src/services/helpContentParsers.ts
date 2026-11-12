@@ -8,11 +8,12 @@ import type {
 
 const SIMPLE_BEFORE_ACTIONS = new Set([
   'openSettings',
+  'openAccountSync',
   'openTranslationsPanel',
   'ensureTranslationsTab',
   'openResourcesPanel',
   'ensureResourcesTab',
-] as const satisfies ReadonlyArray<HelpTourBeforeAction['action']>);
+] as const satisfies ReadonlyArray<Exclude<HelpTourBeforeAction['action'], 'selectPanelTab'>>);
 
 const PANEL_TAB_TYPES = new Set(['search', 'translations', 'resources', 'links', 'help'] as const);
 

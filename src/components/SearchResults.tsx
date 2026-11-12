@@ -8,6 +8,7 @@ import type { OpenDocumentPayload } from '../models/windowMessages';
 import { buildMarkupDocumentShellUrl } from '../utils/resourceLibraryConfig';
 import { searchResourceDocumentTitles, type ResourceDocumentTitleSearchResultSet } from '../services/resourceLibrarySearchService';
 import { normalizeEnglishTerm } from '../services/searchNormalizer';
+import { parseSearchQuery } from '../services/searchQueryParser';
 import { isNewTestamentBook } from '../utils/book-aliases';
 import { useSourcePreferences } from '../hooks/useSourcePreferences';
 import { subscriptionItemFromResource } from '../utils/accountSyncTarget';
@@ -41,17 +42,39 @@ const shouldHighlightTerm = (term: string): boolean => {
 };
 
 const collectHighlightCandidates = (query: string): string[] => {
-  const phrase = query.toLowerCase();
-  const terms = splitQueryTerms(query).filter(shouldHighlightTerm);
-  const candidates = new Set<string>(terms.length > 0 ? [phrase, ...terms] : [phrase]);
+  const parsed = parseSearchQuery(query);
+  const candidates = new Set<string>();
+
+  for (const phrase of parsed.phrases) {
+    candidates.add(phrase.toLowerCase());
+  }
+
+  const terms = splitQueryTerms(parsed.indexQuery).filter(shouldHighlightTerm);
+  if (parsed.phrases.length === 0) {
+    const phrase = parsed.indexQuery.toLowerCase();
+    if (phrase) {
+      candidates.add(phrase);
+    }
+  }
+
+  for (const term of terms) {
+    candidates.add(term);
+  }
 
   // Add normalized English roots so stemmed matches are visually highlighted
   // (e.g. "converse" query highlights "convers" in "conversation").
-  for (const term of terms) {
-    const normalized = normalizeEnglishTerm(term);
-    if (normalized && normalized.length >= 4) {
-      candidates.add(normalized);
+  // Skip stemming extras for quoted phrases — those are literal matches.
+  if (parsed.phrases.length === 0) {
+    for (const term of terms) {
+      const normalized = normalizeEnglishTerm(term);
+      if (normalized && normalized.length >= 4) {
+        candidates.add(normalized);
+      }
     }
+  }
+
+  if (candidates.size === 0 && parsed.indexQuery) {
+    candidates.add(parsed.indexQuery.toLowerCase());
   }
 
   return Array.from(candidates).sort((a, b) => b.length - a.length);
