@@ -3,6 +3,7 @@ import type { DocumentSubscriptionItem } from '../models/accountSync';
 import type { DocumentSyncItem } from '../store/slices/uiSlice';
 import { requestAccountSyncReveal } from '../services/accountSyncRevealService';
 import { showToast } from '../services/toastService';
+import { routeInteraction } from '../services/windowRouting';
 import { resolveAccountSyncRevealTarget } from '../utils/accountSyncTarget';
 
 interface AccountSyncLocateButtonProps {
@@ -22,14 +23,21 @@ const AccountSyncLocateButton: React.FC<AccountSyncLocateButtonProps> = ({
   }
 
   const handleClick = () => {
-    if (requestAccountSyncReveal(target)) {
-      return;
-    }
+    // Account Sync lives in the Bible window; from a document popout, route the reveal there.
+    routeInteraction(
+      { kind: 'bible', type: 'reveal-account-sync', payload: target },
+      () => {
+        if (requestAccountSyncReveal(target)) {
+          return;
+        }
 
-    showToast({
-      tone: 'error',
-      message: `Couldn't open Account Sync to locate '${documentLabel}'.`,
-    });
+        showToast({
+          tone: 'error',
+          message: `Couldn't open Account Sync to locate '${documentLabel}'.`,
+        });
+      },
+      { quiet: true }
+    );
   };
 
   return (

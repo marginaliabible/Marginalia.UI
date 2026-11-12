@@ -1,6 +1,6 @@
 import type { QuickJumpTarget, ThemePreference } from './bible';
 import type { PanelTab, VerseContext } from './tab';
-import type { DocumentSubscriptionItem } from './accountSync';
+import type { AccountSyncRevealTarget, DocumentSubscriptionItem } from './accountSync';
 import type { DocumentSyncItem, TranslationRecord } from '../store/slices/uiSlice';
 import type { ResourceTagOverrides } from '../utils/sourceSubscriptions';
 
@@ -53,6 +53,7 @@ export type WindowCommand =
   | { kind: 'bible'; type: 'show-verses'; payload: ShowVersesPayload }
   | { kind: 'bible'; type: 'go-to-reference'; payload: { target: QuickJumpTarget; translationId?: string } }
   | { kind: 'bible'; type: 'focus-search' }
+  | { kind: 'bible'; type: 'reveal-account-sync'; payload: AccountSyncRevealTarget }
   | { kind: 'document'; type: 'open-document'; payload: OpenDocumentPayload }
   | { kind: 'document'; type: 'open-document-link'; payload: { hash: string } };
 

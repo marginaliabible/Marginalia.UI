@@ -5,6 +5,7 @@ import type { RootState } from '../store/store';
 import { openVerseTabs, runPanelSearch } from '../store/slices/bibleSlice';
 import { closeDocumentViewer, openDocumentViewer } from '../store/slices/uiSlice';
 import { isDocumentWindow, windowChannel } from '../services/windowChannel';
+import { requestAccountSyncReveal } from '../services/accountSyncRevealService';
 import { takePendingCommand } from '../services/windowRouting';
 import { focusWhenWindowActive } from '../utils/focusWhenWindowActive';
 import type { QuickJumpTarget } from '../models/bible';
@@ -66,6 +67,11 @@ export const useWindowCommandHandler = ({ ready, goToReference, focusSearch }: U
           if (!isDocumentWindow) {
             stopFocusSearch?.();
             stopFocusSearch = focusWhenWindowActive(() => latestRef.current.focusSearch());
+          }
+          return;
+        case 'reveal-account-sync':
+          if (!isDocumentWindow) {
+            requestAccountSyncReveal(command.payload);
           }
           return;
         case 'open-document':

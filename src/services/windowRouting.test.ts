@@ -392,6 +392,29 @@ describe('routeInteraction', () => {
     expect(getToasts()).toEqual([]);
   });
 
+  it('sends Find in Account Sync from a document window to the Bible window, or carries it to a new Bible tab', () => {
+    const reader = bus.createWindow('reader', 'document');
+    const reveal: WindowCommand = {
+      kind: 'bible',
+      type: 'reveal-account-sync',
+      payload: { kind: 'cloud', provider: 'google', itemId: 'file-1' },
+    };
+    let carried: string | null = null;
+    openSpy.mockImplementation(() => {
+      carried = window.sessionStorage.getItem(PENDING_COMMAND_KEY);
+      return openedTab();
+    });
+
+    expect(routeInteraction(reveal, jest.fn(), { channel: reader, quiet: true })).toBe('new-window');
+    expect(JSON.parse(carried as unknown as string)).toEqual(reveal);
+
+    const bible = bus.createWindow('bible');
+    const bibleCommands = received(bible);
+    expect(routeInteraction(reveal, jest.fn(), { channel: reader, quiet: true })).toBe('remote');
+    expect(bibleCommands).toEqual([reveal]);
+    expect(getToasts()).toEqual([]);
+  });
+
   it('mutes each kind independently with "Got it!"', () => {
     const bible = bus.createWindow('bible');
     bus.createWindow('panel', 'panel');

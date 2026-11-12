@@ -124,7 +124,9 @@ export function openBibleWindow(command: WindowCommand): Window | null {
   }
 
   const route = bibleRouteFor(command);
-  const carriesCommand = command.type === 'open-document' || command.type === 'focus-search';
+  const carriesCommand = command.type === 'open-document'
+    || command.type === 'focus-search'
+    || command.type === 'reveal-account-sync';
   let opened: Window | null = null;
   try {
     if (carriesCommand) {
