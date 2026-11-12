@@ -22,4 +22,26 @@ describe('extractPageSizeRules', () => {
     expect(result.cssText).not.toContain('.h18{');
     expect(result.cssText).not.toContain('pt');
   });
+
+  it('extracts hex pdf2htmlEX page-box classes (e.g. h48b, wc)', () => {
+    const css = [
+      '.h48b{height:749px;}',
+      '.h48c{height:749.5px;}',
+      '.ha5f{height:775px;}',
+      '.w6{width:553px;}',
+      '.w7{width:553.5px;}',
+      '.wc{width:528px;}',
+      '.h100a{height:21.2964px;}',
+    ].join('');
+
+    const result = extractPageSizeRules(css);
+
+    expect(result.heights.h48b).toBe(749);
+    expect(result.heights.h48c).toBe(749.5);
+    expect(result.heights.ha5f).toBe(775);
+    expect(result.widths.wc).toBe(528);
+    expect(result.cssText).toContain('.h48b{height:749px;}');
+    expect(result.cssText).toContain('.wc{width:528px;}');
+    expect(result.cssText).not.toContain('.h100a{');
+  });
 });

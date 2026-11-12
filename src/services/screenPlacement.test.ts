@@ -1,6 +1,7 @@
 import { __resetToastsForTests, getToasts, toastActions } from './toastService';
 import {
   SCREEN_PLACEMENT_OFFER_MESSAGE,
+  SCREEN_PLACEMENT_SINGLE_DISPLAY_OFFER_MESSAGE,
   __resetScreenPlacementForTests,
   getScreenLayout,
   initScreenPlacement,
@@ -70,18 +71,24 @@ describe('screenPlacement', () => {
     Object.defineProperty(window.screen, 'isExtended', { value: undefined, configurable: true });
   });
 
-  it('stays out of the way with a single display', async () => {
+  it('offers a single-display message and does not expose a multi-screen layout', async () => {
     const browser = setUpBrowser({ isExtended: false, state: 'prompt' });
     await initScreenPlacement();
     offerScreenPlacement();
 
-    expect(getToasts()).toEqual([]);
+    const toasts = getToasts();
+    expect(toasts).toHaveLength(1);
+    expect(toasts[0].message).toBe(SCREEN_PLACEMENT_SINGLE_DISPLAY_OFFER_MESSAGE);
     expect(getScreenLayout()).toBeNull();
     expect(browser.getScreenDetails).not.toHaveBeenCalled();
   });
 
-  it('stays out of the way outside Chromium, where isExtended is undefined', async () => {
-    setUpBrowser({ isExtended: undefined, state: 'prompt' });
+  it('stays out of the way outside Chromium, where getScreenDetails is missing', async () => {
+    Object.defineProperty(window.screen, 'isExtended', { value: undefined, configurable: true });
+    Object.defineProperty(navigator, 'permissions', {
+      value: { query: jest.fn(async () => ({ state: 'prompt', addEventListener: jest.fn(), removeEventListener: jest.fn() })) },
+      configurable: true,
+    });
     await initScreenPlacement();
     offerScreenPlacement();
     expect(getToasts()).toEqual([]);

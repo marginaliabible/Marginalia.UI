@@ -13,17 +13,18 @@ export function extractPageSizeRules(documentCssText: string): {
 } {
   const heights: Record<string, number> = {};
   const widths: Record<string, number> = {};
-  const heightRe = /\.(h\d+)\{height:([\d.]+)px;\}/g;
-  const widthRe = /\.(w\d+)\{width:([\d.]+)px;\}/g;
+  // pdf2htmlEX uses hex suffixes (h48b, wc) — not decimal-only class names.
+  const heightRe = /\.(h[0-9a-f]+)\{height:([\d.]+)px;\}/gi;
+  const widthRe = /\.(w[0-9a-f]+)\{width:([\d.]+)px;\}/gi;
   for (const match of documentCssText.matchAll(heightRe)) {
-    const cls = match[1];
+    const cls = match[1]?.toLowerCase();
     const px = Number.parseFloat(match[2] ?? '');
     if (cls && px > 0) {
       heights[cls] = px;
     }
   }
   for (const match of documentCssText.matchAll(widthRe)) {
-    const cls = match[1];
+    const cls = match[1]?.toLowerCase();
     const px = Number.parseFloat(match[2] ?? '');
     if (cls && px > 0) {
       widths[cls] = px;

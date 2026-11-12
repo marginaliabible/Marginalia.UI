@@ -24,6 +24,9 @@ const PERMISSION_NAMES = ['window-management', 'window-placement'];
 export const SCREEN_PLACEMENT_OFFER_MESSAGE =
   'We see you\'re rocking multiple monitors! Allow window management and we\'ll remember which displays you use for which pop-outs.';
 
+export const SCREEN_PLACEMENT_SINGLE_DISPLAY_OFFER_MESSAGE =
+  'Allow window management to ensure new windows get displayed when reused.';
+
 let permission: PlacementPermission = 'unknown';
 let details: ScreenDetailsLike | null = null;
 let offeredThisLoad = false;
@@ -69,7 +72,7 @@ async function loadScreenDetails(): Promise<boolean> {
 
 /** Learns the permission state up front, so a pop-out click can place its window synchronously. */
 export async function initScreenPlacement(): Promise<void> {
-  if (!hasMultipleDisplays() || !getScreenDetailsFn() || typeof navigator === 'undefined' || !navigator.permissions) {
+  if (!getScreenDetailsFn() || typeof navigator === 'undefined' || !navigator.permissions) {
     return;
   }
 
@@ -134,9 +137,9 @@ export function moveToOtherScreen(popup: Window): void {
   }
 }
 
-/** On a multi-display setup, asks once per page load whether pop-outs may use the other displays. */
+/** Asks once per page load whether pop-outs may use window management (multi-display placement or reliable reuse). */
 export function offerScreenPlacement(onGranted?: () => void): void {
-  if (offeredThisLoad || permission !== 'prompt' || !hasMultipleDisplays()) {
+  if (offeredThisLoad || permission !== 'prompt') {
     return;
   }
 
@@ -144,7 +147,9 @@ export function offerScreenPlacement(onGranted?: () => void): void {
   let toastId = '';
   toastId = showToast({
     key: 'screen-placement-offer',
-    message: SCREEN_PLACEMENT_OFFER_MESSAGE,
+    message: hasMultipleDisplays()
+      ? SCREEN_PLACEMENT_OFFER_MESSAGE
+      : SCREEN_PLACEMENT_SINGLE_DISPLAY_OFFER_MESSAGE,
     actions: [
       {
         label: 'Allow',

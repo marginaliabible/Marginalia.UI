@@ -572,6 +572,26 @@ ${options.bodyHtml}
       return natural;
     }
 
+    // clientHeight is only safe before rescale. After pdf2htmlEX writes an inline
+    // height, that box is already scaled — using it as original_height double-scales
+    // the page (e.g. 749 → 1220 → 1988) and leaves a tall empty band under the scan.
+    function dimensionFromClientBox(page, prop) {
+      if (!page || !page.page) {
+        return 0;
+      }
+      var client = prop === 'height' ? page.page.clientHeight : page.page.clientWidth;
+      if (!(client >= PAGE_SIZE_MIN_PX)) {
+        return 0;
+      }
+      var inline = prop === 'height' ? page.page.style.height : page.page.style.width;
+      var scale = viewer.scale || page.cur_scale || 1;
+      if (inline && scale > 0) {
+        var unscaled = client / scale;
+        return unscaled >= PAGE_SIZE_MIN_PX ? unscaled : 0;
+      }
+      return client;
+    }
+
     function repairPageDimensions(page, applyRescale) {
       if (!page || !page.page) {
         return false;
@@ -585,7 +605,7 @@ ${options.bodyHtml}
       // or collapsed before the mega-stylesheet applies).
       var height = classH
         || dimensionFromBackgroundImage(page, 'height')
-        || (page.page.clientHeight >= PAGE_SIZE_MIN_PX ? page.page.clientHeight : 0);
+        || dimensionFromClientBox(page, 'height');
       var width = classW
         || dimensionFromBackgroundImage(page, 'width')
         || 0;

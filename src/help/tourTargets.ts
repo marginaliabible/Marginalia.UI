@@ -9,6 +9,7 @@ export const HELP_TOUR_TARGETS = {
   'account-sync-connect-modal': '[data-help="account-sync-connect-modal"]',
   'account-sync-sync-files': '[data-help="account-sync-sync-files"]',
   'account-sync-connect-submit': '[data-help="account-sync-connect-submit"]',
+  'cloud-folder-providers-pane': '[data-help="cloud-folder-providers-pane"]',
   'search-input': '[data-help="search-input"]',
   'selected-verse': '.verse-text.is-selected',
   'search-submit': '[data-help="search-submit"]',

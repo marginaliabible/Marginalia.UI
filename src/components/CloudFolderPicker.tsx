@@ -2209,6 +2209,7 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
           {showProvidersPane && (
             <div
               id="cloud-folder-providers-pane"
+              data-help="cloud-folder-providers-pane"
               className="cloud-folder-picker-pane-body"
               role="region"
               aria-labelledby={isMobileStacked ? 'cloud-folder-providers-toggle' : undefined}
