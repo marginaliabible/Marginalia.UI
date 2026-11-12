@@ -11,7 +11,8 @@ import { loadPageScriptureReferences } from '../utils/loadPageScriptureReference
 import { applyScriptureLinkOverlays, clearScriptureLinks } from '../utils/scriptureLinkOverlays';
 import { buildTextLayerHaystack, findAllMatchRanges, getMatchClientRects, placeOverlayOnPage } from '../utils/documentTextMatch';
 import { collapseRedundantTextLayerCopySpaces } from '../utils/textLayerCopySpaces';
-import { clampScale, computeFitWidthScale, fitWidthPageIndex, stepScale } from '../utils/viewerZoom';
+import { clampScale, computeFitWidthScale, fitWidthPageIndex, MAX_SCALE, stepScale } from '../utils/viewerZoom';
+import { extractPageSizeRules, PAGE_SIZE_MIN_PX } from '../utils/extractPageSizeRules';
 import { sanctumPlugin } from '@marginalia/sanctum';
 import AccountSyncLocateButton from './AccountSyncLocateButton';
 import DocumentPopoutButton from './DocumentPopoutButton';
@@ -21,6 +22,12 @@ const SanctumDocumentToolbarExtras = sanctumPlugin.DocumentToolbarExtras;
 
 /** Pages to keep materialized around the active page (matches pdf2htmlEX preload_pages ≈ 3). */
 const PAGE_WINDOW_RADIUS = 2;
+/**
+ * Max distance from the scroll target / current page that may be fetched.
+ * pdf2htmlEX render() treats every zero-height placeholder as visible; without a
+ * cap, jumping to a late page materializes the whole document and freezes the tab.
+ */
+const PAGE_LOAD_RADIUS = 5;
 
 /** App-origin absolute URL — srcdoc uses <base href=storage>, so /vendor/... would hit R2. */
 function appVendorUrl(fileName: string): string {
@@ -64,7 +71,13 @@ function computeMarkupFitWidthScale(frame: HTMLIFrameElement | null, pageNumber:
   if (!page) {
     return null;
   }
-  return computeFitWidthScale(container.clientWidth, page.offsetWidth, viewer.scale || 1);
+  const next = computeFitWidthScale(container.clientWidth, page.offsetWidth, viewer.scale || 1);
+  if (next === null) {
+    return null;
+  }
+  // Fit may land outside the manual zoom range, but keep a floor so a bad
+  // measurement cannot shrink the viewport enough to load dozens of pages.
+  return Math.min(MAX_SCALE * 1.5, Math.max(0.25, next));
 }
 
 function normalizeMatchText(value: string | null | undefined): string {
@@ -366,6 +379,12 @@ function buildViewerSrcDoc(options: {
   const baseCssUrl = appVendorUrl('base.min.css');
   const fancyCssUrl = appVendorUrl('fancy.min.css');
   const safeDocumentCss = options.documentCssText.replace(/<\/style/gi, '<\\/style');
+  const pageSizes = extractPageSizeRules(options.documentCssText);
+  const safePageSizeCss = pageSizes.cssText.replace(/<\/style/gi, '<\\/style');
+  const pageSizeMapsJson = JSON.stringify({
+    heights: pageSizes.heights,
+    widths: pageSizes.widths,
+  });
   return `<!DOCTYPE html>
 <html>
 <head>
@@ -374,6 +393,7 @@ function buildViewerSrcDoc(options: {
 <link rel="stylesheet" href="${baseCssUrl}"/>
 <link rel="stylesheet" href="${fancyCssUrl}"/>
 <style>${safeDocumentCss}</style>
+<style id="marginalia-page-sizes">${safePageSizeCss}</style>
 <style>
   html, body { margin: 0; height: 100%; background: transparent; }
   .loading-indicator, .loading-indicator.active { display: none !important; }
@@ -437,9 +457,12 @@ ${options.bodyHtml}
     });
     var viewer = window.pdf2htmlEX.defaultViewer;
     var pendingPageLoads = {};
-    var pendingScrollPageIndex = null;
+    // Pin the open target before init/render so a collapsed-placeholder render pass
+    // cannot request every page in the document.
+    var pendingScrollPageIndex = ${pageIndex};
     var scrollRetryTimer = null;
     var scrollReleaseTimer = null;
+    var pageLoadRadius = ${PAGE_LOAD_RADIUS};
 
     function clearPendingScroll() {
       pendingScrollPageIndex = null;
@@ -467,6 +490,158 @@ ${options.bodyHtml}
           scrollRetryTimer = null;
         }
       }, 600);
+    }
+
+    function pageLoadCenterIndex() {
+      if (typeof pendingScrollPageIndex === 'number') {
+        return pendingScrollPageIndex;
+      }
+      if (typeof viewer.first_page_idx === 'number') {
+        return viewer.first_page_idx;
+      }
+      if (typeof viewer.cur_page_idx === 'number') {
+        return viewer.cur_page_idx;
+      }
+      return 0;
+    }
+
+    function isPageLoadAllowed(pageIndex) {
+      if (typeof pageIndex !== 'number' || pageIndex < 0) {
+        return false;
+      }
+      var center = pageLoadCenterIndex();
+      if (Math.abs(pageIndex - center) <= pageLoadRadius) {
+        return true;
+      }
+      // During free scroll, allow the band around the current page as well.
+      if (
+        typeof pendingScrollPageIndex !== 'number'
+        && typeof viewer.cur_page_idx === 'number'
+        && Math.abs(pageIndex - viewer.cur_page_idx) <= pageLoadRadius
+      ) {
+        return true;
+      }
+      return false;
+    }
+
+    // Page-size maps are extracted in the parent and inlined below — do not regex the
+    // mega document.css inside this template string (\d escapes get eaten by the outer
+    // template literal, which previously yielded zero matches).
+    var PAGE_SIZE_MIN_PX = ${PAGE_SIZE_MIN_PX};
+    var classDimensionMaps = ${pageSizeMapsJson};
+    function getClassDimensionMaps() {
+      return classDimensionMaps;
+    }
+
+    function dimensionFromClassMaps(el, maps, prop) {
+      if (!el || !el.classList || !maps) {
+        return 0;
+      }
+      var table = prop === 'height' ? maps.heights : maps.widths;
+      for (var c = 0; c < el.classList.length; c += 1) {
+        var cls = el.classList[c];
+        var px = table[cls];
+        if (px > 0) {
+          return px;
+        }
+      }
+      return 0;
+    }
+
+    function dimensionFromBackgroundImage(page, prop) {
+      if (!page || !page.page) {
+        return 0;
+      }
+      var bi = page.page.querySelector('.bi');
+      if (!bi) {
+        return 0;
+      }
+      var natural = prop === 'height' ? bi.naturalHeight : bi.naturalWidth;
+      if (!(natural > PAGE_SIZE_MIN_PX)) {
+        return 0;
+      }
+      // Scanned pages often ship 2× bitmaps for CSS page boxes (~612×792).
+      var maps = getClassDimensionMaps();
+      var cssSize = dimensionFromClassMaps(bi, maps, prop) || dimensionFromClassMaps(page.page, maps, prop);
+      if (cssSize >= PAGE_SIZE_MIN_PX) {
+        return cssSize;
+      }
+      if (natural > 1400) {
+        return natural / 2;
+      }
+      return natural;
+    }
+
+    function repairPageDimensions(page, applyRescale) {
+      if (!page || !page.page) {
+        return false;
+      }
+      var maps = getClassDimensionMaps();
+      var classH = dimensionFromClassMaps(page.page, maps, 'height')
+        || dimensionFromClassMaps(page.content_box, maps, 'height');
+      var classW = dimensionFromClassMaps(page.page, maps, 'width')
+        || dimensionFromClassMaps(page.content_box, maps, 'width');
+      // Prefer authoring CSS class sizes over clientWidth/Height (often container-stretched
+      // or collapsed before the mega-stylesheet applies).
+      var height = classH
+        || dimensionFromBackgroundImage(page, 'height')
+        || (page.page.clientHeight >= PAGE_SIZE_MIN_PX ? page.page.clientHeight : 0);
+      var width = classW
+        || dimensionFromBackgroundImage(page, 'width')
+        || 0;
+      var changed = false;
+      if (height > PAGE_SIZE_MIN_PX && page.original_height !== height) {
+        page.original_height = height;
+        page.page.style.height = '';
+        changed = true;
+      }
+      if (width > PAGE_SIZE_MIN_PX && page.original_width !== width) {
+        page.original_width = width;
+        page.page.style.width = '';
+        changed = true;
+      }
+      if (changed && applyRescale !== false && typeof page.rescale === 'function' && page.original_height > PAGE_SIZE_MIN_PX) {
+        page.rescale(viewer.scale || 1);
+      }
+      return changed;
+    }
+
+    function safeViewerRescale(nextScale) {
+      if (!viewer) {
+        return;
+      }
+      var scale = nextScale || viewer.scale || 1;
+      viewer.scale = scale;
+      if (!viewer.pages) {
+        return;
+      }
+      for (var i = 0; i < viewer.pages.length; i += 1) {
+        var page = viewer.pages[i];
+        if (!page) {
+          continue;
+        }
+        if (!(page.original_height > PAGE_SIZE_MIN_PX)) {
+          // Never write height:0px — that permanently clips loaded page content.
+          page.cur_scale = scale;
+          continue;
+        }
+        if (typeof page.rescale === 'function') {
+          page.rescale(scale);
+        }
+      }
+    }
+
+    function repairPlaceholderDimensions() {
+      if (!viewer || !viewer.pages) {
+        return;
+      }
+      for (var i = 0; i < viewer.pages.length; i += 1) {
+        var page = viewer.pages[i];
+        if (!page || !page.page) {
+          continue;
+        }
+        repairPageDimensions(page, false);
+      }
     }
 
     function scrollToPageWhenReady(pageIndex) {
@@ -555,6 +730,98 @@ ${options.bodyHtml}
       attempt(25);
     }
 
+    // Install before DOMContentLoaded: Viewer constructor also listens for that event
+    // and would otherwise render() with the ungated loader first.
+    var origLoadPage = viewer.load_page.bind(viewer);
+    viewer.load_page = function (pageIndex, preload, callback) {
+      if (!isPageLoadAllowed(pageIndex)) {
+        return;
+      }
+      var wrappedCallback = function (loadedPage) {
+        repairPageDimensions(loadedPage || (viewer.pages && viewer.pages[pageIndex]));
+        window.parent.postMessage({
+          type: 'markup-page-settled',
+          pageIndex: pageIndex
+        }, '*');
+        if (typeof callback === 'function') {
+          try { callback(loadedPage); } catch (cbError) { /* ignore */ }
+        }
+      };
+      var page = viewer.pages && viewer.pages[pageIndex];
+      if (!page || page.loaded || viewer.pages_loading[pageIndex]) {
+        return origLoadPage(pageIndex, preload, wrappedCallback);
+      }
+      var el = page.page;
+      var blobUrl = el && el.getAttribute('data-page-url');
+      var storageUrl = el && el.getAttribute('data-storage-page-url');
+      if (!blobUrl && storageUrl) {
+        if (!pendingPageLoads[pageIndex]) {
+          pendingPageLoads[pageIndex] = [];
+          window.parent.postMessage({
+            type: 'markup-need-page',
+            pageIndex: pageIndex,
+            pageUrl: storageUrl
+          }, '*');
+        }
+        if (typeof callback === 'function') {
+          pendingPageLoads[pageIndex].push(callback);
+        }
+        // Still walk the preload chain so neighbors get requested too.
+        var remaining = typeof preload === 'undefined' ? viewer.config.preload_pages : preload;
+        if (remaining > 1 && isPageLoadAllowed(pageIndex + 1)) {
+          setTimeout(function () {
+            viewer.load_page(pageIndex + 1, remaining - 1);
+          }, 0);
+        }
+        return;
+      }
+      return origLoadPage(pageIndex, preload, wrappedCallback);
+    };
+
+    window.addEventListener('message', function (event) {
+      var data = event.data;
+      if (!data || typeof data !== 'object') {
+        return;
+      }
+      if (data.type === 'markup-scroll-to' && typeof data.pageIndex === 'number') {
+        scrollToPageWhenReady(data.pageIndex);
+        return;
+      }
+      if (data.type !== 'markup-page-ready') {
+        return;
+      }
+      var idx = data.pageIndex;
+      if (!isPageLoadAllowed(idx)) {
+        delete pendingPageLoads[idx];
+        return;
+      }
+      var readyPage = viewer.pages && viewer.pages[idx];
+      if (readyPage && readyPage.page && data.blobUrl) {
+        readyPage.page.setAttribute('data-page-url', data.blobUrl);
+      }
+      var callbacks = pendingPageLoads[idx] || [];
+      delete pendingPageLoads[idx];
+      origLoadPage(idx, 1, function (loadedPage) {
+        repairPageDimensions(loadedPage || (viewer.pages && viewer.pages[idx]));
+        for (var i = 0; i < callbacks.length; i += 1) {
+          try { callbacks[i](loadedPage); } catch (cbError) { /* ignore */ }
+        }
+        window.parent.postMessage({
+          type: 'markup-page-settled',
+          pageIndex: idx
+        }, '*');
+        // Loading a page at/before the target can change cumulative offsets.
+        if (
+          typeof pendingScrollPageIndex === 'number'
+          && idx <= pendingScrollPageIndex
+          && viewer
+          && typeof viewer.scroll_to === 'function'
+        ) {
+          viewer.scroll_to(pendingScrollPageIndex);
+        }
+      });
+    });
+
     function finish() {
       try {
         // Viewer registers DOMContentLoaded in the constructor. If that event already
@@ -562,91 +829,7 @@ ${options.bodyHtml}
         if (!viewer.pages && typeof viewer.init_after_loading_content === 'function') {
           viewer.init_after_loading_content();
         }
-
-        // Parent only materializes a page window up front (auth cookies don't reach
-        // iframe XHR). Intercept load_page so missing pages are fetched via postMessage.
-        if (viewer && typeof viewer.load_page === 'function') {
-          var origLoadPage = viewer.load_page.bind(viewer);
-          viewer.load_page = function (pageIndex, preload, callback) {
-            var wrappedCallback = function (loadedPage) {
-              window.parent.postMessage({
-                type: 'markup-page-settled',
-                pageIndex: pageIndex
-              }, '*');
-              if (typeof callback === 'function') {
-                try { callback(loadedPage); } catch (cbError) { /* ignore */ }
-              }
-            };
-            var page = viewer.pages && viewer.pages[pageIndex];
-            if (!page || page.loaded || viewer.pages_loading[pageIndex]) {
-              return origLoadPage(pageIndex, preload, wrappedCallback);
-            }
-            var el = page.page;
-            var blobUrl = el && el.getAttribute('data-page-url');
-            var storageUrl = el && el.getAttribute('data-storage-page-url');
-            if (!blobUrl && storageUrl) {
-              if (!pendingPageLoads[pageIndex]) {
-                pendingPageLoads[pageIndex] = [];
-                window.parent.postMessage({
-                  type: 'markup-need-page',
-                  pageIndex: pageIndex,
-                  pageUrl: storageUrl
-                }, '*');
-              }
-              if (typeof callback === 'function') {
-                pendingPageLoads[pageIndex].push(callback);
-              }
-              // Still walk the preload chain so neighbors get requested too.
-              var remaining = typeof preload === 'undefined' ? viewer.config.preload_pages : preload;
-              if (remaining > 1) {
-                setTimeout(function () {
-                  viewer.load_page(pageIndex + 1, remaining - 1);
-                }, 0);
-              }
-              return;
-            }
-            return origLoadPage(pageIndex, preload, wrappedCallback);
-          };
-
-          window.addEventListener('message', function (event) {
-            var data = event.data;
-            if (!data || typeof data !== 'object') {
-              return;
-            }
-            if (data.type === 'markup-scroll-to' && typeof data.pageIndex === 'number') {
-              scrollToPageWhenReady(data.pageIndex);
-              return;
-            }
-            if (data.type !== 'markup-page-ready') {
-              return;
-            }
-            var idx = data.pageIndex;
-            var page = viewer.pages && viewer.pages[idx];
-            if (page && page.page && data.blobUrl) {
-              page.page.setAttribute('data-page-url', data.blobUrl);
-            }
-            var callbacks = pendingPageLoads[idx] || [];
-            delete pendingPageLoads[idx];
-            origLoadPage(idx, 1, function (loadedPage) {
-              for (var i = 0; i < callbacks.length; i += 1) {
-                try { callbacks[i](loadedPage); } catch (cbError) { /* ignore */ }
-              }
-              window.parent.postMessage({
-                type: 'markup-page-settled',
-                pageIndex: idx
-              }, '*');
-              // Loading a page at/before the target can change cumulative offsets.
-              if (
-                typeof pendingScrollPageIndex === 'number'
-                && idx <= pendingScrollPageIndex
-                && viewer
-                && typeof viewer.scroll_to === 'function'
-              ) {
-                viewer.scroll_to(pendingScrollPageIndex);
-              }
-            });
-          });
-        }
+        repairPlaceholderDimensions();
 
         // Free-scrolling shows pages without going through toolbar prev/next. Notify the
         // parent when the viewport moves or pdf2htmlEX marks a page .opened so scripture
@@ -719,10 +902,14 @@ ${options.bodyHtml}
           } catch (observerError) { /* ignore */ }
         }
 
+        // Replace pdf2htmlEX rescale so fit-width / parent zoom cannot write height:0px.
+        viewer.rescale = function (nextScale, isRelative) {
+          var base = viewer.scale || 1;
+          var absolute = nextScale === 0 ? 1 : (isRelative ? base * nextScale : nextScale);
+          safeViewerRescale(absolute);
+        };
         // Rescale before scroll so page offset geometry matches the active zoom.
-        if (viewer && typeof viewer.rescale === 'function') {
-          viewer.rescale(${options.initialScale});
-        }
+        safeViewerRescale(${options.initialScale});
         scrollToPageWhenReady(${pageIndex});
         window.parent.postMessage({
           type: 'markup-viewer-ready',
@@ -903,6 +1090,8 @@ const MarkupDocumentViewer: React.FC<MarkupDocumentViewerProps> = ({ onScripture
   openScriptureReferenceRef.current = openScriptureReference;
   const syncingPageFromViewerRef = useRef(false);
   const allowViewportPageSyncRef = useRef(false);
+  /** While a toolbar/open jump is in flight, ignore need-page requests far from this index. */
+  const pendingJumpPageIndexRef = useRef<number | null>(null);
 
   const activeSourceUrl = pdfViewer.sourceUrl;
   const activePage = Math.max(1, pdfViewer.page);
@@ -956,10 +1145,19 @@ const MarkupDocumentViewer: React.FC<MarkupDocumentViewerProps> = ({ onScripture
     }
   };
 
+  const isPageMaterializationAllowed = (pageIndex: number): boolean => {
+    const pendingJump = pendingJumpPageIndexRef.current;
+    const center = typeof pendingJump === 'number' ? pendingJump : Math.max(0, activePageRef.current - 1);
+    return Math.abs(pageIndex - center) <= PAGE_LOAD_RADIUS;
+  };
+
   const ensurePagesMaterialized = async (centerIndex: number): Promise<void> => {
     const pageUrls = pageUrlsRef.current;
     const storageOrigin = storageOriginRef.current;
     if (!storageOrigin || pageUrls.length === 0) {
+      return;
+    }
+    if (!isPageMaterializationAllowed(centerIndex)) {
       return;
     }
 
@@ -1039,6 +1237,7 @@ const MarkupDocumentViewer: React.FC<MarkupDocumentViewerProps> = ({ onScripture
     assetBlobsRef.current = new Map();
     storageOriginRef.current = '';
     materializingPagesRef.current.clear();
+    pendingJumpPageIndexRef.current = Math.max(0, activePage - 1);
 
     void (async () => {
       try {
@@ -1151,6 +1350,9 @@ const MarkupDocumentViewer: React.FC<MarkupDocumentViewerProps> = ({ onScripture
         return;
       }
       if (data.type === 'markup-need-page' && typeof data.pageIndex === 'number') {
+        if (!isPageMaterializationAllowed(data.pageIndex)) {
+          return;
+        }
         void ensurePagesMaterialized(data.pageIndex).catch((loadError) => {
           setError(loadError instanceof Error ? loadError.message : String(loadError));
         });
@@ -1164,6 +1366,9 @@ const MarkupDocumentViewer: React.FC<MarkupDocumentViewerProps> = ({ onScripture
   // Prefetch around the toolbar page when the user navigates.
   useEffect(() => {
     if (isLoading || !srcDoc) {
+      return;
+    }
+    if (syncingPageFromViewerRef.current) {
       return;
     }
     void ensurePagesMaterialized(Math.max(0, activePage - 1)).catch(() => {
@@ -1183,6 +1388,7 @@ const MarkupDocumentViewer: React.FC<MarkupDocumentViewerProps> = ({ onScripture
 
     let cancelled = false;
     const pageIndex = Math.max(0, activePage - 1);
+    pendingJumpPageIndexRef.current = pageIndex;
     highlightPageRef.current = activePage;
     highlightAttemptedRef.current = false;
 
@@ -1200,6 +1406,12 @@ const MarkupDocumentViewer: React.FC<MarkupDocumentViewerProps> = ({ onScripture
         type: 'markup-scroll-to',
         pageIndex,
       }, '*');
+      // Keep the gate briefly after posting scroll so settle/need-page storms stay local.
+      window.setTimeout(() => {
+        if (!cancelled && pendingJumpPageIndexRef.current === pageIndex) {
+          pendingJumpPageIndexRef.current = null;
+        }
+      }, 800);
     })();
 
     return () => {
@@ -1285,7 +1497,9 @@ const MarkupDocumentViewer: React.FC<MarkupDocumentViewerProps> = ({ onScripture
         if (highlightScrolledForNonceRef.current !== focusNonce) {
           highlightScrolledForNonceRef.current = focusNonce;
           if (activePageRef.current === highlightPage) {
-            result.element.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
+            // Instant: smooth scroll across a long document re-enters every page band
+            // and can re-trigger pdf2htmlEX loads for the whole book.
+            result.element.scrollIntoView({ behavior: 'auto', block: 'center', inline: 'nearest' });
           }
         }
       }
