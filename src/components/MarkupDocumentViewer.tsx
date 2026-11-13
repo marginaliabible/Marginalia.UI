@@ -28,6 +28,8 @@ const PAGE_WINDOW_RADIUS = 2;
  * cap, jumping to a late page materializes the whole document and freezes the tab.
  */
 const PAGE_LOAD_RADIUS = 5;
+/** Rolling settle delay before fetching pages during free scroll / scrollbar drag. */
+const PAGE_FETCH_SETTLE_MS = 250;
 
 /** App-origin absolute URL — srcdoc uses <base href=storage>, so /vendor/... would hit R2. */
 function appVendorUrl(fileName: string): string {
@@ -463,6 +465,29 @@ ${options.bodyHtml}
     var scrollRetryTimer = null;
     var scrollReleaseTimer = null;
     var pageLoadRadius = ${PAGE_LOAD_RADIUS};
+    var pageFetchSettleMs = ${PAGE_FETCH_SETTLE_MS};
+    var deferPageFetches = false;
+    var pageFetchSettleTimer = null;
+    var ignoringScrollActivity = false;
+
+    function markFreeScrollActivity() {
+      // Programmatic jumps / rescale scroll fixes must fetch immediately.
+      if (ignoringScrollActivity || typeof pendingScrollPageIndex === 'number') {
+        return;
+      }
+      deferPageFetches = true;
+      if (pageFetchSettleTimer) {
+        clearTimeout(pageFetchSettleTimer);
+      }
+      pageFetchSettleTimer = setTimeout(function () {
+        pageFetchSettleTimer = null;
+        deferPageFetches = false;
+        var center = pageLoadCenterIndex();
+        if (viewer && typeof viewer.load_page === 'function') {
+          viewer.load_page(center, viewer.config.preload_pages || 3);
+        }
+      }, pageFetchSettleMs);
+    }
 
     function clearPendingScroll() {
       pendingScrollPageIndex = null;
@@ -626,17 +651,74 @@ ${options.bodyHtml}
       return changed;
     }
 
-    function safeViewerRescale(nextScale) {
+    function safeViewerRescale(nextScale, preserveScroll) {
       if (!viewer) {
         return;
       }
-      var scale = nextScale || viewer.scale || 1;
-      viewer.scale = scale;
-      if (!viewer.pages) {
+      var oldScale = viewer.scale || 1;
+      var scale = nextScale || 1;
+      if (!(scale > 0)) {
         return;
       }
-      for (var i = 0; i < viewer.pages.length; i += 1) {
-        var page = viewer.pages[i];
+      var container = viewer.container || document.getElementById('page-container');
+      var pages = viewer.pages;
+      // Match pdf2htmlEX: keep the page under the viewport anchored when scale
+      // changes. Without this, fit-width resize leaves scrollTop in px while
+      // page heights change, so the view jumps to another page.
+      var anchor = null;
+      if (preserveScroll !== false && container && pages && pages.length) {
+        var scrollX = container.scrollLeft;
+        var scrollY = container.scrollTop;
+        var probe = typeof viewer.first_page_idx === 'number' ? viewer.first_page_idx : 0;
+        for (; probe < pages.length; probe += 1) {
+          var probePage = pages[probe] && pages[probe].page;
+          if (!probePage) {
+            continue;
+          }
+          if (probePage.offsetTop + probePage.clientTop >= scrollY) {
+            break;
+          }
+        }
+        var anchorIdx = probe - 1;
+        if (anchorIdx < 0) {
+          anchorIdx = 0;
+        }
+        var anchorEl = pages[anchorIdx] && pages[anchorIdx].page;
+        if (anchorEl) {
+          var anchorWidth = anchorEl.clientWidth;
+          var anchorHeight = anchorEl.clientHeight;
+          var anchorLeft = anchorEl.offsetLeft + anchorEl.clientLeft;
+          var anchorTop = anchorEl.offsetTop + anchorEl.clientTop;
+          var offsetX = scrollX - anchorLeft;
+          if (offsetX < 0) {
+            offsetX = 0;
+          } else if (offsetX > anchorWidth) {
+            offsetX = anchorWidth;
+          }
+          var offsetY = scrollY - anchorTop;
+          if (offsetY < 0) {
+            offsetY = 0;
+          } else if (offsetY > anchorHeight) {
+            offsetY = anchorHeight;
+          }
+          anchor = {
+            el: anchorEl,
+            oldScale: oldScale,
+            offsetX: offsetX,
+            offsetY: offsetY,
+            left: anchorLeft,
+            top: anchorTop
+          };
+        }
+      }
+
+      viewer.scale = scale;
+      if (!pages) {
+        return;
+      }
+      ignoringScrollActivity = true;
+      for (var i = 0; i < pages.length; i += 1) {
+        var page = pages[i];
         if (!page) {
           continue;
         }
@@ -649,6 +731,23 @@ ${options.bodyHtml}
           page.rescale(scale);
         }
       }
+      if (anchor && container) {
+        var el = anchor.el;
+        container.scrollLeft += anchor.offsetX / anchor.oldScale * scale
+          + el.offsetLeft + el.clientLeft - anchor.offsetX - anchor.left;
+        container.scrollTop += anchor.offsetY / anchor.oldScale * scale
+          + el.offsetTop + el.clientTop - anchor.offsetY - anchor.top;
+      }
+      if (typeof viewer.schedule_render === 'function') {
+        viewer.schedule_render(true);
+      }
+      // Scroll events from the anchor fix can arrive after this stack; keep
+      // free-scroll deferral suppressed until the next frames settle.
+      requestAnimationFrame(function () {
+        requestAnimationFrame(function () {
+          ignoringScrollActivity = false;
+        });
+      });
     }
 
     function repairPlaceholderDimensions() {
@@ -777,15 +876,22 @@ ${options.bodyHtml}
       if (!blobUrl && storageUrl) {
         if (!pendingPageLoads[pageIndex]) {
           pendingPageLoads[pageIndex] = [];
-          window.parent.postMessage({
-            type: 'markup-need-page',
-            pageIndex: pageIndex,
-            pageUrl: storageUrl
-          }, '*');
         }
         if (typeof callback === 'function') {
           pendingPageLoads[pageIndex].push(callback);
         }
+        // While the scrollbar/wheel is moving, park requests — the settle timer
+        // re-runs load_page for the final viewport only.
+        if (deferPageFetches) {
+          return;
+        }
+        // Always (re)request — parent may have dropped an earlier need-page while
+        // activePage was still catching up to a fast scroll.
+        window.parent.postMessage({
+          type: 'markup-need-page',
+          pageIndex: pageIndex,
+          pageUrl: storageUrl
+        }, '*');
         // Still walk the preload chain so neighbors get requested too.
         var remaining = typeof preload === 'undefined' ? viewer.config.preload_pages : preload;
         if (remaining > 1 && isPageLoadAllowed(pageIndex + 1)) {
@@ -811,13 +917,15 @@ ${options.bodyHtml}
         return;
       }
       var idx = data.pageIndex;
-      if (!isPageLoadAllowed(idx)) {
-        delete pendingPageLoads[idx];
-        return;
-      }
       var readyPage = viewer.pages && viewer.pages[idx];
       if (readyPage && readyPage.page && data.blobUrl) {
         readyPage.page.setAttribute('data-page-url', data.blobUrl);
+      }
+      // Blob may arrive after the user scrolled away; keep the URL so a later
+      // in-range load_page can use it. Do not delete pending if we skip load —
+      // otherwise the next request has no callback list and looks "done".
+      if (!isPageLoadAllowed(idx)) {
+        return;
       }
       var callbacks = pendingPageLoads[idx] || [];
       delete pendingPageLoads[idx];
@@ -877,16 +985,17 @@ ${options.bodyHtml}
         var pageContainer = document.getElementById('page-container');
         if (pageContainer) {
           pageContainer.addEventListener('scroll', function () {
+            markFreeScrollActivity();
             notifyPageChanged();
             notifyViewportChanged();
           }, { passive: true });
           // Programmatic scroll_to fires 'scroll' but not these — cancel sticky
           // pending target as soon as the user takes over.
           function cancelPendingScrollFromUser() {
-            if (pendingScrollPageIndex === null && !scrollRetryTimer && !scrollReleaseTimer) {
-              return;
+            if (pendingScrollPageIndex !== null || scrollRetryTimer || scrollReleaseTimer) {
+              clearPendingScroll();
             }
-            clearPendingScroll();
+            markFreeScrollActivity();
           }
           pageContainer.addEventListener('wheel', cancelPendingScrollFromUser, { passive: true });
           pageContainer.addEventListener('touchstart', cancelPendingScrollFromUser, { passive: true });
@@ -922,11 +1031,12 @@ ${options.bodyHtml}
           } catch (observerError) { /* ignore */ }
         }
 
-        // Replace pdf2htmlEX rescale so fit-width / parent zoom cannot write height:0px.
+        // Replace pdf2htmlEX rescale so fit-width / parent zoom cannot write height:0px,
+        // while still preserving the viewport page (see safeViewerRescale).
         viewer.rescale = function (nextScale, isRelative) {
           var base = viewer.scale || 1;
           var absolute = nextScale === 0 ? 1 : (isRelative ? base * nextScale : nextScale);
-          safeViewerRescale(absolute);
+          safeViewerRescale(absolute, true);
         };
         // Rescale before scroll so page offset geometry matches the active zoom.
         safeViewerRescale(${options.initialScale});
@@ -1112,6 +1222,8 @@ const MarkupDocumentViewer: React.FC<MarkupDocumentViewerProps> = ({ onScripture
   const allowViewportPageSyncRef = useRef(false);
   /** While a toolbar/open jump is in flight, ignore need-page requests far from this index. */
   const pendingJumpPageIndexRef = useRef<number | null>(null);
+  const pageFetchSettleTimerRef = useRef<number | null>(null);
+  const pendingFetchCenterRef = useRef<number | null>(null);
 
   const activeSourceUrl = pdfViewer.sourceUrl;
   const activePage = Math.max(1, pdfViewer.page);
@@ -1165,25 +1277,34 @@ const MarkupDocumentViewer: React.FC<MarkupDocumentViewerProps> = ({ onScripture
     }
   };
 
-  const isPageMaterializationAllowed = (pageIndex: number): boolean => {
-    const pendingJump = pendingJumpPageIndexRef.current;
-    const center = typeof pendingJump === 'number' ? pendingJump : Math.max(0, activePageRef.current - 1);
-    return Math.abs(pageIndex - center) <= PAGE_LOAD_RADIUS;
-  };
-
   const ensurePagesMaterialized = async (centerIndex: number): Promise<void> => {
     const pageUrls = pageUrlsRef.current;
     const storageOrigin = storageOriginRef.current;
     if (!storageOrigin || pageUrls.length === 0) {
       return;
     }
-    if (!isPageMaterializationAllowed(centerIndex)) {
-      return;
-    }
+    // Trust the caller / iframe load gate for which center to fetch. Gating here
+    // against React activePage races free-scroll: the iframe already moved, but
+    // activePageRef is still stale, so need-page was dropped and pages stayed blank.
 
-    const neededUrls = pageWindowIndices(centerIndex, pageUrls.length)
+    const windowIndices = pageWindowIndices(centerIndex, pageUrls.length);
+    const neededUrls = windowIndices
       .map((index) => pageUrls[index])
       .filter((url): url is string => Boolean(url) && !pageBlobsRef.current.has(url) && !materializingPagesRef.current.has(url));
+
+    // Re-push blobs already in hand — iframe may have missed page-ready while the
+    // page was briefly out of the load gate during fast scroll.
+    const existingBlobs = new Map<string, string>();
+    for (const index of windowIndices) {
+      const pageUrl = pageUrls[index];
+      const blobUrl = pageUrl ? pageBlobsRef.current.get(pageUrl) : undefined;
+      if (pageUrl && blobUrl) {
+        existingBlobs.set(pageUrl, blobUrl);
+      }
+    }
+    if (existingBlobs.size > 0) {
+      applyPageBlobsToIframe(existingBlobs);
+    }
 
     if (neededUrls.length === 0) {
       return;
@@ -1209,6 +1330,29 @@ const MarkupDocumentViewer: React.FC<MarkupDocumentViewerProps> = ({ onScripture
         materializingPagesRef.current.delete(url);
       }
     }
+  };
+
+  const schedulePagesMaterialized = (centerIndex: number, immediate = false) => {
+    pendingFetchCenterRef.current = centerIndex;
+    if (pageFetchSettleTimerRef.current !== null) {
+      window.clearTimeout(pageFetchSettleTimerRef.current);
+      pageFetchSettleTimerRef.current = null;
+    }
+    const run = () => {
+      pageFetchSettleTimerRef.current = null;
+      const center = pendingFetchCenterRef.current;
+      if (typeof center !== 'number') {
+        return;
+      }
+      void ensurePagesMaterialized(center).catch((loadError) => {
+        setError(loadError instanceof Error ? loadError.message : String(loadError));
+      });
+    };
+    if (immediate) {
+      run();
+      return;
+    }
+    pageFetchSettleTimerRef.current = window.setTimeout(run, PAGE_FETCH_SETTLE_MS);
   };
 
   const syncPageFromMarkupViewport = () => {
@@ -1370,12 +1514,8 @@ const MarkupDocumentViewer: React.FC<MarkupDocumentViewerProps> = ({ onScripture
         return;
       }
       if (data.type === 'markup-need-page' && typeof data.pageIndex === 'number') {
-        if (!isPageMaterializationAllowed(data.pageIndex)) {
-          return;
-        }
-        void ensurePagesMaterialized(data.pageIndex).catch((loadError) => {
-          setError(loadError instanceof Error ? loadError.message : String(loadError));
-        });
+        // Rolling timer: scrollbar drag can spam need-page; keep only the latest center.
+        schedulePagesMaterialized(data.pageIndex);
       }
     };
 
@@ -1383,17 +1523,18 @@ const MarkupDocumentViewer: React.FC<MarkupDocumentViewerProps> = ({ onScripture
     return () => window.removeEventListener('message', onMessage);
   }, [dispatch]);
 
-  // Prefetch around the toolbar page when the user navigates.
+  // Prefetch around the toolbar page — including free-scroll updates from the
+  // iframe (those set syncingPageFromViewerRef; only the scroll-to effect skips).
   useEffect(() => {
     if (isLoading || !srcDoc) {
       return;
     }
-    if (syncingPageFromViewerRef.current) {
-      return;
-    }
-    void ensurePagesMaterialized(Math.max(0, activePage - 1)).catch(() => {
-      // Errors surface via markup-need-page / load path.
-    });
+    // Free-scroll updates activePage every frame; debounce so drag doesn't fetch
+    // every intermediate page. Toolbar jumps materialize immediately in the scroll effect.
+    schedulePagesMaterialized(
+      Math.max(0, activePage - 1),
+      !syncingPageFromViewerRef.current
+    );
   }, [activePage, focusNonce, isLoading, srcDoc]);
 
   // Scroll after pages in the window are materialized; focusNonce re-fires on same-page re-clicks.
@@ -1414,6 +1555,10 @@ const MarkupDocumentViewer: React.FC<MarkupDocumentViewerProps> = ({ onScripture
 
     void (async () => {
       try {
+        if (pageFetchSettleTimerRef.current !== null) {
+          window.clearTimeout(pageFetchSettleTimerRef.current);
+          pageFetchSettleTimerRef.current = null;
+        }
         await ensurePagesMaterialized(pageIndex);
       } catch {
         // Scroll may still succeed with placeholder geometry.
@@ -1445,6 +1590,9 @@ const MarkupDocumentViewer: React.FC<MarkupDocumentViewerProps> = ({ onScripture
       return;
     }
     viewer.rescale(scale);
+    // Fit-width resize changes scale; ensure the anchored page still materializes
+    // even if scroll sync briefly points elsewhere during layout.
+    schedulePagesMaterialized(Math.max(0, activePageRef.current - 1), true);
   }, [scale, srcDoc, isLoading]);
 
   useEffect(() => {
