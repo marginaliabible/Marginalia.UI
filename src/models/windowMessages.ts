@@ -47,13 +47,22 @@ export interface OpenDocumentPayload {
   shared?: boolean;
 }
 
+export interface StartHelpTourPayload {
+  tourId: string;
+  stepIndex?: number;
+}
+
 export type WindowCommand =
   | { kind: 'panel'; type: 'open-verse-tabs'; payload: OpenVerseTabsPayload }
   | { kind: 'panel'; type: 'run-search'; payload: { query: string; action: 'replace' | 'new'; translationIds: string[] } }
+  | { kind: 'panel'; type: 'open-help' }
+  | { kind: 'panel'; type: 'select-tab'; payload: { tabType: 'search' | 'translations' | 'resources' | 'links' | 'help' } }
+  | { kind: 'panel'; type: 'start-help-tour'; payload: StartHelpTourPayload }
   | { kind: 'bible'; type: 'show-verses'; payload: ShowVersesPayload }
   | { kind: 'bible'; type: 'go-to-reference'; payload: { target: QuickJumpTarget; translationId?: string } }
   | { kind: 'bible'; type: 'focus-search' }
   | { kind: 'bible'; type: 'reveal-account-sync'; payload: AccountSyncRevealTarget }
+  | { kind: 'bible'; type: 'start-help-tour'; payload: StartHelpTourPayload }
   | { kind: 'document'; type: 'open-document'; payload: OpenDocumentPayload }
   | { kind: 'document'; type: 'open-document-link'; payload: { hash: string } };
 

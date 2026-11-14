@@ -2,11 +2,12 @@ import { useEffect, useRef } from 'react';
 import { useStore } from 'react-redux';
 import { useAppDispatch, useAppSelector } from '../store/hooks';
 import type { RootState } from '../store/store';
-import { openVerseTabs, runPanelSearch } from '../store/slices/bibleSlice';
+import { openHelpTab, openVerseTabs, runPanelSearch, setActiveTab } from '../store/slices/bibleSlice';
 import { closeDocumentViewer, openDocumentViewer } from '../store/slices/uiSlice';
 import { isDocumentWindow, windowChannel } from '../services/windowChannel';
 import { requestAccountSyncReveal } from '../services/accountSyncRevealService';
 import { takePendingCommand } from '../services/windowRouting';
+import { startHelpTourFromCommand } from '../help/helpTourStarter';
 import { focusWhenWindowActive } from '../utils/focusWhenWindowActive';
 import type { QuickJumpTarget } from '../models/bible';
 import type { OpenDocumentPayload, WindowCommand } from '../models/windowMessages';
@@ -47,6 +48,22 @@ export const useWindowCommandHandler = ({ ready, goToReference, focusSearch }: U
           return;
         case 'run-search':
           void dispatch(runPanelSearch(command.payload));
+          return;
+        case 'open-help':
+          dispatch(openHelpTab());
+          return;
+        case 'select-tab': {
+          const tab = store.getState().bible.tabs.find((entry) => entry.type === command.payload.tabType);
+          if (tab) {
+            dispatch(setActiveTab({ tabId: tab.id }));
+          }
+          return;
+        }
+        case 'start-help-tour':
+          startHelpTourFromCommand(command.payload.tourId, {
+            stepIndex: command.payload.stepIndex,
+            local: true,
+          });
           return;
         case 'show-verses':
           // A document window never turns into a Bible view.

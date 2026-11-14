@@ -147,6 +147,8 @@ interface CloudFolderPickerProps {
   revealRequest?: AccountSyncRevealRequest | null;
   onSelectionsChange: (next: Record<FederatedProvider, FolderSelectionTarget[]>) => Promise<FolderApplyResult>;
   onConnectRequested: (provider: FederatedProvider) => void;
+  /** When set, replaces the right-pane selected-files list (e.g. provider Manage/Connect UI). */
+  rightPanelOverride?: React.ReactNode;
   onDirtyChange?: (isDirty: boolean) => void;
   onUsageSnapshotChange?: (snapshot: CloudFolderPickerUsageSnapshot) => void;
   // Providers signed back in whose restored selections have not been applied yet.
@@ -754,6 +756,7 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
   revealRequest = null,
   onSelectionsChange,
   onConnectRequested,
+  rightPanelOverride = null,
   onDirtyChange,
   onUsageSnapshotChange,
   reconnectPending,
@@ -831,10 +834,17 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
   const isMobileStacked = !isDesktopLayout;
   const showProvidersPane = isDesktopLayout || mobilePane === 'providers';
   const showFilesPane = isDesktopLayout || mobilePane === 'files';
+  const hasRightPanelOverride = rightPanelOverride != null;
 
   const toggleMobilePane = useCallback((pane: MobileSyncPane) => {
     setMobilePane((current) => (current === pane ? current : pane));
   }, []);
+
+  useEffect(() => {
+    if (hasRightPanelOverride) {
+      setMobilePane('files');
+    }
+  }, [hasRightPanelOverride]);
 
   const updateNodes = useCallback((updater: (current: Record<string, FolderTreeNode>) => Record<string, FolderTreeNode>) => {
     setNodes((current) => {
@@ -2374,7 +2384,7 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
               aria-controls="cloud-folder-files-pane"
               onClick={() => toggleMobilePane('files')}
             >
-              <span>Select Files & Folders</span>
+              <span>{hasRightPanelOverride ? 'Provider connection' : 'Select Files & Folders'}</span>
               <i className={`fa-solid ${showFilesPane ? 'fa-chevron-down' : 'fa-chevron-right'}`} aria-hidden="true"></i>
             </button>
           )}
@@ -2386,6 +2396,8 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
               role="region"
               aria-labelledby={isMobileStacked ? 'cloud-folder-files-toggle' : undefined}
             >
+              {hasRightPanelOverride ? rightPanelOverride : (
+              <>
               {!isMobileStacked && (
                 <div className="cloud-folder-selected-header">
                   <span className="cloud-folder-selected-header-name">Selected Files & Folders</span>
@@ -2669,6 +2681,8 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
                   binding={subscriptions}
                   staging={subscriptionStaging}
                 />
+              )}
+              </>
               )}
             </div>
           )}

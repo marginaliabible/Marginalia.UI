@@ -3,6 +3,11 @@ import React, { createContext, useContext, useMemo } from 'react';
 export interface StartTourOptions {
   /** Jump to a specific step (e.g. from a target: help link). Ignores saved resume. */
   stepIndex?: number;
+  /**
+   * Run in this window without cross-window routing.
+   * Set when the tour was already delivered here via a window command.
+   */
+  local?: boolean;
 }
 
 interface HelpTourContextValue {

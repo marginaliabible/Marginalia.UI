@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { helpContentService } from '../services/helpContentService';
 import { resolveHelpTourTarget } from '../help/tourTargets';
-import { helpTourEventType } from '../help/tourEvents';
+import { subscribeHelpTourEvent } from '../help/tourEvents';
 import { isElementVisible } from '../help/isElementVisible';
 import { scrollTourTargetIntoView } from '../help/scrollTourTargetIntoView';
 import { renderTourContent } from '../help/renderTourContent';
@@ -17,10 +17,17 @@ import {
 } from '../help/tourProgress';
 import { HelpTourProvider, type StartTourOptions } from '../help/HelpTourContext';
 import { findTourStepForTarget } from '../help/tourTargetLinks';
+import {
+  handOffHelpTourIfNeeded,
+  registerHelpTourStarter,
+} from '../help/helpTourStarter';
+import { queryTourTargetElement } from '../help/tourTargetWindows';
 import { useSourcePreferences } from '../hooks/useSourcePreferences';
 import { useAppDispatch, useAppSelector } from '../store/hooks';
 import { openHelpTab, openVerseTabs, setActiveTab } from '../store/slices/bibleSlice';
+import { routeInteraction } from '../services/windowRouting';
 import type { QuickJumpTarget } from '../models/bible';
+import type { OpenVerseTabsPayload } from '../models/windowMessages';
 import type { HelpTourBeforeAction, HelpTourStep } from '../models/help';
 import type { ButtonType, Controls, EventHandler, Placement, Step } from 'react-joyride';
 
@@ -88,13 +95,16 @@ const HelpTourRunner: React.FC<HelpTourRunnerProps> = ({ onOpenSettings, goToRef
 
   useEffect(() => {
     const onOpenArticle = () => {
-      dispatch(openHelpTab());
+      routeInteraction(
+        { kind: 'panel', type: 'open-help' },
+        () => dispatch(openHelpTab())
+      );
     };
     window.addEventListener(HELP_OPEN_ARTICLE_EVENT, onOpenArticle);
     return () => window.removeEventListener(HELP_OPEN_ARTICLE_EVENT, onOpenArticle);
   }, [dispatch]);
 
-  const ensureVerseContext = useCallback(() => {
+  const ensureVerseContext = useCallback((): OpenVerseTabsPayload => {
     const book = selectedBook?.trim() || 'John';
     const chapter = selectedChapter > 0 ? selectedChapter : 10;
     const verses = Array.isArray(selectedVerses)
@@ -106,8 +116,30 @@ const HelpTourRunner: React.FC<HelpTourRunnerProps> = ({ onOpenSettings, goToRef
       chapter,
       verse,
       verses: verses.length > 0 ? verses : [verse],
+      hasResources: true,
     };
   }, [selectedBook, selectedChapter, selectedVerses]);
+
+  const routeOpenVerseTabs = useCallback((payload: OpenVerseTabsPayload) => {
+    routeInteraction(
+      { kind: 'panel', type: 'open-verse-tabs', payload },
+      () => dispatch(openVerseTabs(payload)),
+      { quiet: true }
+    );
+  }, [dispatch]);
+
+  const routeSelectPanelTab = useCallback((tabType: Extract<HelpTourBeforeAction, { action: 'selectPanelTab' }>['tabType']) => {
+    routeInteraction(
+      { kind: 'panel', type: 'select-tab', payload: { tabType } },
+      () => {
+        const tab = tabs.find((entry) => entry.type === tabType);
+        if (tab) {
+          dispatch(setActiveTab({ tabId: tab.id }));
+        }
+      },
+      { quiet: true }
+    );
+  }, [dispatch, tabs]);
 
   const runBeforeAction = useCallback(async (action: HelpTourBeforeAction | undefined) => {
     if (!action) {
@@ -125,73 +157,55 @@ const HelpTourRunner: React.FC<HelpTourRunnerProps> = ({ onOpenSettings, goToRef
       return;
     }
     if (action.action === 'openTranslationsPanel') {
-      const context = ensureVerseContext();
-      dispatch(openVerseTabs({
-        ...context,
-        hasResources: true,
+      routeOpenVerseTabs({
+        ...ensureVerseContext(),
         preferPanel: 'translations',
-      }));
+      });
       await new Promise((resolve) => window.setTimeout(resolve, 350));
       return;
     }
     if (action.action === 'ensureTranslationsTab') {
-      const helpTab = tabs.find((tab) => tab.type === 'help');
       const hasTranslationsTab = tabs.some((tab) => tab.type === 'translations');
       if (!hasTranslationsTab) {
-        const context = ensureVerseContext();
-        dispatch(openVerseTabs({
-          ...context,
-          hasResources: true,
+        routeOpenVerseTabs({
+          ...ensureVerseContext(),
           preferPanel: 'translations',
-        }));
+        });
         // Keep Help active so the user can click the Translations tab themselves.
-        if (helpTab) {
-          dispatch(setActiveTab({ tabId: helpTab.id }));
-        }
+        routeSelectPanelTab('help');
         await new Promise((resolve) => window.setTimeout(resolve, 200));
       }
       return;
     }
     if (action.action === 'openResourcesPanel') {
-      const context = ensureVerseContext();
-      dispatch(openVerseTabs({
-        ...context,
-        hasResources: true,
+      routeOpenVerseTabs({
+        ...ensureVerseContext(),
         preferPanel: 'resources',
-      }));
+      });
       await new Promise((resolve) => window.setTimeout(resolve, 350));
       return;
     }
     if (action.action === 'ensureResourcesTab') {
-      const helpTab = tabs.find((tab) => tab.type === 'help');
       const hasResourcesTab = tabs.some((tab) => tab.type === 'resources');
       if (!hasResourcesTab) {
-        const context = ensureVerseContext();
-        dispatch(openVerseTabs({
-          ...context,
-          hasResources: true,
+        routeOpenVerseTabs({
+          ...ensureVerseContext(),
           preferPanel: 'resources',
-        }));
-        if (helpTab) {
-          dispatch(setActiveTab({ tabId: helpTab.id }));
-        }
+        });
+        routeSelectPanelTab('help');
         await new Promise((resolve) => window.setTimeout(resolve, 200));
       }
       return;
     }
     if (action.action === 'selectPanelTab') {
-      const tab = tabs.find((entry) => entry.type === action.tabType);
-      if (tab) {
-        dispatch(setActiveTab({ tabId: tab.id }));
-        await new Promise((resolve) => window.setTimeout(resolve, 100));
-      }
+      routeSelectPanelTab(action.tabType);
+      await new Promise((resolve) => window.setTimeout(resolve, 100));
     }
-  }, [dispatch, ensureVerseContext, onOpenSettings, tabs]);
+  }, [ensureVerseContext, onOpenSettings, routeOpenVerseTabs, routeSelectPanelTab, tabs]);
 
   /** Open the host UI needed for a logical target when jumping mid-tour, then scroll it into view. */
   const ensureTargetVisible = useCallback(async (targetId: string) => {
-    const selector = resolveHelpTourTarget(targetId);
-    if (!isElementVisible(document.querySelector(selector))) {
+    if (!isElementVisible(queryTourTargetElement(targetId))) {
       if (targetId === 'translations-panel' || targetId.startsWith('translations-')) {
         await runBeforeAction({ action: 'openTranslationsPanel' });
       } else if (targetId === 'settings-button' || targetId.startsWith('settings-')) {
@@ -328,10 +342,10 @@ const HelpTourRunner: React.FC<HelpTourRunnerProps> = ({ onOpenSettings, goToRef
 
     let intervalId: number | undefined;
     if (step.advanceVisible) {
-      const selector = resolveHelpTourTarget(step.advanceVisible);
+      const targetId = step.advanceVisible;
       const check = () => {
         // User completed the requested action (target now visible) — continue the tour.
-        if (isElementVisible(document.querySelector(selector))) {
+        if (isElementVisible(queryTourTargetElement(targetId))) {
           advance();
         }
       };
@@ -339,21 +353,15 @@ const HelpTourRunner: React.FC<HelpTourRunnerProps> = ({ onOpenSettings, goToRef
       intervalId = window.setInterval(check, 200);
     }
 
-    const eventType = step.advanceEvent ? helpTourEventType(step.advanceEvent) : null;
-    const onTourEvent = () => {
-      advance();
-    };
-    if (eventType) {
-      window.addEventListener(eventType, onTourEvent);
-    }
+    const stopEvent = step.advanceEvent
+      ? subscribeHelpTourEvent(step.advanceEvent, advance)
+      : null;
 
     return () => {
       if (intervalId !== undefined) {
         window.clearInterval(intervalId);
       }
-      if (eventType) {
-        window.removeEventListener(eventType, onTourEvent);
-      }
+      stopEvent?.();
     };
   }, [helpSteps, run, stepIndex, tourInstanceKey]);
 
@@ -363,13 +371,13 @@ const HelpTourRunner: React.FC<HelpTourRunnerProps> = ({ onOpenSettings, goToRef
       return;
     }
 
-    const selector = resolveHelpTourTarget(resumeBeacon.step.target);
+    const targetId = resumeBeacon.step.target;
     const timeoutId = window.setTimeout(() => {
       setResumeBeacon(null);
     }, RESUME_BEACON_TTL_MS);
 
     const intervalId = window.setInterval(() => {
-      if (!isElementVisible(document.querySelector(selector))) {
+      if (!isElementVisible(queryTourTargetElement(targetId))) {
         setResumeBeacon(null);
       }
     }, 500);
@@ -405,6 +413,20 @@ const HelpTourRunner: React.FC<HelpTourRunnerProps> = ({ onOpenSettings, goToRef
 
       const definition = await helpContentService.getTour(tourId);
 
+      const resumeIndex = typeof options?.stepIndex === 'number'
+        ? Math.max(0, Math.min(options.stepIndex, definition.steps.length - 1))
+        : getTourResumeIndex(tourId, definition.steps.length);
+
+      const destination = definition.steps[resumeIndex];
+      // Deliver the tour to the window that owns the destination target before any local gates/UI work.
+      if (
+        !options?.local
+        && destination
+        && handOffHelpTourIfNeeded(tourId, resumeIndex, destination.target)
+      ) {
+        return;
+      }
+
       if (tourId === 'resources-panel') {
         const gate = await ensureResourcesPanelTourReady({
           selectedBook,
@@ -433,10 +455,6 @@ const HelpTourRunner: React.FC<HelpTourRunnerProps> = ({ onOpenSettings, goToRef
         }
       }
 
-      const resumeIndex = typeof options?.stepIndex === 'number'
-        ? Math.max(0, Math.min(options.stepIndex, definition.steps.length - 1))
-        : getTourResumeIndex(tourId, definition.steps.length);
-
       // Run prerequisite befores for the resume/jump point (e.g. open Settings even if step 0 is skipped).
       const seenBefores = new Set<string>();
       for (const step of definition.steps.slice(0, resumeIndex + 1)) {
@@ -464,7 +482,6 @@ const HelpTourRunner: React.FC<HelpTourRunnerProps> = ({ onOpenSettings, goToRef
       }
       satisfiedAdvanceVisibleRef.current = satisfied;
 
-      const destination = definition.steps[resumeIndex];
       if (destination) {
         await ensureTargetVisible(destination.target);
         if (destination.spotlightTarget) {
@@ -515,6 +532,27 @@ const HelpTourRunner: React.FC<HelpTourRunnerProps> = ({ onOpenSettings, goToRef
       );
     }
   }, [startTour]);
+
+  useEffect(() => registerHelpTourStarter((tourId, options) => {
+    void startTour(tourId, options);
+  }), [startTour]);
+
+  // When the active step's target lives in another window, hand the tour off there.
+  useEffect(() => {
+    if (!run) {
+      return;
+    }
+    const tourId = activeTourIdRef.current;
+    const step = helpSteps[stepIndex];
+    if (!tourId || !step) {
+      return;
+    }
+    if (!handOffHelpTourIfNeeded(tourId, stepIndex, step.target)) {
+      return;
+    }
+    setResumeBeacon(null);
+    stopTour();
+  }, [helpSteps, run, stepIndex, stopTour]);
 
   const handleEvent = useCallback<EventHandler>((data, controls) => {
     controlsRef.current = controls;

@@ -4,7 +4,12 @@ export function isElementVisible(el: Element | null | undefined): boolean {
     return false;
   }
 
-  const style = window.getComputedStyle(el);
+  const view = el.ownerDocument.defaultView;
+  if (!view) {
+    return false;
+  }
+
+  const style = view.getComputedStyle(el);
   if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') {
     return false;
   }

@@ -900,7 +900,10 @@ function App() {
   };
 
   const handleOpenHelp = () => {
-    dispatch(openHelpTab());
+    routeInteraction(
+      { kind: 'panel', type: 'open-help' },
+      () => dispatch(openHelpTab())
+    );
     if (isPanelFloating) {
       setIsMobilePanelOpen(true);
     }
@@ -987,7 +990,7 @@ function App() {
 
   if (isPanelWindow) {
     return (
-      <HelpTourRunner onOpenSettings={openSettingsModal} goToReference={goToReference}>
+      <HelpTourRunner onOpenSettings={openSettingsModal} goToReference={goToReferenceFromPanel}>
         <PanelWindowShell sidePanelContentProps={panelWindowContentProps} isDocked={isPanelWindowDocked} />
         <ToastPanel />
       </HelpTourRunner>

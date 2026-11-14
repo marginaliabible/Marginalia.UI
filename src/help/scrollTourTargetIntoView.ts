@@ -1,15 +1,14 @@
-import { resolveHelpTourTarget } from './tourTargets';
+import { queryTourTargetElement } from './tourTargetWindows';
 
 /**
- * Scroll a tour target into the viewport.
- * Joyride skips document scrolling when isFixed is true, so we do this ourselves
- * for targets like the search box that sit in the page scrollport.
+ * Scroll a tour target into the viewport (including in a popped-out panel / Bible window).
+ * Joyride skips document scrolling when isFixed is true, so we do this ourselves.
  */
 export function scrollTourTargetIntoView(targetId: string): void {
   if (!targetId) {
     return;
   }
-  const el = document.querySelector(resolveHelpTourTarget(targetId));
+  const el = queryTourTargetElement(targetId);
   if (!(el instanceof HTMLElement)) {
     return;
   }
