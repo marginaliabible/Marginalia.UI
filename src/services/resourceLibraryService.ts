@@ -13,6 +13,7 @@ import {
   isPlainObject,
   indexResourceDocuments,
   readCloudSyncProviderFromResourcesUrl,
+  readLocalFoldersMachineIdFromResourcesUrl,
   readDocumentViewerKind,
   readResourceDocumentEntry,
   readString,
@@ -89,6 +90,8 @@ export interface VerseResourceDocument {
   documentId: string;
   /** Set when the document comes from a Cloud Service Sync library; documentId is then the cloud item id. */
   cloudProvider: FederatedProvider | null;
+  /** Set when the document comes from a Watchman LocalFolders/{machineId} library. */
+  localFoldersMachineId?: string | null;
   title: string;
   tags: string[];
   pages: number[];
@@ -115,6 +118,7 @@ export interface ResolvedResourceDocumentLink {
   title: string;
   hash?: string;
   cloudProvider: FederatedProvider | null;
+  localFoldersMachineId?: string | null;
   viewer: DocumentViewerKind;
   /** Document store URL for the requested page. */
   url: string;
@@ -329,6 +333,7 @@ export class ResourceLibraryService {
         title: document.title,
         ...(document.hash ? { hash: document.hash } : {}),
         cloudProvider: readCloudSyncProviderFromResourcesUrl(library.resourcesUrl),
+        localFoldersMachineId: readLocalFoldersMachineIdFromResourcesUrl(library.resourcesUrl),
         viewer: library.documentViewer === 'markup' ? 'markup' : 'pdf',
         url: buildDocumentStorePageUrl(library.documentStoreAddress, library.resourcesUrl, document, link.page),
         libraryKey: resolveLibraryKey(library.configuredSourceUrl, sourceUrls),
@@ -394,6 +399,7 @@ export class ResourceLibraryService {
           libraryLabel: library.label,
           documentId: document.documentId,
           cloudProvider: readCloudSyncProviderFromResourcesUrl(library.resourcesUrl),
+          localFoldersMachineId: readLocalFoldersMachineIdFromResourcesUrl(library.resourcesUrl),
           title: document.title,
           tags,
           pages: nextPages,

@@ -8,6 +8,7 @@ import CloudFolderPicker, {
 import type { FederatedProvider, FederatedSession } from '../models/bible';
 import { setLinkedCloudProviders } from '../help/linkedCloudProviders';
 import { registerHelpAccountSyncOpener } from '../help/accountSyncOpener';
+import { registerHelpArticleDialogDismisser } from '../help/openHelpArticle';
 import { registerAccountSyncRevealHandler } from '../services/accountSyncRevealService';
 import './AccountControl.scss';
 
@@ -25,9 +26,10 @@ const EMPTY_SELECTIONS: Record<FederatedProvider, FolderSelectionTarget[]> = {
   microsoft: [],
 };
 
-const EMPTY_PROVIDER_FLAGS: Record<FederatedProvider, boolean> = {
+const EMPTY_PROVIDER_FLAGS: Record<FederatedProvider, boolean> & { localFolders?: boolean } = {
   google: false,
   microsoft: false,
+  localFolders: false,
 };
 
 const AccountControl: React.FC<AccountControlProps> = ({ subscriptions }) => {
@@ -41,7 +43,13 @@ const AccountControl: React.FC<AccountControlProps> = ({ subscriptions }) => {
     setLinkedCloudProviders(EMPTY_PROVIDER_FLAGS);
   }, []);
 
+  const discardAndCloseModalRef = useRef<() => void>(() => {});
+
   useEffect(() => registerHelpAccountSyncOpener(() => setIsModalOpen(true)), []);
+
+  useEffect(() => registerHelpArticleDialogDismisser(() => {
+    discardAndCloseModalRef.current();
+  }), []);
 
   useEffect(() => registerAccountSyncRevealHandler((target: AccountSyncRevealTarget) => {
     revealRequestCounterRef.current += 1;
@@ -59,6 +67,7 @@ const AccountControl: React.FC<AccountControlProps> = ({ subscriptions }) => {
     setHasUnsavedChanges(false);
     setIsModalOpen(false);
   };
+  discardAndCloseModalRef.current = discardAndCloseModal;
 
   const closeModal = () => {
     if (hasUnsavedChanges && !window.confirm('You have unapplied File Sync changes. Discard them?')) {

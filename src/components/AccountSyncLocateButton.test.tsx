@@ -58,6 +58,24 @@ describe('AccountSyncLocateButton', () => {
     expect(toastMock).not.toHaveBeenCalled();
   });
 
+  it('resolves a Local Folders reveal target from syncItem.machineId', () => {
+    render(
+      <AccountSyncLocateButton
+        syncItem={{ provider: 'microsoft', itemId: 'C:/Docs/notes.md', machineId: 'machine-1' }}
+        subscriptionItem={{ libraryKey: 'builtin', documentKey: 'builtin|resource|x' }}
+        documentLabel="notes.md"
+      />
+    );
+
+    fireEvent.click(screen.getByTitle('Find in Account Sync'));
+
+    expect(revealMock).toHaveBeenCalledWith({
+      kind: 'localFolders',
+      machineId: 'machine-1',
+      path: 'C:/Docs/notes.md',
+    });
+  });
+
   it('toasts when Account Sync is unavailable locally', () => {
     revealMock.mockReturnValue(false);
 

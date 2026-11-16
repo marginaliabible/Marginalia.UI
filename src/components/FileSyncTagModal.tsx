@@ -85,7 +85,7 @@ const FileSyncTagModal: React.FC<FileSyncTagModalProps> = ({ itemLabel, initialT
                 classNamePrefix="file-sync-tag-select"
                 className="file-sync-tag-select"
                 isClearable={false}
-                closeMenuOnSelect={false}
+                closeMenuOnSelect
                 aria-label="Tag selection"
                 inputId="fileSyncTagInput"
                 styles={createMultiSelectStyles<TagOption>()}

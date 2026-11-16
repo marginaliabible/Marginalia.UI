@@ -8,6 +8,7 @@ import {
   inferSourceFileKindFromPayload,
   inferSourceFileKindFromUrl,
   readCloudSyncProviderFromResourcesUrl,
+  readLocalFoldersMachineIdFromResourcesUrl,
   readDocumentViewerKind,
   readLibrarySourceAddresses,
   validateDocumentsFile,
@@ -186,6 +187,23 @@ describe('readCloudSyncProviderFromResourcesUrl', () => {
     expect(readCloudSyncProviderFromResourcesUrl('https://example.com/data/resources.json')).toBeNull();
     expect(readCloudSyncProviderFromResourcesUrl('https://example.com/libs/x/OneDrive/resources.json')).toBeNull();
     expect(readCloudSyncProviderFromResourcesUrl('https://storage.example/users/u/Dropbox/resources.json')).toBeNull();
+  });
+});
+
+describe('readLocalFoldersMachineIdFromResourcesUrl', () => {
+  it('reads the machine id from LocalFolders library URLs', () => {
+    expect(readLocalFoldersMachineIdFromResourcesUrl(
+      'https://storage.example/users/a%40b.com/LocalFolders/machine-42/resources.json'
+    )).toBe('machine-42');
+  });
+
+  it('returns null for cloud provider or non-matching layouts', () => {
+    expect(readLocalFoldersMachineIdFromResourcesUrl(
+      'https://storage.example/users/u/OneDrive/resources.json'
+    )).toBeNull();
+    expect(readLocalFoldersMachineIdFromResourcesUrl(
+      'https://storage.example/users/u/LocalFolders/resources.json'
+    )).toBeNull();
   });
 });
 

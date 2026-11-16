@@ -10,7 +10,7 @@ import {
   type SharedDocumentLookup,
 } from '../services/sharedDocumentService';
 import { buildMarkupDocumentShellUrl } from '../utils/resourceLibraryConfig';
-import { subscriptionItemFromResource } from '../utils/accountSyncTarget';
+import { subscriptionItemFromResource, syncItemFromLibraryDoc } from '../utils/accountSyncTarget';
 import { routeInteraction } from '../services/windowRouting';
 import type { OpenDocumentPayload } from '../models/windowMessages';
 import {
@@ -158,9 +158,14 @@ export const useDocumentLinkRoute = ({ ready }: UseDocumentLinkRouteOptions): vo
         sourceUrl: resolved.viewer === 'markup' ? buildMarkupDocumentShellUrl(resolved.url) : resolved.url,
         title: resolved.title,
         kind: resolved.viewer,
-        syncItem: resolved.cloudProvider ? { provider: resolved.cloudProvider, itemId: resolved.documentId } : null,
+        syncItem: syncItemFromLibraryDoc({
+          cloudProvider: resolved.cloudProvider,
+          localFoldersMachineId: resolved.localFoldersMachineId,
+          documentId: resolved.documentId,
+        }),
         subscriptionItem: subscriptionItemFromResource({
           cloudProvider: resolved.cloudProvider,
+          localFoldersMachineId: resolved.localFoldersMachineId,
           libraryKey: resolved.libraryKey,
           resourceKey: resolved.resourceKey,
         }),

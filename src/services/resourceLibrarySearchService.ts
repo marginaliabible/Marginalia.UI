@@ -9,6 +9,7 @@ import {
   inferSourceFileKindFromPayload,
   inferSourceFileKindFromUrl,
   readCloudSyncProviderFromResourcesUrl,
+  readLocalFoldersMachineIdFromResourcesUrl,
   readDocumentViewerKind,
   readLibrarySourceAddresses,
   readResourceDocumentEntry,
@@ -43,6 +44,7 @@ export interface ResourceDocumentTitleSearchMatch {
   libraryLabel: string;
   documentId: string;
   cloudProvider: FederatedProvider | null;
+  localFoldersMachineId?: string | null;
   title: string;
   tags: string[];
   url: string;
@@ -181,6 +183,7 @@ export async function searchResourceDocumentTitles(
       libraryLabel,
       documentId,
       cloudProvider: readCloudSyncProviderFromResourcesUrl(resourcesUrl),
+      localFoldersMachineId: readLocalFoldersMachineIdFromResourcesUrl(resourcesUrl),
       title,
       tags,
       url: buildDocumentStorePageUrl(documentStoreAddress, resourcesUrl, { documentId, hash }, 1),

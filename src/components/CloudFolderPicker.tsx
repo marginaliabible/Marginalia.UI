@@ -20,6 +20,13 @@ import { showToast } from '../services/toastService';
 import { formatAccountSyncApplyToast, type FolderApplyResult } from '../utils/syncToastMessages';
 import { describeSyncFailure } from '../utils/syncFailureMessages';
 import type { AccountSyncRevealRequest } from '../models/accountSync';
+import type { FolderSelectionTarget } from '../models/folderSelection';
+import { makeLocalNodeKey } from '../models/folderSelection';
+import type { LocalFoldersBinding } from '../models/localFolders';
+import type { DocumentSyncItem } from '../store/slices/uiSlice';
+import LocalFoldersSection from './LocalFoldersSection';
+
+export type { FolderSelectionTarget } from '../models/folderSelection';
 
 const ROOT_LABEL: Record<FederatedProvider, string> = {
   google: 'Google Drive',
@@ -63,6 +70,16 @@ export interface CloudFolderReprocessButtonProps {
   fileName?: string;
   processed: boolean;
   variant?: 'toolbar' | 'row';
+  /** Watchman machine for Local Folders reprocess (re-upload + convert). */
+  machineId?: string;
+}
+
+export interface CloudFolderOpenInCloudButtonProps {
+  syncItem: DocumentSyncItem;
+  documentLabel: string;
+  userId?: string | null;
+  itemKind?: 'file' | 'folder';
+  variant?: 'toolbar' | 'row';
 }
 
 /** Drive/OneDrive listing and developer tools injected by Sanctum. Omitted in the open-source build. */
@@ -78,6 +95,7 @@ export interface CloudFolderSyncApi {
     driveId?: string
   ) => Promise<{ totalBytes: number; files: SupportedFolderFile[] }>;
   DeveloperReprocessButton?: ComponentType<CloudFolderReprocessButtonProps>;
+  OpenInCloudButton?: ComponentType<CloudFolderOpenInCloudButtonProps>;
 }
 
 /** Live selection snapshot for the Account Sync plan usage bar. */
@@ -86,6 +104,8 @@ export interface CloudFolderPickerUsageSnapshot {
   /** True when every selected root has a known size (or there are no selections). */
   sizesReady: boolean;
   providersWithSelection: FederatedProvider[];
+  /** Display labels for sources with a staged selection (Google Drive, OneDrive, machine names). */
+  sourceLabelsWithSelection: string[];
   stagedSelectedDocs: SyncPlanDocumentRef[];
   /** Applied file docs under roots that are still staged (for exclusion del preview). */
   appliedSelectedDocs: SyncPlanDocumentRef[];
@@ -116,27 +136,6 @@ function describeLowVerseRatioRejection(subject: string): string {
   return `${subject} contains less than an average of one verse per page, and has been removed from your library.`;
 }
 
-export interface FolderSelectionTarget {
-  id: string;
-  kind: 'folder' | 'file';
-  name?: string;
-  path?: string;
-  sizeBytes?: number;
-  sizeKnown?: boolean;
-  // Microsoft shared/remote folder drive id; required to list the folder via /drives/{driveId}/items/{id}.
-  driveId?: string;
-  // Cloud item IDs (folders or files, any depth) explicitly excluded from sync within this selection.
-  excludedItemIds?: string[];
-  // Nested files the user opted into after a folder-inherited skip (e.g. over 500 pages).
-  includedItemIds?: string[];
-  // Tags assigned to this root selection item itself.
-  tags?: string[];
-  // Tags for nested items (any depth) within this selection, keyed by cloud item id.
-  itemTags?: Record<string, string[]>;
-  // Inherited tags explicitly cancelled for a nested item (any depth), keyed by cloud item id.
-  itemTagExclusions?: Record<string, string[]>;
-}
-
 interface CloudFolderPickerProps {
   sessions: Record<FederatedProvider, FederatedSession | null>;
   initialSelections: Record<FederatedProvider, FolderSelectionTarget[]>;
@@ -149,18 +148,21 @@ interface CloudFolderPickerProps {
   onConnectRequested: (provider: FederatedProvider) => void;
   /** When set, replaces the right-pane selected-files list (e.g. provider Manage/Connect UI). */
   rightPanelOverride?: React.ReactNode;
+  /** Local Folders (Watchman) section; supplied only by the Sanctum overlay. */
+  localFolders?: LocalFoldersBinding;
   onDirtyChange?: (isDirty: boolean) => void;
   onUsageSnapshotChange?: (snapshot: CloudFolderPickerUsageSnapshot) => void;
   // Providers signed back in whose restored selections have not been applied yet.
   reconnectPending?: Partial<Record<FederatedProvider, boolean>>;
   // Selected file ids MarkupServer kept out of the library for averaging under one verse per page.
-  rejectedDocumentIds?: Partial<Record<FederatedProvider, ReadonlySet<string>>>;
+  // Keys are `google`/`microsoft` or `LocalFolders/<machineId>`.
+  rejectedDocumentIds?: Partial<Record<string, ReadonlySet<string>>>;
   // Folder-inherited files skipped for page count; shown as unselected, not rejected.
-  skippedDocumentIds?: Partial<Record<FederatedProvider, ReadonlySet<string>>>;
+  skippedDocumentIds?: Partial<Record<string, ReadonlySet<string>>>;
   // Selected files that failed to convert and are not indexed, keyed by cloud item id → raw error.
-  failedDocuments?: Partial<Record<FederatedProvider, ReadonlyMap<string, string>>>;
+  failedDocuments?: Partial<Record<string, ReadonlyMap<string, string>>>;
   // Cloud item ids with a published hash in documents.json (conversion finished).
-  processedDocumentIds?: Partial<Record<FederatedProvider, ReadonlySet<string>>>;
+  processedDocumentIds?: Partial<Record<string, ReadonlySet<string>>>;
   userId?: string | null;
   subscriptions?: SubscriptionsBinding;
   cloudSync?: CloudFolderSyncApi;
@@ -168,13 +170,16 @@ interface CloudFolderPickerProps {
 }
 
 export interface CloudFolderPickerHandle {
-  apply: () => void;
+  /** Returns false when Apply was blocked (e.g. untagged selection). */
+  apply: () => boolean;
   cancel: () => void;
 }
 
 interface FolderTreeNode {
   key: string;
   provider: FederatedProvider;
+  /** Set for Local Folders nodes; provider is unused for browse/session gating. */
+  machineId?: string;
   id: string;
   kind: 'file' | 'folder';
   name: string;
@@ -194,6 +199,8 @@ interface FolderTreeNode {
 interface SelectedFolder {
   key: string;
   provider: FederatedProvider;
+  /** Set for Local Folders roots; absolute path is `id`. */
+  machineId?: string;
   id: string;
   name: string;
   path: string;
@@ -225,6 +232,11 @@ interface RightVisibleRow {
 
 function makeNodeKey(provider: FederatedProvider, id: string): string {
   return `${provider}:${id}`;
+}
+
+/** Sync-status / outcome map key for a tree node (`google`/`microsoft` or `LocalFolders/<machineId>`). */
+function outcomeProviderKey(node: { provider: FederatedProvider; machineId?: string }): string {
+  return node.machineId ? `LocalFolders/${node.machineId}` : node.provider;
 }
 
 function normalizePathSegment(value: string): string {
@@ -266,6 +278,37 @@ function formatFolderSize(sizeBytes: number, sizeKnown: boolean): string {
   return `${gb.toFixed(1)} GB`;
 }
 
+function selectedFolderToTarget(
+  row: SelectedFolder,
+  nodes: Record<string, FolderTreeNode>
+): FolderSelectionTarget {
+  const node = nodes[row.key];
+  const itemTagsRecord = Array.from(row.itemTags.entries())
+    .filter(([, tags]) => tags.length > 0)
+    .sort(([leftId], [rightId]) => leftId.localeCompare(rightId));
+  const itemTagExclusionsRecord = Array.from(row.itemTagExclusions.entries())
+    .filter(([, tags]) => tags.length > 0)
+    .sort(([leftId], [rightId]) => leftId.localeCompare(rightId));
+
+  return {
+    id: row.id,
+    ...(row.machineId ? { machineId: row.machineId } : {}),
+    kind: node?.kind === 'file' ? 'file' : 'folder',
+    name: row.name,
+    path: row.path,
+    sizeBytes: node?.sizeKnown ? node.sizeBytes : undefined,
+    sizeKnown: node?.sizeKnown ?? false,
+    driveId: row.driveId ?? node?.driveId,
+    excludedItemIds: row.excludedItemIds.size > 0 ? Array.from(row.excludedItemIds).sort() : undefined,
+    includedItemIds: row.includedItemIds.size > 0 ? Array.from(row.includedItemIds).sort() : undefined,
+    tags: row.tags.length > 0 ? [...row.tags].sort() : undefined,
+    itemTags: itemTagsRecord.length > 0 ? Object.fromEntries(itemTagsRecord.map(([id, tags]) => [id, [...tags].sort()])) : undefined,
+    itemTagExclusions: itemTagExclusionsRecord.length > 0
+      ? Object.fromEntries(itemTagExclusionsRecord.map(([id, tags]) => [id, [...tags].sort()]))
+      : undefined,
+  };
+}
+
 function toSelectionPayload(
   selectedRows: SelectedFolder[],
   nodes: Record<string, FolderTreeNode>
@@ -276,33 +319,50 @@ function toSelectionPayload(
   };
 
   for (const row of selectedRows) {
-    const node = nodes[row.key];
-    const itemTagsRecord = Array.from(row.itemTags.entries())
-      .filter(([, tags]) => tags.length > 0)
-      .sort(([leftId], [rightId]) => leftId.localeCompare(rightId));
-    const itemTagExclusionsRecord = Array.from(row.itemTagExclusions.entries())
-      .filter(([, tags]) => tags.length > 0)
-      .sort(([leftId], [rightId]) => leftId.localeCompare(rightId));
-
-    next[row.provider].push({
-      id: row.id,
-      kind: node?.kind === 'file' ? 'file' : 'folder',
-      name: row.name,
-      path: row.path,
-      sizeBytes: node?.sizeKnown ? node.sizeBytes : undefined,
-      sizeKnown: node?.sizeKnown ?? false,
-      driveId: row.driveId ?? node?.driveId,
-      excludedItemIds: row.excludedItemIds.size > 0 ? Array.from(row.excludedItemIds).sort() : undefined,
-      includedItemIds: row.includedItemIds.size > 0 ? Array.from(row.includedItemIds).sort() : undefined,
-      tags: row.tags.length > 0 ? [...row.tags].sort() : undefined,
-      itemTags: itemTagsRecord.length > 0 ? Object.fromEntries(itemTagsRecord.map(([id, tags]) => [id, [...tags].sort()])) : undefined,
-      itemTagExclusions: itemTagExclusionsRecord.length > 0
-        ? Object.fromEntries(itemTagExclusionsRecord.map(([id, tags]) => [id, [...tags].sort()]))
-        : undefined,
-    });
+    // Local Folders targets are applied via Sanctum / localFolders.onTargetsChange, not cloud Apply.
+    if (row.machineId) {
+      continue;
+    }
+    next[row.provider].push(selectedFolderToTarget(row, nodes));
   }
 
   return next;
+}
+
+function targetToSelectedFolder(target: FolderSelectionTarget, machineId: string): SelectedFolder {
+  const key = makeLocalNodeKey(machineId, target.id);
+  return {
+    key,
+    provider: 'microsoft',
+    machineId,
+    id: target.id,
+    name: target.name || target.id,
+    path: target.path || target.id,
+    driveId: target.driveId,
+    excludedItemIds: new Set(target.excludedItemIds || []),
+    includedItemIds: new Set(target.includedItemIds || []),
+    tags: [...(target.tags || [])],
+    itemTags: new Map(Object.entries(target.itemTags || {}).map(([id, tags]) => [id, [...tags]])),
+    itemTagExclusions: new Map(Object.entries(target.itemTagExclusions || {}).map(([id, tags]) => [id, [...tags]])),
+  };
+}
+
+function serializeLocalTargetList(targets: readonly FolderSelectionTarget[]): string {
+  return JSON.stringify(
+    [...targets]
+      .map((target) => ({
+        id: target.id,
+        machineId: target.machineId,
+        kind: target.kind,
+        path: target.path,
+        tags: [...(target.tags || [])].sort(),
+        excludedItemIds: [...(target.excludedItemIds || [])].sort(),
+        includedItemIds: [...(target.includedItemIds || [])].sort(),
+        itemTags: target.itemTags || {},
+        itemTagExclusions: target.itemTagExclusions || {},
+      }))
+      .sort((left, right) => left.id.localeCompare(right.id))
+  );
 }
 
 function normalizeSelectionPayload(
@@ -507,7 +567,8 @@ function findFirstUntaggedSelection(
   selectedRows: SelectedFolder[],
   nodes: Record<string, FolderTreeNode>,
   providerSyncFilesEnabled: Record<FederatedProvider, boolean>,
-  sessions: Record<FederatedProvider, FederatedSession | null>
+  sessions: Record<FederatedProvider, FederatedSession | null>,
+  localMachineOnline?: ReadonlyMap<string, boolean>
 ): UntaggedSelectionHit | null {
   const walk = (
     nodeKey: string,
@@ -520,7 +581,9 @@ function findFirstUntaggedSelection(
       return null;
     }
 
-    const providerAvailable = providerSyncFilesEnabled[node.provider] && Boolean(sessions[node.provider]);
+    const providerAvailable = rootSelection.machineId
+      ? Boolean(localMachineOnline?.get(rootSelection.machineId))
+      : providerSyncFilesEnabled[node.provider] && Boolean(sessions[node.provider]);
     if (isNodeTaggable(nodeKey, rootSelectionKey, rootSelection, nodes, providerAvailable)) {
       const { effectiveTags } = computeEffectiveTags(
         nodeKey,
@@ -663,25 +726,46 @@ function computeUsageSnapshot(
   appliedPayload: Record<FederatedProvider, FolderSelectionTarget[]>,
   folderContentsByRoot: Record<string, SupportedFolderFile[]>,
   reconnectPending?: Partial<Record<FederatedProvider, boolean>>,
-  skippedDocumentIds?: Partial<Record<FederatedProvider, ReadonlySet<string>>>
+  skippedDocumentIds?: Partial<Record<FederatedProvider, ReadonlySet<string>>>,
+  localMachineNameById?: ReadonlyMap<string, string>
 ): CloudFolderPickerUsageSnapshot {
   let selectedBytes = 0;
   let sizesReady = true;
   const providers = new Set<FederatedProvider>();
+  const sourceLabels: string[] = [];
+  const seenSourceLabels = new Set<string>();
   const stagedSelectedDocs: SyncPlanDocumentRef[] = [];
   const stagedRootKeys = new Set(selectedRows.map((row) => row.key));
   const liveById = new Map<string, SyncPlanLiveFile>();
 
+  const pushSourceLabel = (label: string) => {
+    const trimmed = label.trim();
+    if (!trimmed || seenSourceLabels.has(trimmed)) {
+      return;
+    }
+    seenSourceLabels.add(trimmed);
+    sourceLabels.push(trimmed);
+  };
+
   for (const row of selectedRows) {
-    providers.add(row.provider);
+    const isLocal = Boolean(row.machineId);
+    if (isLocal && row.machineId) {
+      pushSourceLabel(localMachineNameById?.get(row.machineId) || row.machineId);
+    } else {
+      providers.add(row.provider);
+      pushSourceLabel(ROOT_LABEL[row.provider]);
+    }
+
     const node = nodes[row.key];
     if (!node?.sizeKnown) {
       sizesReady = false;
     }
     let rootBytes = node?.sizeKnown ? Math.max(0, node.sizeBytes) : 0;
-    const skippedIds = skippedDocumentIds?.[row.provider];
+    const skippedIds = skippedDocumentIds?.[outcomeProviderKey(row)];
     for (const excludedId of row.excludedItemIds) {
-      const excludedKey = makeNodeKey(row.provider, excludedId);
+      const excludedKey = row.machineId
+        ? makeLocalNodeKey(row.machineId, excludedId)
+        : makeNodeKey(row.provider, excludedId);
       const excludedNode = nodes[excludedKey];
       if (excludedNode?.sizeKnown) {
         rootBytes = Math.max(0, rootBytes - excludedNode.sizeBytes);
@@ -692,7 +776,9 @@ function computeUsageSnapshot(
         if (row.includedItemIds.has(skippedId) || row.excludedItemIds.has(skippedId)) {
           continue;
         }
-        const skippedKey = makeNodeKey(row.provider, skippedId);
+        const skippedKey = row.machineId
+          ? makeLocalNodeKey(row.machineId, skippedId)
+          : makeNodeKey(row.provider, skippedId);
         const skippedNode = nodes[skippedKey];
         if (skippedNode?.sizeKnown) {
           rootBytes = Math.max(0, rootBytes - skippedNode.sizeBytes);
@@ -700,6 +786,7 @@ function computeUsageSnapshot(
       }
     }
     selectedBytes += rootBytes;
+
     stagedSelectedDocs.push(...collectFileDocsUnderSelection(row, nodes, skippedIds));
     for (const file of folderContentsByRoot[row.key] ?? []) {
       if (isFileExcludedFromSelection(file, row.excludedItemIds, row.includedItemIds, skippedIds)) {
@@ -728,7 +815,7 @@ function computeUsageSnapshot(
     appliedSelectedDocs.push(...collectFileDocsUnderSelection(row, nodes, skippedDocumentIds?.[row.provider]));
   }
 
-  const reconnectRoots = selectedRows.filter((row) => reconnectPending?.[row.provider]);
+  const reconnectRoots = selectedRows.filter((row) => !row.machineId && reconnectPending?.[row.provider]);
   const reconnecting = (Object.keys(ROOT_LABEL) as FederatedProvider[]).some((provider) => (
     Boolean(reconnectPending?.[provider])
   ));
@@ -739,6 +826,7 @@ function computeUsageSnapshot(
     selectedBytes,
     sizesReady: selectedRows.length === 0 ? true : sizesReady,
     providersWithSelection: Array.from(providers),
+    sourceLabelsWithSelection: sourceLabels,
     stagedSelectedDocs,
     appliedSelectedDocs,
     deselectedAppliedRootBytes,
@@ -757,6 +845,7 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
   onSelectionsChange,
   onConnectRequested,
   rightPanelOverride = null,
+  localFolders,
   onDirtyChange,
   onUsageSnapshotChange,
   reconnectPending,
@@ -771,6 +860,7 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
 }) => {
   const cloudProvidersEnabled = Boolean(cloudSync);
   const ReprocessButton = cloudSync?.DeveloperReprocessButton;
+  const OpenInCloudButton = cloudSync?.OpenInCloudButton;
   const isDesktopLayout = useDesktopLayout();
   const [loadingRoots, setLoadingRoots] = useState(true);
   const [isSubscriptionsExpanded, setIsSubscriptionsExpanded] = useState(false);
@@ -785,7 +875,10 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
   const [folderContentsByRoot, setFolderContentsByRoot] = useState<Record<string, SupportedFolderFile[]>>({});
   // Mobile stacked layout: open files when selections already exist, otherwise providers.
   const [mobilePane, setMobilePane] = useState<MobileSyncPane>(() => (
-    hasAnyFolderSelection(initialSelections) ? 'files' : 'providers'
+    hasAnyFolderSelection(initialSelections)
+      || Boolean(localFolders?.machines.some((machine) => machine.selectedTargets.length > 0))
+      ? 'files'
+      : 'providers'
   ));
   const [highlightNodeKey, setHighlightNodeKey] = useState<string | null>(null);
   const [highlightSelectedKey, setHighlightSelectedKey] = useState<string | null>(null);
@@ -806,6 +899,8 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
   const nodesRef = useRef<Record<string, FolderTreeNode>>({});
   const inFlightLoadsRef = useRef<Record<string, Promise<FolderTreeNode[]>>>({});
   const inFlightFolderSizeReadsRef = useRef<Partial<Record<string, Promise<void>>>>({});
+  /** Child folder sizes from a parent getFolderSize walk, applied when those nodes are created. */
+  const pendingLocalFolderSizesRef = useRef<Record<string, number>>({});
   const subfolderCheckQueueRef = useRef<SubfolderCheckRequest[]>([]);
   const pendingSubfolderCheckKeysRef = useRef<Set<string>>(new Set());
   const checkedSubfolderKeysRef = useRef<Set<string>>(new Set());
@@ -909,9 +1004,14 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
         .filter((entry): entry is FolderTreeNode => Boolean(entry));
     }
 
-    const session = sessions[node.provider];
-    if (!session || !cloudSync) {
-      setErrorMessage(`Connect ${ROOT_LABEL[node.provider]} to browse folders.`);
+    const isLocal = Boolean(node.machineId);
+    if (!isLocal) {
+      const session = sessions[node.provider];
+      if (!session || !cloudSync) {
+        setErrorMessage(`Connect ${ROOT_LABEL[node.provider]} to browse folders.`);
+        return [];
+      }
+    } else if (!localFolders) {
       return [];
     }
 
@@ -925,15 +1025,42 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
 
     const loadPromise = (async () => {
       try {
-        const children = await cloudSync.listFolderChildrenForSession(session, node.id, node.driveId);
-        // Subfolders are listed before files within a folder.
-        const sortedChildren = [...children].sort((left, right) => {
-          if (left.kind === right.kind) {
-            return 0;
-          }
+        let sortedChildren: Array<{
+          id: string;
+          kind: 'file' | 'folder';
+          name: string;
+          sizeBytes: number;
+          hasChildren: boolean;
+          driveId?: string;
+        }>;
 
-          return left.kind === 'folder' ? -1 : 1;
-        });
+        if (isLocal && node.machineId && localFolders) {
+          const entries = await localFolders.listChildren(node.machineId, node.id);
+          sortedChildren = [...entries]
+            .map((entry) => ({
+              id: entry.path,
+              kind: entry.kind,
+              name: entry.name,
+              sizeBytes: Math.max(0, Math.floor(entry.sizeBytes ?? 0)),
+              hasChildren: entry.kind === 'folder',
+            }))
+            .sort((left, right) => {
+              if (left.kind === right.kind) {
+                return left.name.localeCompare(right.name);
+              }
+              return left.kind === 'folder' ? -1 : 1;
+            });
+        } else {
+          const session = sessions[node.provider]!;
+          const children = await cloudSync!.listFolderChildrenForSession(session, node.id, node.driveId);
+          // Subfolders are listed before files within a folder.
+          sortedChildren = [...children].sort((left, right) => {
+            if (left.kind === right.kind) {
+              return 0;
+            }
+            return left.kind === 'folder' ? -1 : 1;
+          });
+        }
 
         const nextChildren: FolderTreeNode[] = [];
         updateNodes((current) => {
@@ -946,23 +1073,33 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
           const childKeys: string[] = [];
 
           for (const child of sortedChildren) {
-            const childKey = makeNodeKey(parent.provider, child.id);
+            const childKey = parent.machineId
+              ? makeLocalNodeKey(parent.machineId, child.id)
+              : makeNodeKey(parent.provider, child.id);
             childKeys.push(childKey);
 
             const existingChild = next[childKey];
             const hasChildren = child.kind === 'folder'
               ? existingChild?.hasChildren ?? child.hasChildren
               : false;
+            const pendingLocalSize = parent.machineId
+              ? pendingLocalFolderSizesRef.current[child.id]
+              : undefined;
+            const knownFromPending = pendingLocalSize !== undefined;
+            if (knownFromPending) {
+              delete pendingLocalFolderSizesRef.current[child.id];
+            }
 
             next[childKey] = {
               key: childKey,
               provider: parent.provider,
+              machineId: parent.machineId,
               id: child.id,
               kind: child.kind,
               name: child.name,
-              path: `${parent.path}/${child.name}`,
-              sizeBytes: child.sizeBytes,
-              sizeKnown: existingChild?.sizeKnown ?? child.kind === 'file',
+              path: parent.machineId ? child.id : `${parent.path}/${child.name}`,
+              sizeBytes: knownFromPending ? pendingLocalSize : child.sizeBytes,
+              sizeKnown: existingChild?.sizeKnown ?? (child.kind === 'file' || knownFromPending),
               hasChildren,
               driveId: child.driveId,
               parentKey: nodeKey,
@@ -1006,7 +1143,7 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
 
     inFlightLoadsRef.current[nodeKey] = loadPromise;
     return loadPromise;
-  }, [cloudSync, sessions, updateNodes]);
+  }, [cloudSync, localFolders, sessions, updateNodes]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1096,10 +1233,29 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
         };
       }
 
-      nodesRef.current = nextNodes;
-      setNodes(nextNodes);
+      // Cloud bootstrap rebuilds the tree from provider sessions. Keep any Local Folders
+      // rows/nodes already mirrored from Sanctum — otherwise a session refresh wipes them from
+      // Selected Files & Folders while Watchman is still syncing the same paths.
+      setNodes((current) => {
+        const next = { ...nextNodes };
+        for (const [key, node] of Object.entries(current)) {
+          if (node.machineId) {
+            next[key] = node;
+          }
+        }
+        nodesRef.current = next;
+        return next;
+      });
       setRootKeys(nextRootKeys);
-      setSelected(initialSelected);
+      setSelected((current) => {
+        const next = { ...initialSelected };
+        for (const [key, row] of Object.entries(current)) {
+          if (row.machineId) {
+            next[key] = row;
+          }
+        }
+        return next;
+      });
       hasBootstrappedSelectionsRef.current = true;
       setLoadingRoots(false);
     };
@@ -1242,6 +1398,117 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
     return Object.values(selected).sort((left, right) => left.path.localeCompare(right.path));
   }, [selected]);
 
+  const localMachineOnline = useMemo(() => {
+    const map = new Map<string, boolean>();
+    for (const machine of localFolders?.machines ?? []) {
+      map.set(machine.machineId, machine.online);
+    }
+    return map;
+  }, [localFolders?.machines]);
+
+  const localTargetsFingerprintRef = useRef('');
+  const pendingLocalFlushMachineIdRef = useRef<string | null>(null);
+
+  // Mirror Sanctum staged Local targets into the shared selected / right-pane graph.
+  useEffect(() => {
+    if (!localFolders) {
+      return;
+    }
+
+    // An empty machines list is a transient refresh/loading state — not "clear every Local
+    // selection". Clearing a machine happens when that machine is still listed with [].
+    if (localFolders.machines.length === 0) {
+      return;
+    }
+
+    const machinesInBinding = new Set(localFolders.machines.map((machine) => machine.machineId));
+    const desired: Array<{ machineId: string; target: FolderSelectionTarget }> = [];
+    for (const machine of localFolders.machines) {
+      for (const target of machine.selectedTargets) {
+        desired.push({ machineId: machine.machineId, target });
+      }
+    }
+    const fingerprint = serializeLocalTargetList(
+      desired.map(({ machineId, target }) => ({ ...target, machineId: target.machineId || machineId }))
+    );
+    if (fingerprint === localTargetsFingerprintRef.current) {
+      return;
+    }
+    localTargetsFingerprintRef.current = fingerprint;
+
+    updateNodes((current) => {
+      const next = { ...current };
+      for (const { machineId, target } of desired) {
+        const key = makeLocalNodeKey(machineId, target.id);
+        const existing = next[key];
+        const persistedKnown = Boolean(target.sizeKnown && typeof target.sizeBytes === 'number');
+        next[key] = {
+          key,
+          provider: 'microsoft',
+          machineId,
+          id: target.id,
+          kind: target.kind === 'file' ? 'file' : 'folder',
+          name: target.name || target.id,
+          path: target.path || target.id,
+          sizeBytes: existing?.sizeBytes
+            ?? (persistedKnown ? Math.max(0, Math.floor(target.sizeBytes!)) : 0),
+          sizeKnown: existing?.sizeKnown ?? persistedKnown,
+          hasChildren: target.kind !== 'file',
+          parentKey: null,
+          childKeys: existing?.childKeys || [],
+          childrenLoaded: existing?.childrenLoaded || false,
+          isExpanded: existing?.isExpanded || false,
+          isLoading: existing?.isLoading || false,
+        };
+      }
+      return next;
+    });
+
+    setSelected((current) => {
+      const next: Record<string, SelectedFolder> = {};
+      for (const [key, row] of Object.entries(current)) {
+        if (!row.machineId) {
+          next[key] = row;
+          continue;
+        }
+        // Keep rows for machines temporarily missing from the binding so a later flush cannot
+        // wipe Sanctum's staged selection for a machine that briefly dropped out of the list.
+        if (!machinesInBinding.has(row.machineId)) {
+          next[key] = row;
+        }
+      }
+      for (const { machineId, target } of desired) {
+        next[makeLocalNodeKey(machineId, target.id)] = targetToSelectedFolder(
+          { ...target, machineId },
+          machineId
+        );
+      }
+      return next;
+    });
+  }, [localFolders, updateNodes]);
+
+  const flushLocalTargetsForMachine = useCallback((machineId: string, nextSelected: Record<string, SelectedFolder>) => {
+    if (!localFolders) {
+      return;
+    }
+    const targets = Object.values(nextSelected)
+      .filter((row) => row.machineId === machineId)
+      .map((row) => selectedFolderToTarget(row, nodesRef.current));
+    localTargetsFingerprintRef.current = serializeLocalTargetList(
+      targets.map((target) => ({ ...target, machineId }))
+    );
+    localFolders.onTargetsChange(machineId, targets);
+  }, [localFolders]);
+
+  useEffect(() => {
+    const machineId = pendingLocalFlushMachineIdRef.current;
+    if (!machineId) {
+      return;
+    }
+    pendingLocalFlushMachineIdRef.current = null;
+    flushLocalTargetsForMachine(machineId, selected);
+  }, [flushLocalTargetsForMachine, selected]);
+
   const toggleExpanded = useCallback((key: string) => {
     const node = nodes[key];
     if (!node) {
@@ -1317,6 +1584,14 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
     onDirtyChange?.(isDirty);
   }, [isDirty, onDirtyChange]);
 
+  const localMachineNameById = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const machine of localFolders?.machines ?? []) {
+      map.set(machine.machineId, machine.name);
+    }
+    return map;
+  }, [localFolders?.machines]);
+
   const usageSnapshot = useMemo(
     () => computeUsageSnapshot(
       selectedRows,
@@ -1324,9 +1599,18 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
       initialSelections,
       folderContentsByRoot,
       reconnectPending,
-      skippedDocumentIds
+      skippedDocumentIds,
+      localMachineNameById
     ),
-    [folderContentsByRoot, initialSelections, nodes, reconnectPending, selectedRows, skippedDocumentIds]
+    [
+      folderContentsByRoot,
+      initialSelections,
+      localMachineNameById,
+      nodes,
+      reconnectPending,
+      selectedRows,
+      skippedDocumentIds,
+    ]
   );
   const usageSnapshotFingerprintRef = useRef('');
 
@@ -1338,6 +1622,7 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
       selectedBytes: usageSnapshot.selectedBytes,
       sizesReady: usageSnapshot.sizesReady,
       providersWithSelection: usageSnapshot.providersWithSelection,
+      sourceLabelsWithSelection: usageSnapshot.sourceLabelsWithSelection,
       stagedSelectedDocs: usageSnapshot.stagedSelectedDocs,
       appliedSelectedDocs: usageSnapshot.appliedSelectedDocs,
       deselectedAppliedRootBytes: usageSnapshot.deselectedAppliedRootBytes,
@@ -1381,10 +1666,17 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
     setPendingSubscriptionReveal(null);
   }, [pendingSubscriptionReveal, subscriptionLibraries, subscriptions]);
 
-  const handleApply = useCallback(() => {
-    const shouldApplyFiles = areFilesDirty || !areSubscriptionsDirty;
-    const untagged = shouldApplyFiles
-      ? findFirstUntaggedSelection(selectedRows, nodes, providerSyncFilesEnabled, sessions)
+  const handleApply = useCallback((): boolean => {
+    const hasLocalSelection = selectedRows.some((row) => Boolean(row.machineId));
+    const shouldValidateFiles = areFilesDirty || hasLocalSelection || !areSubscriptionsDirty;
+    const untagged = shouldValidateFiles
+      ? findFirstUntaggedSelection(
+        selectedRows,
+        nodes,
+        providerSyncFilesEnabled,
+        sessions,
+        localMachineOnline
+      )
       : null;
     if (untagged) {
       window.alert('You must supply tags for all files before saving.');
@@ -1405,7 +1697,7 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
       window.setTimeout(() => {
         selectedRowRefs.current[untagged.key]?.scrollIntoView?.({ block: 'center', behavior: 'smooth' });
       }, 30);
-      return;
+      return false;
     }
 
     if (subscriptions && areSubscriptionsDirty) {
@@ -1417,12 +1709,17 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
       if (blocked) {
         window.alert('At least one of your starred translations must stay enabled.');
         setPendingSubscriptionReveal({ ...blocked, flash: true });
-        return;
+        return false;
       }
     }
 
+    // Local-only Apply uses this path for tag validation; Sanctum sends the Local payload separately.
+    if (!areFilesDirty && !areSubscriptionsDirty) {
+      return true;
+    }
+
     setErrorMessage(null);
-    const folderApply = shouldApplyFiles
+    const folderApply = areFilesDirty
       ? onSelectionsChange(toSelectionPayload(selectedRows, nodes))
       : null;
     const subscriptionsApply = subscriptions && areSubscriptionsDirty
@@ -1438,9 +1735,11 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
           failures: [error instanceof Error ? error.message : String(error)],
         }, null));
       });
+    return true;
   }, [
     areFilesDirty,
     areSubscriptionsDirty,
+    localMachineOnline,
     nodes,
     onSelectionsChange,
     providerSyncFilesEnabled,
@@ -1452,7 +1751,16 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
 
   const resetSubscriptionStaging = subscriptionStaging.reset;
   const handleCancel = useCallback(() => {
-    setSelected(buildSelectedMapFromPayload(initialSelectionsRef.current));
+    setSelected((current) => {
+      const cloud = buildSelectedMapFromPayload(initialSelectionsRef.current);
+      const localRows: Record<string, SelectedFolder> = {};
+      for (const [key, row] of Object.entries(current)) {
+        if (row.machineId) {
+          localRows[key] = row;
+        }
+      }
+      return { ...cloud, ...localRows };
+    });
     resetSubscriptionStaging();
   }, [resetSubscriptionStaging]);
 
@@ -1903,6 +2211,11 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
       };
     }
 
+    // Local Folders reveals are handled by Sanctum (expand machine tree + focusPath).
+    if (revealRequest.target.kind !== 'cloud') {
+      return;
+    }
+
     setIsRevealingLocation(true);
     void revealCloudItem(
       revealRequest.target.provider,
@@ -1955,7 +2268,7 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
         nextIncluded.delete(itemId);
       }
 
-      return {
+      const next = {
         ...current,
         [rootSelectionKey]: {
           ...existing,
@@ -1963,6 +2276,10 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
           includedItemIds: nextIncluded,
         },
       };
+      if (existing.machineId) {
+        pendingLocalFlushMachineIdRef.current = existing.machineId;
+      }
+      return next;
     });
   }, []);
 
@@ -1973,30 +2290,35 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
         return current;
       }
 
+      let next: Record<string, SelectedFolder>;
       if (itemId === null) {
-        return {
+        next = {
           ...current,
           [rootSelectionKey]: {
             ...existing,
             tags: nextTags,
           },
         };
-      }
-
-      const nextItemTags = new Map(existing.itemTags);
-      if (nextTags.length > 0) {
-        nextItemTags.set(itemId, nextTags);
       } else {
-        nextItemTags.delete(itemId);
-      }
+        const nextItemTags = new Map(existing.itemTags);
+        if (nextTags.length > 0) {
+          nextItemTags.set(itemId, nextTags);
+        } else {
+          nextItemTags.delete(itemId);
+        }
 
-      return {
-        ...current,
-        [rootSelectionKey]: {
-          ...existing,
-          itemTags: nextItemTags,
-        },
-      };
+        next = {
+          ...current,
+          [rootSelectionKey]: {
+            ...existing,
+            itemTags: nextItemTags,
+          },
+        };
+      }
+      if (existing.machineId) {
+        pendingLocalFlushMachineIdRef.current = existing.machineId;
+      }
+      return next;
     });
   }, []);
 
@@ -2012,13 +2334,17 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
       currentExclusions.add(tag);
       nextExclusions.set(itemId, Array.from(currentExclusions));
 
-      return {
+      const next = {
         ...current,
         [rootSelectionKey]: {
           ...existing,
           itemTagExclusions: nextExclusions,
         },
       };
+      if (existing.machineId) {
+        pendingLocalFlushMachineIdRef.current = existing.machineId;
+      }
+      return next;
     });
   }, []);
 
@@ -2085,18 +2411,101 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
 
     for (const nodeKey of keysToSize) {
       const node = nodesRef.current[nodeKey];
-      if (!node || node.kind !== 'folder') {
+      if (!node) {
         continue;
       }
 
+      const isLocal = Boolean(node.machineId);
+      const selectedRow = selectedRows.find((row) => row.key === nodeKey);
       const isSelectedRoot = selectedRootKeys.has(nodeKey);
-      const needsInventory = isSelectedRoot && Boolean(reconnectPending?.[node.provider]);
+      const needsInventory = !isLocal
+        && node.kind === 'folder'
+        && isSelectedRoot
+        && Boolean(reconnectPending?.[node.provider]);
       const hasInventory = Object.prototype.hasOwnProperty.call(folderContentsByRoot, nodeKey);
       if (node.sizeKnown && !(needsInventory && !hasInventory)) {
         continue;
       }
 
       if (inFlightFolderSizeReadsRef.current[nodeKey]) {
+        continue;
+      }
+
+      if (isLocal) {
+        if (!localFolders || !node.machineId) {
+          continue;
+        }
+        if (!localMachineOnline.get(node.machineId)) {
+          continue;
+        }
+        const machineId = node.machineId;
+        const listChildren = localFolders.listChildren;
+        const getFolderSize = localFolders.getFolderSize;
+        const excludedItemIds = selectedRow?.excludedItemIds ?? new Set<string>();
+        const includedItemIds = selectedRow?.includedItemIds ?? new Set<string>();
+        const pendingSize = pendingLocalFolderSizesRef.current[node.id];
+        const readPromise = (async () => {
+          try {
+            let computedSize = 0;
+            let childSizes: Array<{ path: string; sizeBytes: number }> = [];
+            if (node.kind === 'file') {
+              computedSize = Math.max(0, Math.floor(node.sizeBytes || 0));
+              if (!node.sizeKnown || computedSize === 0) {
+                const parentPath = node.id.replace(/[\\/][^\\/]+$/, '') || '';
+                const siblings = await listChildren(machineId, parentPath);
+                const match = siblings.find((entry) => entry.path === node.id || entry.name === node.name);
+                computedSize = Math.max(0, Math.floor(match?.sizeBytes ?? 0));
+              }
+            } else if (pendingSize !== undefined) {
+              computedSize = pendingSize;
+              delete pendingLocalFolderSizesRef.current[node.id];
+            } else {
+              const contents = await getFolderSize(machineId, node.id, {
+                excluded: [...excludedItemIds],
+                included: [...includedItemIds],
+              });
+              computedSize = Math.max(0, Math.floor(contents.sizeBytes));
+              childSizes = contents.children ?? [];
+            }
+            updateNodes((current) => {
+              const existing = current[nodeKey];
+              if (!existing) {
+                return current;
+              }
+              const next: Record<string, FolderTreeNode> = {
+                ...current,
+                [nodeKey]: {
+                  ...existing,
+                  sizeBytes: computedSize,
+                  sizeKnown: true,
+                },
+              };
+              for (const child of childSizes) {
+                const childKey = makeLocalNodeKey(machineId, child.path);
+                const existingChild = next[childKey];
+                if (existingChild) {
+                  next[childKey] = {
+                    ...existingChild,
+                    sizeBytes: Math.max(0, Math.floor(child.sizeBytes)),
+                    sizeKnown: true,
+                  };
+                } else {
+                  pendingLocalFolderSizesRef.current[child.path] = Math.max(0, Math.floor(child.sizeBytes));
+                }
+              }
+              return next;
+            });
+          } catch {
+            // Keep unknown size blank if Watchman is offline or listing fails.
+          } finally {
+            delete inFlightFolderSizeReadsRef.current[nodeKey];
+          }
+        })();
+        inFlightFolderSizeReadsRef.current[nodeKey] = readPromise;
+        continue;
+      }
+
+      if (node.kind !== 'folder') {
         continue;
       }
 
@@ -2136,7 +2545,18 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
 
       inFlightFolderSizeReadsRef.current[nodeKey] = readPromise;
     }
-  }, [cloudSync, folderContentsByRoot, reconnectPending, rightVisibleRows, selectedRootKeys, selectedRows, sessions, updateNodes]);
+  }, [
+    cloudSync,
+    folderContentsByRoot,
+    localFolders,
+    localMachineOnline,
+    reconnectPending,
+    rightVisibleRows,
+    selectedRootKeys,
+    selectedRows,
+    sessions,
+    updateNodes,
+  ]);
 
   // Right-panel expansion outlives the node tree, which is rebuilt whenever sessions change.
   useEffect(() => {
@@ -2311,6 +2731,8 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
                 </ul>
               )}
 
+              {localFolders && <LocalFoldersSection binding={localFolders} />}
+
               {subscriptions && (
                 <ul className="cloud-folder-tree-list" aria-label="Subscriptions">
                   <li>
@@ -2418,7 +2840,10 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
                   return null;
                 }
 
-                const providerAvailable = providerSyncFilesEnabled[node.provider] && Boolean(sessions[node.provider]);
+                const providerAvailable = rootSelection.machineId
+                  ? Boolean(localMachineOnline.get(rootSelection.machineId))
+                  : providerSyncFilesEnabled[node.provider] && Boolean(sessions[node.provider]);
+                const isLocalRoot = Boolean(rootSelection.machineId);
                 const isFolder = node.kind === 'folder';
                 // Once expanded, a folder that turned out to have no files/subfolders loses its chevron.
                 const isEmptyFolder = isFolder && node.childrenLoaded && node.childKeys.length === 0;
@@ -2430,26 +2855,29 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
                 const isCoveredByExcludedAncestor = !visibleRow.isRootSelection
                   && hasExcludedAncestor(visibleRow.key, visibleRow.rootSelectionKey, rootSelection, nodes);
                 const canToggleSync = isFolder || Boolean(fileIcon?.supported);
+                const statusKey = outcomeProviderKey(rootSelection.machineId
+                  ? { provider: node.provider, machineId: rootSelection.machineId }
+                  : node);
                 const isSkipped = !isFolder
                   && !visibleRow.isRootSelection
                   && !isExcluded
                   && !isCoveredByExcludedAncestor
                   && !rootSelection.includedItemIds.has(node.id)
-                  && Boolean(skippedDocumentIds?.[node.provider]?.has(node.id));
+                  && Boolean(skippedDocumentIds?.[statusKey]?.has(node.id));
                 const looksUnselected = isExcluded || isSkipped;
                 const isRejected = !isFolder
                   && !visibleRow.isRootSelection
                   && !isExcluded
                   && !isSkipped
                   && !isCoveredByExcludedAncestor
-                  && Boolean(rejectedDocumentIds?.[node.provider]?.has(node.id));
+                  && Boolean(rejectedDocumentIds?.[statusKey]?.has(node.id));
                 const failedError = !isFolder
                   && !visibleRow.isRootSelection
                   && !isExcluded
                   && !isSkipped
                   && !isCoveredByExcludedAncestor
                   && !isRejected
-                  ? failedDocuments?.[node.provider]?.get(node.id)
+                  ? failedDocuments?.[statusKey]?.get(node.id)
                   : undefined;
                 const isFailed = failedError !== undefined;
                 const unavailableMessage = isRejected
@@ -2482,7 +2910,10 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
                   }
 
                   toggleRightExpanded(groupKey, visibleRow.key);
-                  void revealPath(rootSelection);
+                  // Local roots use absolute Windows paths; cloud revealPath would fall through to OneDrive.
+                  if (!rootSelection.machineId) {
+                    void revealPath(rootSelection);
+                  }
                 };
 
                 const handleOpenTagModal = (event: React.MouseEvent) => {
@@ -2527,7 +2958,7 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
                         </span>
                       )}
 
-                      {visibleRow.isRootSelection && (!providerSyncFilesEnabled[node.provider] || !sessions[node.provider]) ? (
+                      {visibleRow.isRootSelection && !providerAvailable ? (
                         <div className="cloud-folder-selected-name-wrap">
                           <button
                             type="button"
@@ -2596,11 +3027,27 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
                             documentId={node.id}
                             documentLabel={node.name}
                             fileName={node.name}
-                            processed={Boolean(processedDocumentIds?.[node.provider]?.has(node.id))}
+                            processed={Boolean(processedDocumentIds?.[statusKey]?.has(node.id))}
+                            variant="row"
+                            {...(rootSelection.machineId ? { machineId: rootSelection.machineId } : {})}
+                          />
+                        )}
+                        {OpenInCloudButton && providerAvailable && (
+                          <OpenInCloudButton
+                            syncItem={{
+                              provider: node.provider,
+                              itemId: rootSelection.machineId
+                                ? `LocalFolders/${rootSelection.machineId}/${node.id}`
+                                : node.id,
+                              ...(rootSelection.machineId ? { machineId: rootSelection.machineId } : {}),
+                            }}
+                            documentLabel={node.name}
+                            userId={userId}
+                            itemKind={isFolder ? 'folder' : 'file'}
                             variant="row"
                           />
                         )}
-                        {visibleRow.isRootSelection && (!providerSyncFilesEnabled[node.provider] || !sessions[node.provider]) ? (
+                        {visibleRow.isRootSelection && !providerAvailable && !isLocalRoot ? (
                           <button
                             type="button"
                             className="btn btn-link btn-sm p-0 cloud-folder-selected-reconnect"
@@ -2612,7 +3059,7 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
                           >
                             Reconnect
                           </button>
-                        ) : visibleRow.isRootSelection ? (
+                        ) : visibleRow.isRootSelection && (providerAvailable || isLocalRoot) ? (
                           <button
                             type="button"
                             className="btn btn-link btn-sm text-info p-0 cloud-folder-selected-remove"
@@ -2621,8 +3068,12 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
                             onClick={(event) => {
                               event.stopPropagation();
                               setSelected((current) => {
+                                const existing = current[visibleRow.key];
                                 const next = { ...current };
                                 delete next[visibleRow.key];
+                                if (existing?.machineId) {
+                                  pendingLocalFlushMachineIdRef.current = existing.machineId;
+                                }
                                 return next;
                               });
                             }}

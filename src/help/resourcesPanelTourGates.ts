@@ -7,7 +7,7 @@ export type ResourcesPanelTourGateResult =
   | { status: 'blocked'; message: string };
 
 const NO_PROVIDER_MESSAGE =
-  'The Resources panel requires you to connect to a cloud provider. Please do so via [Account Sync](account-sync) before continuing.';
+  'The Resources panel requires you to connect a provider (Google Drive, OneDrive, or Local Folders). Please do so via [Account Sync](account-sync) before continuing.';
 
 const NO_RESOURCE_MESSAGE =
   'The Resources panel requires at least one resource in order to be used. Follow the steps in the [Account Sync Help Topic](account-sync) to connect to your notes or ministry\'s resources.';

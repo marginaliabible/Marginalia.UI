@@ -114,11 +114,32 @@
   min-width: 0;
 }
 
+.cloud-folder-tree-name-primary {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-width: 0;
+}
+
 .cloud-folder-tree-name {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.cloud-folder-tree-offline {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  flex: 0 0 auto;
+  font-size: 0.8rem;
+  line-height: 1.1;
+  color: #fd7e14;
+
+  .fa-radiation {
+    flex: 0 0 auto;
+  }
 }
 
 .cloud-folder-tree-name.is-highlighted {
@@ -338,6 +359,16 @@
 }
 
 .btn.cloud-folder-selected-reprocess:disabled {
+  color: var(--bs-secondary-color);
+  opacity: 0.45;
+}
+
+.btn.cloud-folder-selected-open {
+  font-size: 0.78rem;
+  color: var(--bs-info);
+}
+
+.btn.cloud-folder-selected-open:disabled {
   color: var(--bs-secondary-color);
   opacity: 0.45;
 }

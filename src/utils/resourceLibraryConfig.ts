@@ -440,19 +440,22 @@ const CLOUD_SYNC_PROVIDER_BY_FOLDER: Record<string, FederatedProvider> = {
   onedrive: 'microsoft',
 };
 
-/**
- * Cloud Service Sync publishes one resources.json per provider at
- * `users/{userId}/{GoogleDrive|OneDrive}/resources.json`; any other layout is not a synced library.
- */
-export function readCloudSyncProviderFromResourcesUrl(resourcesUrl: string): FederatedProvider | null {
+function resourcesUrlPathSegments(resourcesUrl: string): string[] {
   let pathname: string;
   try {
     pathname = new URL(resourcesUrl).pathname;
   } catch {
     pathname = resourcesUrl.split(/[?#]/)[0] ?? '';
   }
+  return pathname.split('/').filter(Boolean);
+}
 
-  const segments = pathname.split('/').filter(Boolean);
+/**
+ * Cloud Service Sync publishes one resources.json per provider at
+ * `users/{userId}/{GoogleDrive|OneDrive}/resources.json`; any other layout is not a synced library.
+ */
+export function readCloudSyncProviderFromResourcesUrl(resourcesUrl: string): FederatedProvider | null {
+  const segments = resourcesUrlPathSegments(resourcesUrl);
   if (segments.length < 4) {
     return null;
   }
@@ -463,6 +466,32 @@ export function readCloudSyncProviderFromResourcesUrl(resourcesUrl: string): Fed
   }
 
   return CLOUD_SYNC_PROVIDER_BY_FOLDER[providerFolder.toLowerCase()] ?? null;
+}
+
+/**
+ * Watchman Local Folders libraries publish at
+ * `users/{userId}/LocalFolders/{machineId}/resources.json`.
+ */
+export function readLocalFoldersMachineIdFromResourcesUrl(resourcesUrl: string): string | null {
+  const segments = resourcesUrlPathSegments(resourcesUrl);
+  if (segments.length < 5) {
+    return null;
+  }
+
+  const fileName = segments[segments.length - 1];
+  const machineId = segments[segments.length - 2];
+  const localFolders = segments[segments.length - 3];
+  const usersSegment = segments[segments.length - 5];
+  if (
+    usersSegment !== 'users'
+    || localFolders.toLowerCase() !== 'localfolders'
+    || fileName.toLowerCase() !== 'resources.json'
+  ) {
+    return null;
+  }
+
+  const trimmed = String(machineId ?? '').trim();
+  return trimmed || null;
 }
 
 export function readDocumentViewerKind(value: unknown): DocumentViewerKind | null {

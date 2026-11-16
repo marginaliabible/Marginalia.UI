@@ -18,6 +18,8 @@ export interface TranslationRecord {
 export interface DocumentSyncItem {
   provider: FederatedProvider;
   itemId: string;
+  /** Set (by the Sanctum overlay) when the document came from a Local Folders / Watchman machine. */
+  machineId?: string;
 }
 
 export type { DocumentSubscriptionItem };

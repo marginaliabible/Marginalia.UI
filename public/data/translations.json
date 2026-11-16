@@ -1,5 +1,5 @@
 {
-  "modifiedOn": "2026-10-22T21:32:49.383Z",
+  "modifiedOn": "2026-11-16T21:32:49.383Z",
   "translations": [
     {
       "id": "CSlElizabeth",
@@ -105,7 +105,7 @@
     },
     {
       "id": "FreJND",
-      "label": "Bible J.N. Darby in French with Strong's numbers",
+      "label": "Bible J.N. Darby in French",
       "language": "fr",
       "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/FreJND.json"
     },
@@ -435,7 +435,7 @@
     },
     {
       "id": "KJV",
-      "label": "King James Version (1769) with Strongs Numbers and Morphology and CatchWords",
+      "label": "King James Version (1769)",
       "language": "en",
       "address": "bibles/KJV.json"
     },
@@ -687,7 +687,7 @@
     },
     {
       "id": "RLT",
-      "label": "Revised Literal Translation (2018) of the King James Version with Strongs Numbers and Morphology",
+      "label": "Revised Literal Translation (2018) of the King James Version",
       "language": "en",
       "address": "https://raw.githubusercontent.com/grinn/scrollmapper_bible_databases/master/formats/json/RLT.json"
     },

@@ -11,7 +11,7 @@ import { normalizeEnglishTerm } from '../services/searchNormalizer';
 import { parseSearchQuery } from '../services/searchQueryParser';
 import { isNewTestamentBook } from '../utils/book-aliases';
 import { useSourcePreferences } from '../hooks/useSourcePreferences';
-import { subscriptionItemFromResource } from '../utils/accountSyncTarget';
+import { subscriptionItemFromResource, syncItemFromLibraryDoc } from '../utils/accountSyncTarget';
 
 const escapeRegex = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
@@ -203,9 +203,14 @@ const SearchResults: React.FC<SearchResultsProps> = ({ tab, goToReference, onBef
       title: match.title,
       matchRaws: [],
       kind,
-      syncItem: match.cloudProvider ? { provider: match.cloudProvider, itemId: match.documentId } : null,
+      syncItem: syncItemFromLibraryDoc({
+        cloudProvider: match.cloudProvider,
+        localFoldersMachineId: match.localFoldersMachineId,
+        documentId: match.documentId,
+      }),
       subscriptionItem: subscriptionItemFromResource({
         cloudProvider: match.cloudProvider,
+        localFoldersMachineId: match.localFoldersMachineId,
         libraryKey: match.libraryKey,
         resourceKey: match.resourceKey,
       }),

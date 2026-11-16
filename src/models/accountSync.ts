@@ -1,9 +1,10 @@
 import type { FederatedProvider } from './bible';
 import type { SubscriptionDocumentType } from '../utils/sourceSubscriptions';
 
-/** Locate a cloud-synced file or a Subscriptions library document in File Sync. */
+/** Locate a cloud-synced file, Local Folders path, or Subscriptions library document in File Sync. */
 export type AccountSyncRevealTarget =
   | { kind: 'cloud'; provider: FederatedProvider; itemId: string }
+  | { kind: 'localFolders'; machineId: string; path: string }
   | {
     kind: 'subscription';
     libraryKey: string;
