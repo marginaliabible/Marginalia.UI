@@ -43,12 +43,19 @@ export interface DocumentsFileLike {
   documents: unknown[];
 }
 
+/** TOC chapter entry from documents.json (`page` is the PDF page where the chapter starts). */
+export interface ResourceDocumentChapter {
+  title: string;
+  page: number;
+}
+
 // Canonical shape for a single documents.json entry, shared across parsing, caching, and URL building.
 export interface ResourceDocumentEntry {
   documentId: string;
   title: string;
   tags: string[];
   hash?: string;
+  chapters?: ResourceDocumentChapter[];
 }
 
 export interface ResourceDocumentEntryLike {
@@ -56,6 +63,28 @@ export interface ResourceDocumentEntryLike {
   title?: unknown;
   tags?: unknown;
   hash?: unknown;
+  chapters?: unknown;
+}
+
+export function readResourceDocumentChapters(value: unknown): ResourceDocumentChapter[] | undefined {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+
+  const chapters: ResourceDocumentChapter[] = [];
+  for (const entry of value) {
+    if (!isPlainObject(entry)) {
+      continue;
+    }
+    const title = readString(entry.title);
+    const page = typeof entry.page === 'number' ? entry.page : Number(entry.page);
+    if (!title || !Number.isFinite(page) || page < 1) {
+      continue;
+    }
+    chapters.push({ title, page: Math.trunc(page) });
+  }
+
+  return chapters.length > 0 ? chapters : undefined;
 }
 
 export function readResourceDocumentEntry(item: unknown): ResourceDocumentEntry | null {
@@ -72,12 +101,14 @@ export function readResourceDocumentEntry(item: unknown): ResourceDocumentEntry 
   const tags = Array.isArray(entry.tags)
     ? entry.tags.filter((tag): tag is string => typeof tag === 'string' && tag.trim().length > 0)
     : [];
+  const chapters = readResourceDocumentChapters(entry.chapters);
 
   return {
     documentId,
     title: readString(entry.title) ?? documentId,
     tags: Array.from(new Set(tags)),
     hash: readString(entry.hash),
+    ...(chapters ? { chapters } : {}),
   };
 }
 

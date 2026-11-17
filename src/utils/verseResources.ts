@@ -3,7 +3,9 @@ import type { VerseResourceDocument, VerseResourcesPayload } from '../services/b
 export type ResourceVerseMatchMode = 'all' | 'any';
 
 const documentKey = (document: VerseResourceDocument): string => (
-  `${document.libraryId}::${document.documentId}::${document.title}`
+  document.hash
+    ? `hash:${document.hash}`
+    : `${document.libraryId}::${document.documentId}::${document.title}`
 );
 
 /** One link per page number; reference texts from every merged link for that page are kept. */
@@ -32,16 +34,40 @@ export const mergePageLinks = <Link extends { page: number; raws?: string[] }>(
   return Array.from(byPage.values()).sort((a, b) => a.page - b.page);
 };
 
+const mergeChapters = (
+  left: VerseResourceDocument['chapters'],
+  right: VerseResourceDocument['chapters']
+): VerseResourceDocument['chapters'] => {
+  const byPage = new Map<number, { title: string; page: number }>();
+  for (const chapter of [...(left ?? []), ...(right ?? [])]) {
+    if (!byPage.has(chapter.page)) {
+      byPage.set(chapter.page, chapter);
+    }
+  }
+  const chapters = Array.from(byPage.values()).sort((a, b) => a.page - b.page);
+  return chapters.length > 0 ? chapters : undefined;
+};
+
 const mergeDocuments = (
   left: VerseResourceDocument,
   right: VerseResourceDocument
 ): VerseResourceDocument => {
   const pageLinks = mergePageLinks(left.pageLinks, right.pageLinks);
+  const chapters = mergeChapters(left.chapters, right.chapters);
+  const hash = left.hash || right.hash;
+  const link = hash && right.link?.doc === hash
+    ? right.link
+    : hash && left.link?.doc === hash
+      ? left.link
+      : left.link ?? right.link;
   return {
     ...left,
+    ...(hash ? { hash } : {}),
+    ...(link ? { link } : {}),
     tags: Array.from(new Set([...left.tags, ...right.tags])),
     pages: Array.from(new Set([...left.pages, ...right.pages])).sort((a, b) => a - b),
     pageLinks,
+    ...(chapters ? { chapters } : { chapters: undefined }),
   };
 };
 

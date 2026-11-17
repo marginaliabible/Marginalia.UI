@@ -182,6 +182,71 @@ describe('ResourcesPanel page links', () => {
     expect(pageLink.getAttribute('href')).toBe('#/Genesis/1/1?doc=abcd&page=7');
   });
 
+  it('groups multiple chapter pages under a plain chapter label', async () => {
+    (bibleService.getResourcesForVerse as jest.Mock).mockResolvedValue(documentPayload(1, [{
+      libraryId: 'lib-a',
+      libraryLabel: 'Library A',
+      documentId: 'spirit',
+      title: 'Receiving The Holy Spirit Today',
+      tags: [],
+      pages: [145, 147],
+      pageLinks: [
+        { page: 145, url: 'https://example.com/spirit#145' },
+        { page: 147, url: 'https://example.com/spirit#147' },
+      ],
+      chapters: [{ title: 'The Word Receive', page: 140 }],
+      link: { doc: 'spirit', lib: '0a1b2c3d' },
+    }]));
+
+    const { findByText, findAllByRole } = render(<ResourcesPanel tab={resourcesTab} isActive={true} />);
+
+    expect(await findByText('Receiving The Holy Spirit Today')).toHaveClass('fw-semibold');
+    expect(await findByText(/The Word Receive:/)).not.toHaveClass('fw-semibold');
+    const pageLinks = await findAllByRole('link', { name: /^\d+$/ });
+    expect(pageLinks.map((link) => link.textContent)).toEqual(['145', '147']);
+  });
+
+  it('links the whole chapter label when only one page hits that chapter', async () => {
+    (bibleService.getResourcesForVerse as jest.Mock).mockResolvedValue(documentPayload(1, [{
+      libraryId: 'lib-a',
+      libraryLabel: 'Library A',
+      documentId: 'spirit',
+      title: 'Receiving The Holy Spirit Today',
+      tags: [],
+      pages: [145],
+      pageLinks: [{ page: 145, url: 'https://example.com/spirit#145' }],
+      chapters: [{ title: 'The Word Receive', page: 140 }],
+      link: { doc: 'spirit', lib: '0a1b2c3d' },
+    }]));
+
+    const { findByRole } = render(<ResourcesPanel tab={resourcesTab} isActive={true} />);
+
+    const pageLink = await findByRole('link', { name: 'The Word Receive: 145' });
+    expect(pageLink.getAttribute('href')).toBe('#/Genesis/1/1?lib=0a1b2c3d&doc=spirit&page=145');
+  });
+
+  it('keeps pages before the first chapter as bare page links', async () => {
+    (bibleService.getResourcesForVerse as jest.Mock).mockResolvedValue(documentPayload(1, [{
+      libraryId: 'lib-a',
+      libraryLabel: 'Library A',
+      documentId: 'spirit',
+      title: 'Receiving The Holy Spirit Today',
+      tags: [],
+      pages: [3, 145],
+      pageLinks: [
+        { page: 3, url: 'https://example.com/spirit#3' },
+        { page: 145, url: 'https://example.com/spirit#145' },
+      ],
+      chapters: [{ title: 'The Word Receive', page: 140 }],
+      link: { doc: 'spirit', lib: '0a1b2c3d' },
+    }]));
+
+    const { findByRole } = render(<ResourcesPanel tab={resourcesTab} isActive={true} />);
+
+    expect(await findByRole('link', { name: '3' })).toBeInTheDocument();
+    expect(await findByRole('link', { name: 'The Word Receive: 145' })).toBeInTheDocument();
+  });
+
   it('opens a page link by assigning the hash without native hash scrolling', async () => {
     const { findAllByRole } = render(<ResourcesPanel tab={resourcesTab} isActive={true} />);
     const pageLinks = await findAllByRole('link', { name: /^\d+$/ });

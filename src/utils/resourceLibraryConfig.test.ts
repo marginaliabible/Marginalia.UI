@@ -11,6 +11,7 @@ import {
   readLocalFoldersMachineIdFromResourcesUrl,
   readDocumentViewerKind,
   readLibrarySourceAddresses,
+  readResourceDocumentEntry,
   validateDocumentsFile,
   validateHyperlinksFile,
 } from './resourceLibraryConfig';
@@ -204,6 +205,42 @@ describe('readLocalFoldersMachineIdFromResourcesUrl', () => {
     expect(readLocalFoldersMachineIdFromResourcesUrl(
       'https://storage.example/users/u/LocalFolders/resources.json'
     )).toBeNull();
+  });
+});
+
+describe('readResourceDocumentEntry chapters', () => {
+  it('keeps lean TOC chapters from documents.json', () => {
+    expect(readResourceDocumentEntry({
+      documentId: 'doc-1',
+      title: 'Receiving The Holy Spirit Today',
+      tags: ['Research'],
+      hash: 'abc',
+      chapters: [
+        { title: 'The Word Receive', page: 145 },
+        { title: '  ', page: 2 },
+        { title: 'Bad', page: 0 },
+      ],
+    })).toEqual({
+      documentId: 'doc-1',
+      title: 'Receiving The Holy Spirit Today',
+      tags: ['Research'],
+      hash: 'abc',
+      chapters: [{ title: 'The Word Receive', page: 145 }],
+    });
+  });
+
+  it('omits chapters when none are valid', () => {
+    expect(readResourceDocumentEntry({
+      documentId: 'doc-1',
+      title: 'Notes',
+      tags: [],
+      chapters: [],
+    })).toEqual({
+      documentId: 'doc-1',
+      title: 'Notes',
+      tags: [],
+      hash: undefined,
+    });
   });
 });
 

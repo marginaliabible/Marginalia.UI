@@ -102,6 +102,8 @@ export interface VerseResourceDocument {
   resourceKey?: string;
   /** Content hash (SHA-256 of the source file) when the manifest publishes one. */
   hash?: string;
+  /** TOC chapters when documents.json published them. */
+  chapters?: Array<{ title: string; page: number }>;
   /** Identifies this document in shareable page links; the same for every user who has it. */
   link: ResourceDocumentLinkKey;
 }
@@ -412,6 +414,7 @@ export class ResourceLibraryService {
           libraryKey: resolveLibraryKey(library.configuredSourceUrl, normalizedSourceUrls),
           resourceKey: resourceDocumentKey(library.resourcesUrl, document.documentId),
           ...(document.hash ? { hash: document.hash } : {}),
+          ...(document.chapters && document.chapters.length > 0 ? { chapters: document.chapters } : {}),
           link: buildResourceDocumentLinkKey(library.resourcesUrl, document),
         };
 

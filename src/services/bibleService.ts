@@ -225,6 +225,7 @@ export interface VerseResourceDocument {
   libraryKey?: string;
   resourceKey?: string;
   hash?: string;
+  chapters?: Array<{ title: string; page: number }>;
   link: ResourceDocumentLinkKey;
 }
 

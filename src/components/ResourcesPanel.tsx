@@ -8,6 +8,7 @@ import { TAG_COLOR_PALETTE } from '../utils/resourceTagColors';
 import { useResourceTagColors } from '../hooks/useResourceTagColors';
 import { versesFromContext } from '../utils/selectedVerseContext';
 import { mergePageLinks, mergeVerseResourcePayloads, type ResourceVerseMatchMode } from '../utils/verseResources';
+import { groupPageLinksByChapter } from '../utils/resourceDocumentChapters';
 import { markupFlagsFromBible } from '../utils/verseMarkup';
 import { useRevealVerseSelectionInBible } from '../hooks/useDocumentScriptureNavigation';
 import { useSourcePreferences } from '../hooks/useSourcePreferences';
@@ -158,7 +159,11 @@ const ResourcesPanel: React.FC<ResourcesPanelProps> = ({ tab, isActive, onBefore
     const groups = new Map<string, (typeof visibleDocuments)[number] & { libraryLabels: string[] }>();
 
     for (const document of visibleDocuments) {
-      const key = `${document.documentId}::${document.title}`;
+      // Same file can appear under OneDrive and LocalFolders with different documentIds;
+      // content hash is the stable identity across libraries.
+      const key = document.hash
+        ? `hash:${document.hash}`
+        : `${document.documentId}::${document.title}`;
       const existing = groups.get(key);
 
       if (!existing) {
@@ -171,6 +176,21 @@ const ResourcesPanel: React.FC<ResourcesPanelProps> = ({ tab, isActive, onBefore
 
       existing.pageLinks = mergePageLinks(existing.pageLinks, document.pageLinks);
       existing.tags = Array.from(new Set([...existing.tags, ...document.tags]));
+      if (document.chapters && document.chapters.length > 0) {
+        const byPage = new Map((existing.chapters ?? []).map((chapter) => [chapter.page, chapter]));
+        for (const chapter of document.chapters) {
+          if (!byPage.has(chapter.page)) {
+            byPage.set(chapter.page, chapter);
+          }
+        }
+        existing.chapters = Array.from(byPage.values()).sort((left, right) => left.page - right.page);
+      }
+      if (!existing.hash && document.hash) {
+        existing.hash = document.hash;
+      }
+      if (document.link?.doc && (!existing.link?.doc || (document.hash && existing.link.doc !== document.hash))) {
+        existing.link = document.link;
+      }
       if (!existing.libraryLabels.includes(document.libraryLabel)) {
         existing.libraryLabels.push(document.libraryLabel);
       }
@@ -357,21 +377,71 @@ const ResourcesPanel: React.FC<ResourcesPanelProps> = ({ tab, isActive, onBefore
                         </div>
                       </div>
 
-                      <div className="small mt-1">
-                        {document.pageLinks.map((link, index) => {
-                          const href = buildDocumentLinkRoute(linkReference, { ...document.link, page: link.page });
+                      <div className="small mt-1 d-flex flex-column gap-1">
+                        {groupPageLinksByChapter(document.pageLinks, document.chapters).map((group, groupIndex) => {
+                          const firstHelp = documentIndex === 0 && groupIndex === 0;
+
+                          if (!group.chapter) {
+                            return (
+                              <div key={`${document.documentId}:preface:${group.links[0]?.page ?? groupIndex}`}>
+                                {group.links.map((link, index) => {
+                                  const href = buildDocumentLinkRoute(linkReference, { ...document.link, page: link.page });
+                                  return (
+                                    <span key={`${document.documentId}:${link.page}`}>
+                                      {index > 0 ? ', ' : ''}
+                                      <a
+                                        className="resource-page-link btn btn-link btn-sm p-0 align-baseline"
+                                        href={href}
+                                        data-help={firstHelp && index === 0 ? 'resources-page-link' : undefined}
+                                        onClick={(event) => handlePageLinkClick(event, href)}
+                                      >
+                                        {link.page}
+                                      </a>
+                                    </span>
+                                  );
+                                })}
+                              </div>
+                            );
+                          }
+
+                          if (group.links.length === 1) {
+                            const link = group.links[0];
+                            const href = buildDocumentLinkRoute(linkReference, { ...document.link, page: link.page });
+                            const label = `${group.chapter.title}: ${link.page}`;
+                            return (
+                              <div key={`${document.documentId}:chapter:${group.chapter.page}:${link.page}`}>
+                                <a
+                                  className="resource-page-link btn btn-link btn-sm p-0 align-baseline"
+                                  href={href}
+                                  data-help={firstHelp ? 'resources-page-link' : undefined}
+                                  onClick={(event) => handlePageLinkClick(event, href)}
+                                >
+                                  {label}
+                                </a>
+                              </div>
+                            );
+                          }
+
                           return (
-                            <span key={`${document.documentId}:${link.page}`}>
-                              {index > 0 ? ', ' : ''}
-                              <a
-                                className="resource-page-link btn btn-link btn-sm p-0 align-baseline"
-                                href={href}
-                                data-help={documentIndex === 0 && index === 0 ? 'resources-page-link' : undefined}
-                                onClick={(event) => handlePageLinkClick(event, href)}
-                              >
-                                {link.page}
-                              </a>
-                            </span>
+                            <div key={`${document.documentId}:chapter:${group.chapter.page}`}>
+                              <span>{group.chapter.title}: </span>
+                              {group.links.map((link, index) => {
+                                const href = buildDocumentLinkRoute(linkReference, { ...document.link, page: link.page });
+                                return (
+                                  <span key={`${document.documentId}:${link.page}`}>
+                                    {index > 0 ? ', ' : ''}
+                                    <a
+                                      className="resource-page-link btn btn-link btn-sm p-0 align-baseline"
+                                      href={href}
+                                      data-help={firstHelp && index === 0 ? 'resources-page-link' : undefined}
+                                      onClick={(event) => handlePageLinkClick(event, href)}
+                                    >
+                                      {link.page}
+                                    </a>
+                                  </span>
+                                );
+                              })}
+                            </div>
                           );
                         })}
                       </div>
