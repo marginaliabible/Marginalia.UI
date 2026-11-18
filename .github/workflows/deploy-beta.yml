@@ -26,6 +26,9 @@ jobs:
       # VITE_GITHUB_CLIENT_ID: ${{ vars.VITE_GITHUB_CLIENT_ID }}
 
     steps:
+      - name: Debounce (wait for quieter main)
+        run: sleep 300
+
       - name: Checkout Marginalia.UI
         uses: actions/checkout@v4
         with:
