@@ -1713,13 +1713,18 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
       }
     }
 
+    // Reconnect Apply resumes CCS even when the restored selection is unchanged.
+    const hasReconnectPending = (Object.keys(ROOT_LABEL) as FederatedProvider[]).some(
+      (provider) => Boolean(reconnectPending?.[provider])
+    );
+
     // Local-only Apply uses this path for tag validation; Sanctum sends the Local payload separately.
-    if (!areFilesDirty && !areSubscriptionsDirty) {
+    if (!areFilesDirty && !areSubscriptionsDirty && !hasReconnectPending) {
       return true;
     }
 
     setErrorMessage(null);
-    const folderApply = areFilesDirty
+    const folderApply = (areFilesDirty || hasReconnectPending)
       ? onSelectionsChange(toSelectionPayload(selectedRows, nodes))
       : null;
     const subscriptionsApply = subscriptions && areSubscriptionsDirty
@@ -1743,6 +1748,7 @@ const CloudFolderPicker: React.FC<CloudFolderPickerProps> = ({
     nodes,
     onSelectionsChange,
     providerSyncFilesEnabled,
+    reconnectPending,
     selectedRows,
     sessions,
     subscriptionStaging,
