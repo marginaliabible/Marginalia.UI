@@ -39,6 +39,8 @@ export interface LocalFolderMachineView {
   expanded: boolean;
   loading?: boolean;
   error?: string | null;
+  /** True while waiting on the browser's Open Watchman protocol prompt. */
+  grantPromptPending?: boolean;
   /** Directory listings keyed by parent path; `''` is the machine root. Undefined = not loaded. */
   entriesByPath: Record<string, LocalFolderEntry[] | undefined>;
   expandedPaths: string[];
@@ -51,6 +53,15 @@ export interface LocalFoldersBinding {
   machines: LocalFolderMachineView[];
   /** Opens the "connect a local folder" flow. */
   onConnect: () => void;
+  /** Re-shows the browser protocol prompt while a grant wait is in progress. */
+  onRetryGrantPrompt?: (machineId: string) => void;
+  /** Aborts the in-flight grant wait and closes the prompt. */
+  onCancelGrantPrompt?: (machineId: string) => void;
+  /**
+   * When false, hide the Local Folders "Connect" link (e.g. this browser already
+   * paired an online Watchman on this machine). Defaults to true.
+   */
+  showConnect?: boolean;
   onExpandMachine: (machineId: string) => void;
   onExpandPath: (machineId: string, path: string) => void;
   onTogglePath: (machineId: string, path: string, kind: 'file' | 'folder') => void;

@@ -309,4 +309,46 @@ describe('CloudFolderPicker Local Folders right pane', () => {
     expect(getFolderSize).toHaveBeenCalledTimes(1);
     expect(listChildren).not.toHaveBeenCalled();
   });
+
+  it('hides Local Folders Connect when showConnect is false', async () => {
+    const localFolders: LocalFoldersBinding = {
+      machines: [{
+        machineId: 'm1',
+        name: 'Desk',
+        online: true,
+        expanded: false,
+        entriesByPath: {},
+        expandedPaths: [],
+        loadingPaths: [],
+        selectedTargets: [],
+      }],
+      onConnect: jest.fn(),
+      showConnect: false,
+      onExpandMachine: jest.fn(),
+      onExpandPath: jest.fn(),
+      onTogglePath: jest.fn(),
+      onTargetsChange: jest.fn(),
+      listChildren: jest.fn(async () => []),
+      getFolderSize: emptyGetFolderSize,
+      onEditMachine: jest.fn(),
+    };
+
+    render(
+      <CloudFolderPicker
+        sessions={{ google: null, microsoft: null }}
+        initialSelections={{ google: [], microsoft: [] }}
+        providerSyncFilesEnabled={{ google: false, microsoft: false }}
+        linkedProviders={{ google: false, microsoft: false }}
+        focusRequest={null}
+        onSelectionsChange={jest.fn()}
+        onConnectRequested={jest.fn()}
+        cloudSync={cloudSync}
+        localFolders={localFolders}
+      />
+    );
+
+    expect(await screen.findByRole('button', { name: 'Local Folders' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Connect a local folder' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Edit Desk' })).toBeInTheDocument();
+  });
 });

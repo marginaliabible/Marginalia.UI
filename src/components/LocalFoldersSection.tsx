@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { LocalFolderEntry, LocalFolderMachineView, LocalFoldersBinding } from '../models/localFolders';
+import WatchmanGrantPromptModal from './WatchmanGrantPromptModal';
 
 function isUnderSelectedPath(path: string, selectedPaths: readonly string[]): boolean {
   return selectedPaths.some((selected) => (
@@ -142,101 +143,118 @@ const LocalFoldersSection: React.FC<LocalFoldersSectionProps> = ({ binding }) =>
     machineRowRefs.current[focusMachineId]?.scrollIntoView?.({ block: 'nearest' });
   }, [focusMachineId, focusPath, focusRequestId, isExpanded]);
 
+  const grantPromptMachine = binding.machines.find((machine) => machine.grantPromptPending) ?? null;
+
   return (
-    <ul className="cloud-folder-tree-list" aria-label="Local Folders" data-help="account-sync-local-folders">
-      <li>
-        <div className="cloud-folder-tree-row no-checkbox" style={{ paddingLeft: 0 }}>
-          <button
-            type="button"
-            className="cloud-folder-tree-chevron"
-            aria-label={isExpanded ? 'Collapse Local Folders' : 'Expand Local Folders'}
-            onClick={() => setIsExpanded((current) => !current)}
-          >
-            <i className={`fa-solid ${isExpanded ? 'fa-chevron-down' : 'fa-chevron-right'}`} aria-hidden="true"></i>
-          </button>
-          <div className="cloud-folder-tree-name-wrap">
-            <button
-              type="button"
-              className="cloud-folder-tree-name"
-              onClick={() => setIsExpanded((current) => !current)}
-            >
-              Local Folders
-            </button>
-            <button
-              type="button"
-              className="btn btn-link btn-sm cloud-folder-tree-connect-link"
-              aria-label="Connect a local folder"
-              data-help="account-sync-local-folders-connect"
-              onClick={binding.onConnect}
-            >
-              Connect
-            </button>
-          </div>
-        </div>
-      </li>
-      {isExpanded && binding.machines.map((machine) => (
-        <li key={machine.machineId}>
-          <div
-            ref={(entry) => {
-              machineRowRefs.current[machine.machineId] = entry;
-            }}
-            className={`cloud-folder-tree-row no-checkbox${focusMachineId === machine.machineId && !focusPath ? ' is-service-highlighted' : ''}`}
-            style={{ paddingLeft: '0.55rem' }}
-          >
+    <>
+      <ul className="cloud-folder-tree-list" aria-label="Local Folders" data-help="account-sync-local-folders">
+        <li>
+          <div className="cloud-folder-tree-row no-checkbox" style={{ paddingLeft: 0 }}>
             <button
               type="button"
               className="cloud-folder-tree-chevron"
-              aria-label={machine.expanded ? `Collapse ${machine.name}` : `Expand ${machine.name}`}
-              onClick={() => binding.onExpandMachine(machine.machineId)}
+              aria-label={isExpanded ? 'Collapse Local Folders' : 'Expand Local Folders'}
+              onClick={() => setIsExpanded((current) => !current)}
             >
-              <i className={`fa-solid ${machine.expanded ? 'fa-chevron-down' : 'fa-chevron-right'}`} aria-hidden="true"></i>
+              <i className={`fa-solid ${isExpanded ? 'fa-chevron-down' : 'fa-chevron-right'}`} aria-hidden="true"></i>
             </button>
             <div className="cloud-folder-tree-name-wrap">
-              <div className="cloud-folder-tree-name-primary">
-                <button
-                  type="button"
-                  className="cloud-folder-tree-name"
-                  title={machine.hostname || machine.name}
-                  onClick={() => binding.onExpandMachine(machine.machineId)}
-                >
-                  {machine.name}
-                </button>
-                {!machine.online && (
-                  <span className="cloud-folder-tree-offline" title="Offline">
-                    <i className="fa-solid fa-radiation" aria-hidden="true"></i>
-                    offline
-                  </span>
-                )}
-              </div>
               <button
                 type="button"
-                className="btn btn-link btn-sm cloud-folder-tree-connect-link"
-                aria-label={`Edit ${machine.name}`}
-                onClick={() => binding.onEditMachine(machine.machineId)}
+                className="cloud-folder-tree-name"
+                onClick={() => setIsExpanded((current) => !current)}
               >
-                Edit
+                Local Folders
               </button>
+              {binding.showConnect !== false && (
+                <button
+                  type="button"
+                  className="btn btn-link btn-sm cloud-folder-tree-connect-link"
+                  aria-label="Connect a local folder"
+                  data-help="account-sync-local-folders-connect"
+                  onClick={binding.onConnect}
+                >
+                  Connect
+                </button>
+              )}
             </div>
           </div>
-          {machine.expanded && (
-            <>
-              {machine.loading && <div className="small text-body-secondary cloud-folder-tree-loading">Loading...</div>}
-              {machine.error && <div className="small text-danger cloud-folder-tree-loading">{machine.error}</div>}
-              <ul className="cloud-folder-tree-list">
-                <MachineTree
-                  machine={machine}
-                  parentPath=""
-                  depth={1}
-                  binding={binding}
-                  pathRowRefs={pathRowRefs}
-                  focusPath={focusMachineId === machine.machineId ? focusPath : null}
-                />
-              </ul>
-            </>
-          )}
         </li>
-      ))}
-    </ul>
+        {isExpanded && binding.machines.map((machine) => (
+          <li key={machine.machineId}>
+            <div
+              ref={(entry) => {
+                machineRowRefs.current[machine.machineId] = entry;
+              }}
+              className={`cloud-folder-tree-row no-checkbox${focusMachineId === machine.machineId && !focusPath ? ' is-service-highlighted' : ''}`}
+              style={{ paddingLeft: '0.55rem' }}
+            >
+              <button
+                type="button"
+                className="cloud-folder-tree-chevron"
+                aria-label={machine.expanded ? `Collapse ${machine.name}` : `Expand ${machine.name}`}
+                onClick={() => binding.onExpandMachine(machine.machineId)}
+              >
+                <i className={`fa-solid ${machine.expanded ? 'fa-chevron-down' : 'fa-chevron-right'}`} aria-hidden="true"></i>
+              </button>
+              <div className="cloud-folder-tree-name-wrap">
+                <div className="cloud-folder-tree-name-primary">
+                  <button
+                    type="button"
+                    className="cloud-folder-tree-name"
+                    title={machine.hostname || machine.name}
+                    onClick={() => binding.onExpandMachine(machine.machineId)}
+                  >
+                    {machine.name}
+                  </button>
+                  {!machine.online && (
+                    <span className="cloud-folder-tree-offline" title="Offline">
+                      <i className="fa-solid fa-radiation" aria-hidden="true"></i>
+                      offline
+                    </span>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  className="btn btn-link btn-sm cloud-folder-tree-connect-link"
+                  aria-label={`Edit ${machine.name}`}
+                  onClick={() => binding.onEditMachine(machine.machineId)}
+                >
+                  Edit
+                </button>
+              </div>
+            </div>
+            {machine.expanded && (
+              <>
+                {machine.loading && !machine.grantPromptPending && (
+                  <div className="small text-body-secondary cloud-folder-tree-loading">Loading...</div>
+                )}
+                {machine.error && !machine.grantPromptPending && (
+                  <div className="small text-danger cloud-folder-tree-loading">{machine.error}</div>
+                )}
+                <ul className="cloud-folder-tree-list">
+                  <MachineTree
+                    machine={machine}
+                    parentPath=""
+                    depth={1}
+                    binding={binding}
+                    pathRowRefs={pathRowRefs}
+                    focusPath={focusMachineId === machine.machineId ? focusPath : null}
+                  />
+                </ul>
+              </>
+            )}
+          </li>
+        ))}
+      </ul>
+      {grantPromptMachine && (
+        <WatchmanGrantPromptModal
+          machineName={grantPromptMachine.name}
+          onRetry={() => binding.onRetryGrantPrompt?.(grantPromptMachine.machineId)}
+          onCancel={() => binding.onCancelGrantPrompt?.(grantPromptMachine.machineId)}
+        />
+      )}
+    </>
   );
 };
 
