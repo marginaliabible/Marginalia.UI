@@ -26,6 +26,8 @@ jobs:
     env:
       VITE_SANCTUM: '0'
       VITE_AUTH_SERVICE_URL: https://cloudcontrol.marginaliabible.com/
+      # Ready for when Sanctum is enabled on prod; unused while VITE_SANCTUM=0.
+      VITE_WATCHMAN_DOWNLOAD_BASE: https://downloads.marginaliabible.com/watchman/prod/
       # Optional for forks that use private GitHub library OAuth:
       # VITE_GITHUB_CLIENT_ID: ${{ vars.VITE_GITHUB_CLIENT_ID }}
 

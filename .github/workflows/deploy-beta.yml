@@ -22,6 +22,7 @@ jobs:
       VITE_GOOGLE_CLIENT_ID: ${{ vars.VITE_GOOGLE_CLIENT_ID }}
       VITE_MICROSOFT_CLIENT_ID: ${{ vars.VITE_MICROSOFT_CLIENT_ID }}
       VITE_APP_GIT_SHA: ${{ github.sha }}
+      VITE_WATCHMAN_DOWNLOAD_BASE: https://downloads.marginaliabible.com/watchman/beta/
       # Optional for forks that use private GitHub library OAuth:
       # VITE_GITHUB_CLIENT_ID: ${{ vars.VITE_GITHUB_CLIENT_ID }}
 
