@@ -213,6 +213,12 @@ const LocalFoldersSection: React.FC<LocalFoldersSectionProps> = ({ binding }) =>
                       offline
                     </span>
                   )}
+                  {machine.needsUpdate && (
+                    <span className="cloud-folder-tree-update" title="Update available">
+                      <i className="fa-solid fa-arrow-up" aria-hidden="true"></i>
+                      update
+                    </span>
+                  )}
                 </div>
                 <button
                   type="button"

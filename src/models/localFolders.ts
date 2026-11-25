@@ -33,6 +33,8 @@ export interface LocalFolderMachineView {
   machineId: string;
   name: string;
   online: boolean;
+  /** Agent reported version is behind channel latest.json. */
+  needsUpdate?: boolean;
   /** The agent is running in an interactive desktop session (required to open files). */
   interactiveSession?: boolean;
   hostname?: string;

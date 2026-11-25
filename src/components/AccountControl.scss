@@ -142,6 +142,20 @@
   }
 }
 
+.cloud-folder-tree-update {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  flex: 0 0 auto;
+  font-size: 0.8rem;
+  line-height: 1.1;
+  color: var(--bs-primary);
+
+  .fa-arrow-up {
+    flex: 0 0 auto;
+  }
+}
+
 .cloud-folder-tree-name.is-highlighted {
   border: 1px solid color-mix(in srgb, var(--bs-primary) 65%, transparent);
   border-radius: 0.45rem;
